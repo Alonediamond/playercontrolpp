@@ -1,0 +1,14 @@
+{
+  "playercontrolpp.gui.title": "PlayerControl++ 配置",
+  "playercontrolpp.gui.tab.hotkeys": "热键",
+  "playercontrolpp.gui.tab.settings": "设置",
+
+  "playercontrolpp.hotkey.auto_forward.name": "自动前进",
+  "playercontrolpp.hotkey.auto_forward.comment": "切换自动前进。开启后玩家将持续向前移动。",
+
+  "playercontrolpp.hotkey.quick_turn.name": "快速转向",
+  "playercontrolpp.hotkey.quick_turn.comment": "按配置的角度快速转向。瞬间旋转。",
+
+  "playercontrolpp.setting.turn_angle.name": "转向角度",
+  "playercontrolpp.setting.turn_angle.comment": "快速转向的角度（度）。常用值：90、180、270。"
+}

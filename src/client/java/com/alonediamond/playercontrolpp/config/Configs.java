@@ -26,12 +26,16 @@ public class Configs implements IConfigHandler {
         public static final ConfigHotkey AUTO_FORWARD = new ConfigHotkey(
                 "autoForward", "",
                 KeybindSettings.PRESS_ALLOWEXTRA,
-                "Toggle auto forward movement. When enabled, the player will continuously move forward.");
+                "Toggle auto forward movement. When enabled, the player will continuously move forward.",
+                "playercontrolpp.hotkey.auto_forward.name",
+                "playercontrolpp.hotkey.auto_forward.comment");
 
         public static final ConfigHotkey QUICK_TURN = new ConfigHotkey(
                 "quickTurn", "",
                 KeybindSettings.PRESS_ALLOWEXTRA,
-                "Quick turn by the configured angle. Instant rotational snap.");
+                "Quick turn by the configured angle. Instant rotational snap.",
+                "playercontrolpp.hotkey.quick_turn.name",
+                "playercontrolpp.hotkey.quick_turn.comment");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 AUTO_FORWARD, QUICK_TURN);
@@ -43,7 +47,9 @@ public class Configs implements IConfigHandler {
     public static class Settings {
         public static final ConfigInteger TURN_ANGLE = new ConfigInteger(
                 "turnAngle", 180, 0, 360, false,
-                "Turn angle in degrees for Quick Turn. Common values: 90, 180, 270.");
+                "Turn angle in degrees for Quick Turn. Common values: 90, 180, 270.",
+                "playercontrolpp.setting.turn_angle.name",
+                "playercontrolpp.setting.turn_angle.comment");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 TURN_ANGLE);
