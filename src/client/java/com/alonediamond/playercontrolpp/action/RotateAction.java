@@ -9,6 +9,7 @@ public class RotateAction {
             float newYaw = client.player.getYaw() + angleDegrees;
             newYaw = ((newYaw % 360) + 360) % 360;
             client.player.setYaw(newYaw);
+            client.player.setHeadYaw(newYaw);
         }
     }
 }
