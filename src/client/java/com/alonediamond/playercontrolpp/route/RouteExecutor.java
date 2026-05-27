@@ -63,12 +63,14 @@ public class RouteExecutor {
         jumpRequested = false;
         lastPosition = player.getPos();
 
-        // Find closest waypoint to start from
+        // Find closest waypoint to start from (XZ only, ignore Y)
         double bestDist = Double.MAX_VALUE;
         int bestIdx = 0;
         for (int i = 0; i < nodes.size(); i++) {
             RouteNode node = nodes.get(i);
-            double d = player.squaredDistanceTo(node.x, node.y, node.z);
+            double dx = node.x - player.getX();
+            double dz = node.z - player.getZ();
+            double d = dx * dx + dz * dz;
             if (d < bestDist) {
                 bestDist = d;
                 bestIdx = i;
@@ -121,7 +123,10 @@ public class RouteExecutor {
 
         Vec3d currentPos = player.getPos();
 
-        double distSq = currentTarget.squaredDistanceTo(currentPos.x, currentPos.y, currentPos.z);
+        // XZ-only distance (ignore Y to avoid vertical mismatch issues)
+        double dx = currentTarget.x - currentPos.x;
+        double dz = currentTarget.z - currentPos.z;
+        double distSq = dx * dx + dz * dz;
         double arrivalSq = route.getArrivalRadius() * route.getArrivalRadius();
 
         if (distSq <= arrivalSq) {

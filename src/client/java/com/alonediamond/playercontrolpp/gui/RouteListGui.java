@@ -71,6 +71,7 @@ public class RouteListGui extends Screen {
                     selectedRoute = route;
                     dirty = true;
                     rebuildWaypointFields();
+                    refreshFieldValues();
                 })
                 .dimensions(LEFT_X, TOP, 85, 20)
                 .build());
@@ -192,9 +193,9 @@ public class RouteListGui extends Screen {
 
         for (WaypointFields wf : waypointFields) {
             RouteNode node = selectedRoute.getNodes().get(wf.nodeIndex);
-            wf.fields.get(0).setText(String.format("%.2f", node.x));
-            wf.fields.get(1).setText(String.format("%.2f", node.y));
-            wf.fields.get(2).setText(String.format("%.2f", node.z));
+            wf.fields.get(0).setText(String.format("%.1f", node.x));
+            wf.fields.get(1).setText(String.format("%.1f", node.y));
+            wf.fields.get(2).setText(String.format("%.1f", node.z));
         }
     }
 
@@ -489,6 +490,19 @@ public class RouteListGui extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // ESC closes the GUI when no text field is focused
+        if (keyCode == 256 && !nameField.isFocused() && !radiusField.isFocused()
+                && !loopField.isFocused()) {
+            boolean anyWptFocused = false;
+            for (WaypointFields wf : waypointFields) {
+                for (TextFieldWidget tf : wf.fields) {
+                    if (tf.isFocused()) { anyWptFocused = true; break; }
+                }
+                if (anyWptFocused) break;
+            }
+            if (!anyWptFocused) { close(); return true; }
+        }
+
         if (nameField.isFocused()) return nameField.keyPressed(keyCode, scanCode, modifiers);
         if (radiusField.isFocused()) return radiusField.keyPressed(keyCode, scanCode, modifiers);
         if (loopField.isFocused()) return loopField.keyPressed(keyCode, scanCode, modifiers);
