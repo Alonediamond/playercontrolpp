@@ -93,14 +93,16 @@ public class Route {
 
     /**
      * Calculate the total number of segments to traverse.
-     * loopCount 1 = single trip A->B (1 segment)
-     * loopCount N>1 = N round trips (2N segments)
+     * With k nodes: one forward traversal = k-1 segments.
+     * loopCount 1 = single forward pass through all waypoints
+     * loopCount N>1 = N round trips (forward + backward)
      * loopCount 0 = infinite (returns -1)
      */
     public int getTotalSegments() {
-        if (loopCount == 0) return -1; // infinite
-        if (loopCount == 1) return 1;  // single trip
-        return loopCount * 2;           // N round trips = 2N segments
+        int waypointSegments = Math.max(1, nodes.size() - 1);
+        if (loopCount == 0) return -1;    // infinite
+        if (loopCount == 1) return waypointSegments; // single forward pass
+        return loopCount * 2 * waypointSegments;     // N round trips
     }
 
     public JsonObject toJson() {

@@ -5,6 +5,8 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.List;
+
 public class RouteExecutor {
 
     public enum State {
@@ -15,21 +17,22 @@ public class RouteExecutor {
         COMPLETED
     }
 
-    private static final double STUCK_THRESHOLD_SQ = 0.01; // 0.1 blocks squared
-    private static final int STUCK_TICKS = 60;              // 3 seconds
-    private static final int STUCK_JUMP_TICKS = 100;        // 5 seconds after jump
-    private static final double YAW_CORRECTION_SPEED = 5.0; // degrees per tick
-    private static final double YAW_DEAD_ZONE = 2.0;        // allowed deviation in degrees
+    private static final double STUCK_THRESHOLD_SQ = 0.01;
+    private static final int STUCK_TICKS = 60;
+    private static final int STUCK_JUMP_TICKS = 100;
+    private static final double YAW_CORRECTION_SPEED = 15.0;
+    private static final double YAW_DEAD_ZONE = 2.0;
 
     private final Route route;
     private State state = State.IDLE;
     private RouteNode currentTarget;
-    private int direction = +1;
-    private int completedSegments = 0;
-    private int totalSegments = 0;
-    private int stuckTicks = 0;
-    private int postJumpTicks = 0;
-    private boolean jumpRequested = false;
+    private int currentWPIndex;
+    private int direction;
+    private int completedSegments;
+    private int totalSegments;
+    private int stuckTicks;
+    private int postJumpTicks;
+    private boolean jumpRequested;
     private Vec3d lastPosition = Vec3d.ZERO;
 
     public RouteExecutor(Route route) {
@@ -47,7 +50,8 @@ public class RouteExecutor {
     }
 
     public void start() {
-        if (route.getNodes().size() < 2) return;
+        List<RouteNode> nodes = route.getNodes();
+        if (nodes.size() < 2) return;
 
         MinecraftClient client = MinecraftClient.getInstance();
         ClientPlayerEntity player = client.player;
@@ -59,22 +63,40 @@ public class RouteExecutor {
         jumpRequested = false;
         lastPosition = player.getPos();
 
-        // Determine initial direction and target
-        RouteNode startNode = route.getStartPos();
-        RouteNode endNode = route.getEndPos();
-        double distToStart = player.squaredDistanceTo(startNode.x, startNode.y, startNode.z);
-        double distToEnd = player.squaredDistanceTo(endNode.x, endNode.y, endNode.z);
+        // Find closest waypoint to start from
+        double bestDist = Double.MAX_VALUE;
+        int bestIdx = 0;
+        for (int i = 0; i < nodes.size(); i++) {
+            RouteNode node = nodes.get(i);
+            double d = player.squaredDistanceTo(node.x, node.y, node.z);
+            if (d < bestDist) {
+                bestDist = d;
+                bestIdx = i;
+            }
+        }
 
-        if (distToStart <= distToEnd) {
-            direction = +1;
-            currentTarget = endNode;
+        // Determine initial direction and target
+        currentWPIndex = bestIdx;
+        if (bestIdx < nodes.size() - 1) {
+            direction = 1;
         } else {
             direction = -1;
-            currentTarget = startNode;
         }
+
+        // Move to next waypoint in chosen direction
+        int nextIdx = currentWPIndex + direction;
+        if (nextIdx < 0 || nextIdx >= nodes.size()) {
+            // Player is at the only valid waypoint; force direction
+            direction = -direction;
+            nextIdx = currentWPIndex + direction;
+        }
+        currentTarget = nodes.get(nextIdx);
 
         totalSegments = route.getTotalSegments();
         completedSegments = 0;
+
+        // Snap yaw to face the first target immediately
+        snapYawToTarget(client, currentTarget);
     }
 
     public void stop() {
@@ -91,7 +113,6 @@ public class RouteExecutor {
             return;
         }
 
-        // Check dimension
         String currentDim = player.getWorld().getRegistryKey().getValue().toString();
         if (!route.getDimensionId().isEmpty() && !route.getDimensionId().equals(currentDim)) {
             state = State.FAILED;
@@ -100,13 +121,12 @@ public class RouteExecutor {
 
         Vec3d currentPos = player.getPos();
 
-        // Check arrival
         double distSq = currentTarget.squaredDistanceTo(currentPos.x, currentPos.y, currentPos.z);
         double arrivalSq = route.getArrivalRadius() * route.getArrivalRadius();
 
         if (distSq <= arrivalSq) {
             onArrival();
-            return;
+            if (!isActive()) return;
         }
 
         // Stuck detection
@@ -115,7 +135,6 @@ public class RouteExecutor {
             stuckTicks++;
             if (state == State.MOVING) {
                 if (stuckTicks >= STUCK_TICKS) {
-                    // First stuck: try jumping
                     state = State.STUCK_JUMP;
                     jumpRequested = true;
                     postJumpTicks = 0;
@@ -129,7 +148,6 @@ public class RouteExecutor {
                 }
             }
         } else {
-            // Player moved - reset stuck detection
             if (state == State.STUCK_JUMP) {
                 state = State.MOVING;
                 postJumpTicks = 0;
@@ -140,10 +158,21 @@ public class RouteExecutor {
 
         lastPosition = currentPos;
 
-        // Yaw control
         if (state == State.MOVING || state == State.STUCK_JUMP) {
             adjustYaw(client, currentTarget);
         }
+    }
+
+    private void snapYawToTarget(MinecraftClient client, RouteNode target) {
+        ClientPlayerEntity player = client.player;
+        if (player == null) return;
+
+        double dx = target.x - player.getX();
+        double dz = target.z - player.getZ();
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        yaw = MathHelper.wrapDegrees(yaw);
+        player.setYaw(yaw);
+        player.setHeadYaw(yaw);
     }
 
     private void adjustYaw(MinecraftClient client, RouteNode target) {
@@ -157,11 +186,18 @@ public class RouteExecutor {
         float currentYaw = MathHelper.wrapDegrees(player.getYaw());
         float diff = MathHelper.wrapDegrees(desiredYaw - currentYaw);
 
-        // Mixed mode: only auto-correct when deviation exceeds dead zone
         if (Math.abs(diff) < YAW_DEAD_ZONE) return;
 
+        // Smooth correction: faster for large angles, slower for small
+        double speed = YAW_CORRECTION_SPEED;
+        if (Math.abs(diff) > 45.0) {
+            speed = 25.0; // very fast for large deviations
+        } else if (Math.abs(diff) > 15.0) {
+            speed = 18.0;
+        }
+
         float correction = (float) Math.copySign(
-                Math.min(Math.abs(diff), (float) YAW_CORRECTION_SPEED), diff);
+                Math.min(Math.abs(diff), (float) speed), diff);
 
         float newYaw = MathHelper.wrapDegrees(currentYaw + correction);
         player.setYaw(newYaw);
@@ -174,13 +210,22 @@ public class RouteExecutor {
             state = State.COMPLETED;
             return;
         }
-        // Swap target
-        if (currentTarget == route.getStartPos()) {
-            currentTarget = route.getEndPos();
-        } else {
-            currentTarget = route.getStartPos();
+
+        List<RouteNode> nodes = route.getNodes();
+        currentWPIndex += direction;
+
+        // Reverse at boundaries
+        if (currentWPIndex >= nodes.size() - 1) {
+            direction = -1;
+            currentWPIndex = nodes.size() - 1;
+        } else if (currentWPIndex <= 0) {
+            direction = 1;
+            currentWPIndex = 0;
         }
-        direction *= -1;
+
+        int nextIdx = currentWPIndex + direction;
+        currentTarget = nodes.get(nextIdx);
+
         stuckTicks = 0;
         postJumpTicks = 0;
         jumpRequested = false;

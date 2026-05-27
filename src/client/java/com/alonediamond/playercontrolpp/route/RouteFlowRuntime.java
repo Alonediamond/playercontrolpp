@@ -48,12 +48,11 @@ public class RouteFlowRuntime {
         RouteExecutor executor = executors.remove(route.getId());
         if (executor != null) {
             executor.stop();
-        }
-        updateForwardState();
-
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player != null) {
-            MessageUtil.sendActionBar(client, "playercontrolpp.message.route.stopped");
+            updateForwardState();
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player != null) {
+                MessageUtil.sendActionBar(client, "playercontrolpp.message.route.stopped");
+            }
         }
     }
 

@@ -45,14 +45,13 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     public List<ConfigOptionWrapper> getConfigs() {
         switch (selectedTab) {
             case HOTKEYS:
-                List<ConfigOptionWrapper> hotkeys = new ArrayList<>();
-                hotkeys.addAll(ConfigOptionWrapper.createFor(Configs.Hotkeys.HOTKEY_LIST));
-                hotkeys.addAll(ConfigOptionWrapper.createFor(RouteManager.getInstance().getRouteHotkeyList()));
-                return hotkeys;
+                return ConfigOptionWrapper.createFor(Configs.Hotkeys.HOTKEY_LIST);
+            case ROUTE_HOTKEYS:
+                return ConfigOptionWrapper.createFor(
+                        new ArrayList<>(RouteManager.getInstance().getRouteHotkeyList()));
             case SETTINGS:
                 return ConfigOptionWrapper.createFor(Configs.Settings.OPTIONS);
             case ROUTES:
-                MinecraftClient.getInstance().setScreen(new RouteListGui(this));
                 return Collections.emptyList();
         }
         return Collections.emptyList();
@@ -60,11 +59,12 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
 
     @Override
     protected boolean useKeybindSearch() {
-        return selectedTab == ConfigGuiTab.HOTKEYS;
+        return selectedTab == ConfigGuiTab.HOTKEYS || selectedTab == ConfigGuiTab.ROUTE_HOTKEYS;
     }
 
     public enum ConfigGuiTab {
         HOTKEYS("playercontrolpp.gui.tab.hotkeys"),
+        ROUTE_HOTKEYS("playercontrolpp.gui.tab.route_hotkeys"),
         SETTINGS("playercontrolpp.gui.tab.settings"),
         ROUTES("playercontrolpp.gui.tab.routes");
 
@@ -82,8 +82,12 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     private record ButtonListener(ConfigGuiTab tab, PlayerControlppConfigGui parent) implements IButtonActionListener {
         @Override
         public void actionPerformedWithButton(ButtonBase button, int mouseButton) {
-            selectedTab = tab;
-            parent.getListWidget().refreshEntries();
+            if (tab == ConfigGuiTab.ROUTES) {
+                MinecraftClient.getInstance().setScreen(new RouteListGui(parent));
+            } else {
+                selectedTab = tab;
+                parent.getListWidget().refreshEntries();
+            }
         }
     }
 }

@@ -37,6 +37,7 @@ public class RouteManager {
         RouteHotkey rh = new RouteHotkey(route);
         routeHotkeys.add(rh);
         registerRouteKeybind(route);
+        registerRouteCallback(rh);
         saveRoutes();
         return route;
     }
@@ -71,6 +72,19 @@ public class RouteManager {
         InputEventHandler.getKeybindManager().addKeybindToMap(route.getHotkey().getKeybind());
     }
 
+    private void registerRouteCallback(RouteHotkey rh) {
+        rh.getKeybind().setCallback(new fi.dy.masa.malilib.hotkeys.IHotkeyCallback() {
+            @Override
+            public boolean onKeyAction(fi.dy.masa.malilib.hotkeys.KeyAction action,
+                                        fi.dy.masa.malilib.hotkeys.IKeybind key) {
+                if (action != fi.dy.masa.malilib.hotkeys.KeyAction.PRESS) return false;
+                if (MinecraftClient.getInstance().player == null) return false;
+                RouteFlowRuntime.getInstance().toggleRoute(rh.getRoute());
+                return true;
+            }
+        });
+    }
+
     private void unregisterRouteKeybind(Route route) {
         // KeybindManager doesn't explicitly unregister, but removing from list is enough
     }
@@ -96,6 +110,7 @@ public class RouteManager {
                     routes.add(route);
                     RouteHotkey rh = new RouteHotkey(route);
                     routeHotkeys.add(rh);
+                    registerRouteCallback(rh);
                 }
             }
         } catch (Exception e) {
