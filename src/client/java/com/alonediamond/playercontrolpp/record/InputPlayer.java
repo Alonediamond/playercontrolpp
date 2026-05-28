@@ -9,7 +9,8 @@ public class InputPlayer {
 
     public enum State { IDLE, MOVING_TO_START, PLAYING, COMPLETED }
 
-    private static final double ARRIVAL_SQ = 0.25; // 0.5 blocks
+    private static final double ARRIVAL_SQ = 0.25;
+    private static final double HP_CORRECT_SQ = 0.04; // 0.2 blocks - HP correction threshold
 
     private RecordingFile recording;
     private State state = State.IDLE;
@@ -28,6 +29,9 @@ public class InputPlayer {
     private float playYaw;
     private float playPitch;
 
+    // Sprint release delay (ticks since sprint turned off)
+    private int sprintOffTicks;
+
     public State getState() { return state; }
     public boolean isPlaying() { return state == State.PLAYING || state == State.MOVING_TO_START; }
 
@@ -40,6 +44,7 @@ public class InputPlayer {
     public boolean getRightClick() { return playRightClick; }
     public float getYaw() { return playYaw; }
     public float getPitch() { return playPitch; }
+    public RecordingFile getRecording() { return recording; }
 
     public void start(RecordingFile rec, int playCount) {
         if (rec == null || rec.getFrames().isEmpty()) return;
@@ -52,6 +57,7 @@ public class InputPlayer {
         this.playCount = playCount;
         this.currentPlay = 0;
         this.frameIndex = 0;
+        this.sprintOffTicks = 0;
         beginWalkingToStart(client);
     }
 
@@ -59,7 +65,6 @@ public class InputPlayer {
         ClientPlayerEntity player = client.player;
         if (player == null || recording == null) return;
 
-        // Check if already at start
         double dx = recording.getStartX() - player.getX();
         double dz = recording.getStartZ() - player.getZ();
         if (dx * dx + dz * dz <= ARRIVAL_SQ) {
@@ -75,6 +80,7 @@ public class InputPlayer {
         playSprint = false;
         playLeftClick = false;
         playRightClick = false;
+        sprintOffTicks = 0;
         MessageUtil.sendActionBar(client, "playercontrolpp.message.playback.walking");
     }
 
@@ -86,6 +92,7 @@ public class InputPlayer {
         playForward = 0;
         playSideways = 0;
         frameIndex = 0;
+        sprintOffTicks = 0;
         loadFrame(0);
         player.setYaw(recording.getStartYaw());
         player.setHeadYaw(recording.getStartYaw());
@@ -102,9 +109,11 @@ public class InputPlayer {
         playSprint = false;
         playLeftClick = false;
         playRightClick = false;
+        sprintOffTicks = 0;
 
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player != null) {
+            client.options.sprintKey.setPressed(false);
             MessageUtil.sendActionBar(client, "playercontrolpp.message.playback.stopped");
         }
     }
@@ -117,7 +126,6 @@ public class InputPlayer {
         }
 
         if (state == State.MOVING_TO_START) {
-            // Walk toward start position using input simulation
             double dx = recording.getStartX() - player.getX();
             double dz = recording.getStartZ() - player.getZ();
             double distSq = dx * dx + dz * dz;
@@ -127,7 +135,6 @@ public class InputPlayer {
                 return;
             }
 
-            // Steer toward target
             float targetYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
             playYaw = MathHelper.wrapDegrees(targetYaw);
             playPitch = 0;
@@ -135,6 +142,7 @@ public class InputPlayer {
             playSideways = 0;
             playJump = false;
             playSneak = false;
+            playSprint = false;
             playLeftClick = false;
             playRightClick = false;
             return;
@@ -142,11 +150,32 @@ public class InputPlayer {
 
         if (state != State.PLAYING) return;
 
-        // Advance frame
+        // High-precision: snap to recorded position if deviation is too large
+        if (recording.isHighPrecision() && currentFrame != null
+                && currentFrame.posX != 0) {
+            double pdx = player.getX() - currentFrame.posX;
+            double pdy = player.getY() - currentFrame.posY;
+            double pdz = player.getZ() - currentFrame.posZ;
+            if (pdx*pdx + pdy*pdy + pdz*pdz > HP_CORRECT_SQ) {
+                player.setPosition(currentFrame.posX, currentFrame.posY, currentFrame.posZ);
+            }
+        }
+
+        // Sprint key simulation with release delay
+        if (playSprint) {
+            client.options.sprintKey.setPressed(true);
+            sprintOffTicks = 0;
+        } else if (sprintOffTicks < 3) {
+            // Hold sprint key off for a few ticks to ensure smooth transition
+            client.options.sprintKey.setPressed(false);
+            sprintOffTicks++;
+        }
+
         frameIndex++;
         if (frameIndex >= recording.getFrames().size()) {
             currentPlay++;
             if (playCount == 0 || currentPlay < playCount) {
+                client.options.sprintKey.setPressed(false);
                 beginWalkingToStart(client);
             } else {
                 state = State.COMPLETED;
@@ -154,8 +183,10 @@ public class InputPlayer {
                 playSideways = 0;
                 playJump = false;
                 playSneak = false;
+                playSprint = false;
                 playLeftClick = false;
                 playRightClick = false;
+                client.options.sprintKey.setPressed(false);
                 MessageUtil.sendActionBar(client, "playercontrolpp.message.playback.completed");
             }
             return;
@@ -183,7 +214,6 @@ public class InputPlayer {
         if (state == State.MOVING_TO_START) {
             ClientPlayerEntity player = client.player;
             if (player != null && recording != null) {
-                // During walk-to-start, yaw is set directly
                 player.setYaw(MathHelper.wrapDegrees(playYaw));
                 player.setHeadYaw(MathHelper.wrapDegrees(playYaw));
             }

@@ -5,8 +5,8 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
 /**
- * Litematica integration via reflection to avoid compile-time dependency.
- * Only works in SINGLE_LAYER mode.
+ * Litematica integration via reflection.
+ * Directly manipulates single-layer value for reliability.
  */
 public class LitematicaIntegration {
 
@@ -19,10 +19,6 @@ public class LitematicaIntegration {
     public static boolean isShowActionBar() { return showActionBar; }
     public static void setShowActionBar(boolean show) { showActionBar = show; }
 
-    /**
-     * Increment (or decrement) the Litematica SINGLE_LAYER render layer.
-     * @param amount positive to go up, negative to go down
-     */
     public static boolean incrementLayer(int amount) {
         if (!enabled || amount == 0) return false;
 
@@ -31,14 +27,14 @@ public class LitematicaIntegration {
             Object range = dmClass.getMethod("getRenderLayerRange").invoke(null);
             if (range == null) return false;
 
-            // Only work in SINGLE_LAYER mode (ordinal 1)
+            // Ensure SINGLE_LAYER mode
             Object mode = range.getClass().getMethod("getLayerMode").invoke(range);
-            if (mode == null) return false;
             String modeName = ((Enum<?>) mode).name();
             if (!"SINGLE_LAYER".equals(modeName)) return false;
 
-            // moveLayer handles positive and negative values
-            range.getClass().getMethod("moveLayer", int.class).invoke(range, amount);
+            // Directly get/set layerSingle for reliability
+            int current = (Integer) range.getClass().getMethod("getLayerSingle").invoke(range);
+            range.getClass().getMethod("setLayerSingle", int.class).invoke(range, current + amount);
 
             if (showActionBar) {
                 MinecraftClient client = MinecraftClient.getInstance();

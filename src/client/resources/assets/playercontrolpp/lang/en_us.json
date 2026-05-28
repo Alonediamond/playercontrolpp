@@ -79,5 +79,5 @@
   "playercontrolpp.gui.recording.idle": "Status: Idle",
   "playercontrolpp.gui.recording.hp_on": "[HP Mode: ON]",
   "playercontrolpp.gui.recording.hp_off": "[HP Mode: OFF]",
-  "playercontrolpp.gui.recording.hp_warn": "WARNING: HP mode stores position per frame, increasing file size significantly."
+  "playercontrolpp.gui.recording.hp_warn": "! HP MODE ACTIVE - tracks exact position each frame, larger files, higher replay accuracy !"
 }
