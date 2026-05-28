@@ -11,6 +11,7 @@ import java.util.List;
 public class InputRecorder {
 
     private boolean recording;
+    private boolean highPrecision;
     private final List<RecordedFrame> frames = new ArrayList<>();
     private double startX, startY, startZ;
     private float startYaw, startPitch;
@@ -18,13 +19,15 @@ public class InputRecorder {
     private String recordingName;
 
     public boolean isRecording() { return recording; }
+    public boolean isHighPrecision() { return highPrecision; }
 
-    public void startRecording(String name) {
+    public void startRecording(String name, boolean highPrecision) {
         MinecraftClient client = MinecraftClient.getInstance();
         ClientPlayerEntity player = client.player;
         if (player == null) return;
 
         this.recordingName = name;
+        this.highPrecision = highPrecision;
         this.frames.clear();
         this.startX = player.getX();
         this.startY = player.getY();
@@ -53,6 +56,7 @@ public class InputRecorder {
         file.setStartPitch(startPitch);
         file.setDimension(dimension);
         file.setFrames(new ArrayList<>(frames));
+        file.setHighPrecision(highPrecision);
         return file;
     }
 
@@ -67,11 +71,17 @@ public class InputRecorder {
                 player.input.movementSideways,
                 player.input.playerInput.jump(),
                 player.input.playerInput.sneak(),
+                player.input.playerInput.sprint(),
                 client.options.attackKey.isPressed(),
                 client.options.useKey.isPressed(),
                 MathHelper.wrapDegrees(player.getYaw()),
                 player.getPitch()
         );
+        if (highPrecision) {
+            frame.posX = player.getX();
+            frame.posY = player.getY();
+            frame.posZ = player.getZ();
+        }
         frames.add(frame);
     }
 }

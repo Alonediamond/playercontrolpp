@@ -37,7 +37,7 @@ public abstract class MixinKeyboardInput {
                     playback.getSideways() > 0,
                     playback.getJump(),
                     playback.getSneak(),
-                    original.sprint()
+                    playback.getSprint()
             );
             self.movementForward = playback.getForward();
             self.movementSideways = playback.getSideways();

@@ -26,6 +26,7 @@ public class RecordingListGui extends Screen {
     private final Screen parent;
     private RecordingFile selectedRecording;
     private int leftScroll;
+    private boolean highPrecision;
 
     private TextFieldWidget nameField;
     private TextFieldWidget playCountField;
@@ -47,8 +48,9 @@ public class RecordingListGui extends Screen {
     protected void init() {
         super.init();
         this.leftScroll = 0;
+        this.highPrecision = false;
 
-        // Start/Stop Rec button
+        // Start/Stop Rec
         this.addDrawableChild(ButtonWidget.builder(
                 Text.of(StringUtils.translate("playercontrolpp.gui.recording.start_recording")),
                 btn -> {
@@ -60,9 +62,13 @@ public class RecordingListGui extends Screen {
                         dirty = true;
                         refreshFields();
                     } else {
-                        rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
+                        if (RecordingManager.getInstance().getPlayer().isPlaying()) return;
+                        rec.startRecording(
+                                StringUtils.translate("playercontrolpp.gui.recording.new_recording"),
+                                highPrecision);
                         selectedRecording = null;
                         refreshFields();
+                        close(); // exit GUI
                     }
                 })
                 .dimensions(LEFT_X, TOP, 90, 20)
@@ -89,7 +95,29 @@ public class RecordingListGui extends Screen {
                 .dimensions(this.width - 55, 10, 45, 20)
                 .build());
 
-        int fieldX = RIGHT_X + 8;
+        // Play (hidden until a recording is selected)
+        this.addDrawableChild(ButtonWidget.builder(
+                Text.of(StringUtils.translate("playercontrolpp.gui.recording.play")),
+                btn -> {
+                    if (selectedRecording != null) {
+                        int count = 1;
+                        try { count = Integer.parseInt(playCountField.getText()); }
+                        catch (NumberFormatException ignored) {}
+                        RecordingManager.getInstance().getPlayer().start(selectedRecording, count);
+                        close();
+                    }
+                })
+                .dimensions(0, 0, 45, 20)
+                .build()).visible = false;
+
+        // Stop (hidden until playback starts)
+        this.addDrawableChild(ButtonWidget.builder(
+                Text.of(StringUtils.translate("playercontrolpp.gui.recording.stop")),
+                btn -> RecordingManager.getInstance().getPlayer().stop())
+                .dimensions(0, 0, 45, 20)
+                .build()).visible = false;
+
+        int fieldX = RIGHT_X + 4;
 
         nameField = new TextFieldWidget(textRenderer, fieldX, 0, 130, 18, Text.empty());
         nameField.setChangedListener(s -> {
@@ -99,27 +127,6 @@ public class RecordingListGui extends Screen {
 
         playCountField = new TextFieldWidget(textRenderer, fieldX, 0, 50, 18, Text.empty());
         this.addSelectableChild(playCountField);
-
-        // Play
-        this.addDrawableChild(ButtonWidget.builder(
-                Text.of(StringUtils.translate("playercontrolpp.gui.recording.play")),
-                btn -> {
-                    if (selectedRecording != null) {
-                        int count = 1;
-                        try { count = Integer.parseInt(playCountField.getText()); }
-                        catch (NumberFormatException ignored) {}
-                        RecordingManager.getInstance().getPlayer().start(selectedRecording, count);
-                    }
-                })
-                .dimensions(fieldX, 0, 45, 20)
-                .build());
-
-        // Stop
-        this.addDrawableChild(ButtonWidget.builder(
-                Text.of(StringUtils.translate("playercontrolpp.gui.recording.stop")),
-                btn -> RecordingManager.getInstance().getPlayer().stop())
-                .dimensions(fieldX + 55, 0, 45, 20)
-                .build());
 
         refreshFields();
     }
@@ -162,75 +169,109 @@ public class RecordingListGui extends Screen {
             int bg = isSel ? 0x40FFFFFF : 0x0;
             int color = isSel ? 0xFF55FF55 : 0xFFCCCCCC;
             context.fill(LEFT_X + 1, y, LEFT_X + LEFT_W - 1, y + ITEM_H - 1, bg);
-            context.drawTextWithShadow(textRenderer, Text.of(rf.getName()), LEFT_X + 4, y + 5, color);
+            String text = rf.getName() + (rf.isHighPrecision() ? " [HP]" : "");
+            context.drawTextWithShadow(textRenderer, Text.of(text), LEFT_X + 4, y + 5, color);
         }
 
         // --- Right panel ---
-        int fieldX = RIGHT_X + 8;
+        int fieldX = RIGHT_X + 4;
 
-        // Status line
+        // Status
         InputRecorder recorder = RecordingManager.getInstance().getRecorder();
         String status;
+        int statusColor = 0xFF55FFFF;
         if (recorder.isRecording()) {
             status = StringUtils.translate("playercontrolpp.gui.recording.recording");
+            if (recorder.isHighPrecision()) status += " [HP]";
         } else if (RecordingManager.getInstance().getPlayer().isPlaying()) {
             status = StringUtils.translate("playercontrolpp.gui.recording.playing");
         } else {
             status = StringUtils.translate("playercontrolpp.gui.recording.idle");
+            statusColor = 0xFF888888;
         }
-        context.drawTextWithShadow(textRenderer, Text.of(status), RIGHT_X + 4, TOP + 4, 0xFF55FFFF);
+        context.drawTextWithShadow(textRenderer, Text.of(status), RIGHT_X + 4, TOP + 4, statusColor);
 
-        if (selectedRecording == null) return;
+        // High-precision toggle (always visible)
+        String hpLabel = highPrecision
+                ? StringUtils.translate("playercontrolpp.gui.recording.hp_on")
+                : StringUtils.translate("playercontrolpp.gui.recording.hp_off");
+        int hpColor = highPrecision ? 0xFFFFFF55 : 0xFF888888;
+        int hpX = this.width - textRenderer.getWidth(hpLabel) - 14;
+        context.drawTextWithShadow(textRenderer, Text.of(hpLabel), hpX, TOP + 4, hpColor);
+
+        if (selectedRecording == null) {
+            // Hide play/stop buttons
+            String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
+            String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
+            for (var child : this.children()) {
+                if (child instanceof ButtonWidget btn) {
+                    String msg = btn.getMessage().getString();
+                    if (msg.equals(playLabel) || msg.equals(stopLabel)) btn.visible = false;
+                }
+            }
+            if (highPrecision) {
+                context.drawTextWithShadow(textRenderer,
+                        Text.of(StringUtils.translate("playercontrolpp.gui.recording.hp_warn")),
+                        RIGHT_X + 4, TOP + 30, 0xFFFF5555);
+            }
+            return;
+        }
 
         int ry = TOP + 30;
 
-        // Name
+        // Name label
         context.drawTextWithShadow(textRenderer,
                 Text.of(StringUtils.translate("playercontrolpp.gui.route.name") + ":"),
                 RIGHT_X, ry + 4, 0xFFFFFFFF);
+        // Name field (to the right of label)
         nameField.setX(fieldX);
         nameField.setY(ry + 2);
         nameField.render(context, mouseX, mouseY, delta);
         ry += ROW_H;
 
         // Frame count info
-        context.drawTextWithShadow(textRenderer,
-                Text.of(StringUtils.translate("playercontrolpp.gui.recording.frames") + ": " +
-                        selectedRecording.getFrameCount()),
-                RIGHT_X + 4, ry + 4, 0xFFCCCCCC);
+        String info = StringUtils.translate("playercontrolpp.gui.recording.frames") + ": " +
+                selectedRecording.getFrameCount();
+        if (selectedRecording.isHighPrecision()) info += "  [HP]";
+        context.drawTextWithShadow(textRenderer, Text.of(info), RIGHT_X + 4, ry + 4, 0xFFCCCCCC);
         ry += ROW_H;
 
-        // Play count
+        // Play count label
         context.drawTextWithShadow(textRenderer,
                 Text.of(StringUtils.translate("playercontrolpp.gui.recording.play_count") + ":"),
                 RIGHT_X, ry + 4, 0xFFFFFFFF);
+        // Play count field
         playCountField.setX(fieldX);
         playCountField.setY(ry + 2);
         playCountField.render(context, mouseX, mouseY, delta);
         ry += ROW_H + 4;
 
-        // Play / Stop buttons
-        // These are ButtonWidget, rendered by super.render()
-        var children = this.children();
-        // Update play/stop button Y positions
-        for (var child : children) {
+        // Play / Stop buttons: show when a recording is selected
+        int btnY = ry;
+        String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
+        String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
+        for (var child : this.children()) {
             if (child instanceof ButtonWidget btn) {
                 String msg = btn.getMessage().getString();
-                String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
-                String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
                 if (msg.equals(playLabel)) {
-                    btn.setX(fieldX);
-                    btn.setY(ry);
+                    btn.setX(fieldX); btn.setY(btnY); btn.visible = true;
                 } else if (msg.equals(stopLabel)) {
-                    btn.setX(fieldX + 55);
-                    btn.setY(ry);
+                    btn.setX(fieldX + 55); btn.setY(btnY); btn.visible = true;
                 }
             }
         }
         ry += ROW_H;
 
+        // HP warning for selected recording
+        if (highPrecision) {
+            context.drawTextWithShadow(textRenderer,
+                    Text.of(StringUtils.translate("playercontrolpp.gui.recording.hp_warn")),
+                    RIGHT_X + 4, ry, 0xFFFF5555);
+        }
+
         // Dimension
         if (!selectedRecording.getDimension().isEmpty()) {
+            ry += ROW_H;
             context.drawTextWithShadow(textRenderer,
                     Text.of("Dim: " + selectedRecording.getDimension()),
                     RIGHT_X + 4, ry + 2, 0xFF888888);
@@ -239,6 +280,16 @@ public class RecordingListGui extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // High-precision toggle
+        int hpX = this.width - textRenderer.getWidth(
+                highPrecision ? StringUtils.translate("playercontrolpp.gui.recording.hp_on")
+                        : StringUtils.translate("playercontrolpp.gui.recording.hp_off")) - 14;
+        if (mouseX >= hpX && mouseY >= TOP + 4 && mouseY <= TOP + 18) {
+            highPrecision = !highPrecision;
+            return true;
+        }
+
+        // Left panel
         List<RecordingFile> recs = RecordingManager.getInstance().getRecordings();
         int listTop = TOP + 30;
         int maxVisible = (this.height - listTop - 10) / ITEM_H;

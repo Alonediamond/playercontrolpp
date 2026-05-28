@@ -76,5 +76,8 @@
   "playercontrolpp.gui.recording.frames": "帧数",
   "playercontrolpp.gui.recording.recording": "状态：录制中...",
   "playercontrolpp.gui.recording.playing": "状态：播放中...",
-  "playercontrolpp.gui.recording.idle": "状态：空闲"
+  "playercontrolpp.gui.recording.idle": "状态：空闲",
+  "playercontrolpp.gui.recording.hp_on": "[高精度：开]",
+  "playercontrolpp.gui.recording.hp_off": "[高精度：关]",
+  "playercontrolpp.gui.recording.hp_warn": "警告：高精度模式将每帧记录位置，文件大小会显著增加。"
 }

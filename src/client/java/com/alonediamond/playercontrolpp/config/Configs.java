@@ -55,12 +55,8 @@ public class Configs implements IConfigHandler {
                 "turnAngle", 180, 0, 360, false)
                 .apply("playercontrolpp.config.settings");
 
-        public static final ConfigInteger LAYER_INCREMENT = new ConfigInteger(
-                "layerIncrement", 1, 1, 64, false)
-                .apply("playercontrolpp.config.settings");
-
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                TURN_ANGLE, LAYER_INCREMENT);
+                TURN_ANGLE);
     }
 
     public static void loadFromFile() {

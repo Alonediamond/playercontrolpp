@@ -6,7 +6,7 @@ import net.minecraft.text.Text;
 
 /**
  * Litematica integration via reflection to avoid compile-time dependency.
- * Only works when Litematica is loaded at runtime.
+ * Only works in SINGLE_LAYER mode.
  */
 public class LitematicaIntegration {
 
@@ -20,26 +20,25 @@ public class LitematicaIntegration {
     public static void setShowActionBar(boolean show) { showActionBar = show; }
 
     /**
-     * Attempt to increment the Litematica render layer via reflection.
-     *
-     * @param incrementAmount number of layers to advance (positive integer)
+     * Increment (or decrement) the Litematica SINGLE_LAYER render layer.
+     * @param amount positive to go up, negative to go down
      */
-    public static boolean incrementLayer(int incrementAmount) {
-        if (!enabled || incrementAmount <= 0) return false;
+    public static boolean incrementLayer(int amount) {
+        if (!enabled || amount == 0) return false;
 
         try {
-            // Reflectively call: DataManager.getRenderLayerRange()
-            Class<?> dataManagerClass = Class.forName("fi.dy.masa.litematica.data.DataManager");
-            Object range = dataManagerClass.getMethod("getRenderLayerRange").invoke(null);
+            Class<?> dmClass = Class.forName("fi.dy.masa.litematica.data.DataManager");
+            Object range = dmClass.getMethod("getRenderLayerRange").invoke(null);
             if (range == null) return false;
 
-            // Get layer mode
+            // Only work in SINGLE_LAYER mode (ordinal 1)
             Object mode = range.getClass().getMethod("getLayerMode").invoke(range);
-            // Check mode is not ALL (ordinal 0)
-            if (mode != null && ((Enum<?>) mode).ordinal() == 0) return false;
+            if (mode == null) return false;
+            String modeName = ((Enum<?>) mode).name();
+            if (!"SINGLE_LAYER".equals(modeName)) return false;
 
-            // range.moveLayer(incrementAmount)
-            range.getClass().getMethod("moveLayer", int.class).invoke(range, incrementAmount);
+            // moveLayer handles positive and negative values
+            range.getClass().getMethod("moveLayer", int.class).invoke(range, amount);
 
             if (showActionBar) {
                 MinecraftClient client = MinecraftClient.getInstance();

@@ -89,7 +89,10 @@ public class KeybindCallbacks {
                 RecordingFile rf = rec.stopRecording();
                 RecordingManager.getInstance().addRecording(rf);
             } else {
-                rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
+                // Prevent recording during playback
+                if (RecordingManager.getInstance().getPlayer().isPlaying()) return false;
+                rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"), false);
+                client.setScreen(null); // exit GUI
             }
             return true;
         }

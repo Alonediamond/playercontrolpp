@@ -92,7 +92,7 @@ public class Route {
     public void setLoopCount(int loopCount) { this.loopCount = Math.max(0, loopCount); }
 
     public int getLayerIncrement() { return layerIncrement; }
-    public void setLayerIncrement(int layerIncrement) { this.layerIncrement = Math.max(1, layerIncrement); }
+    public void setLayerIncrement(int layerIncrement) { this.layerIncrement = layerIncrement == 0 ? 1 : layerIncrement; }
 
     public ConfigHotkey getHotkey() { return hotkey; }
 

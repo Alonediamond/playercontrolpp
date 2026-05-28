@@ -13,6 +13,7 @@ public class RecordingFile {
     private double startX, startY, startZ;
     private float startYaw, startPitch;
     private String dimension;
+    private boolean highPrecision;
     private List<RecordedFrame> frames = new ArrayList<>();
 
     public RecordingFile() {
@@ -41,6 +42,9 @@ public class RecordingFile {
     public String getDimension() { return dimension; }
     public void setDimension(String v) { dimension = v; }
 
+    public boolean isHighPrecision() { return highPrecision; }
+    public void setHighPrecision(boolean v) { highPrecision = v; }
+
     public List<RecordedFrame> getFrames() { return frames; }
     public void setFrames(List<RecordedFrame> frames) { this.frames = frames; }
     public int getFrameCount() { return frames.size(); }
@@ -55,6 +59,7 @@ public class RecordingFile {
         obj.addProperty("startYaw", startYaw);
         obj.addProperty("startPitch", startPitch);
         obj.addProperty("dimension", dimension);
+        obj.addProperty("highPrecision", highPrecision);
         JsonArray arr = new JsonArray();
         for (RecordedFrame f : frames) {
             arr.add(f.toJson());
@@ -73,6 +78,7 @@ public class RecordingFile {
         if (obj.has("startYaw")) rf.setStartYaw(obj.get("startYaw").getAsFloat());
         if (obj.has("startPitch")) rf.setStartPitch(obj.get("startPitch").getAsFloat());
         if (obj.has("dimension")) rf.setDimension(obj.get("dimension").getAsString());
+        if (obj.has("highPrecision")) rf.setHighPrecision(obj.get("highPrecision").getAsBoolean());
         if (obj.has("frames")) {
             JsonArray arr = obj.getAsJsonArray("frames");
             for (int i = 0; i < arr.size(); i++) {

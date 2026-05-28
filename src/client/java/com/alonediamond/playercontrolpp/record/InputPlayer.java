@@ -22,6 +22,7 @@ public class InputPlayer {
     private float playSideways;
     private boolean playJump;
     private boolean playSneak;
+    private boolean playSprint;
     private boolean playLeftClick;
     private boolean playRightClick;
     private float playYaw;
@@ -34,6 +35,7 @@ public class InputPlayer {
     public float getSideways() { return playSideways; }
     public boolean getJump() { return playJump; }
     public boolean getSneak() { return playSneak; }
+    public boolean getSprint() { return playSprint; }
     public boolean getLeftClick() { return playLeftClick; }
     public boolean getRightClick() { return playRightClick; }
     public float getYaw() { return playYaw; }
@@ -70,6 +72,7 @@ public class InputPlayer {
         playSideways = 0;
         playJump = false;
         playSneak = false;
+        playSprint = false;
         playLeftClick = false;
         playRightClick = false;
         MessageUtil.sendActionBar(client, "playercontrolpp.message.playback.walking");
@@ -96,6 +99,7 @@ public class InputPlayer {
         playSideways = 0;
         playJump = false;
         playSneak = false;
+        playSprint = false;
         playLeftClick = false;
         playRightClick = false;
 
@@ -168,6 +172,7 @@ public class InputPlayer {
         this.playSideways = f.movementSideways;
         this.playJump = f.jump;
         this.playSneak = f.sneak;
+        this.playSprint = f.sprint;
         this.playLeftClick = f.leftClick;
         this.playRightClick = f.rightClick;
         this.playYaw = f.yaw;
