@@ -143,5 +143,19 @@
   "playercontrolpp.message.baritone.shulker_box_full": "[PlayerControl++] 潜影盒已满。已停止。",
   "playercontrolpp.message.baritone.shulker_place_failed": "[PlayerControl++] 潜影盒放置失败。已停止。",
   "playercontrolpp.message.baritone.shulker_open_failed": "[PlayerControl++] 未能打开已放置的潜影盒 — 中止以防止破坏周围方块。",
-  "playercontrolpp.message.baritone.shulker_pickup_failed": "[PlayerControl++] 5秒内未拾取到潜影盒 — 停止自动备货以防止物品丢失。"
+  "playercontrolpp.message.baritone.shulker_pickup_failed": "[PlayerControl++] 5秒内未拾取到潜影盒 — 停止自动备货以防止物品丢失。",
+
+  "playercontrolpp.config.hotkeys.name.autoCacheNearbyContainers": "自动缓存附近容器",
+  "playercontrolpp.config.hotkeys.pretty_name.autoCacheNearbyContainers": "自动缓存附近容器",
+  "playercontrolpp.config.hotkeys.comment.autoCacheNearbyContainers": "切换自动缓存附近容器内容以帮助 ChestTracker 建立缓存。",
+
+  "playercontrolpp.config.cache_nearby.name.containerWhitelist": "可缓存容器白名单",
+  "playercontrolpp.config.cache_nearby.pretty_name.containerWhitelist": "可缓存容器白名单",
+  "playercontrolpp.config.cache_nearby.comment.containerWhitelist": "允许自动缓存的容器方块 ID 列表。点击打开列表编辑器。默认：所有原版存储容器。",
+
+  "playercontrolpp.message.cache_nearby.on": "[PlayerControl++] 自动缓存附近容器：开",
+  "playercontrolpp.message.cache_nearby.off": "[PlayerControl++] 自动缓存附近容器：关",
+  "playercontrolpp.message.cache_nearby.all_cached": "[PlayerControl++] 附近容器已缓存，3秒后自动关闭缓存功能",
+  "playercontrolpp.message.cache_nearby.auto_stop": "[PlayerControl++] 自动缓存附近容器：已停止（附近容器已全部缓存）",
+  "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] 自动缓存附近容器：关（世界切换）"
 }

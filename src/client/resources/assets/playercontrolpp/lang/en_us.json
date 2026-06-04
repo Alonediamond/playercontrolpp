@@ -143,5 +143,19 @@
   "playercontrolpp.message.baritone.shulker_box_full": "[PlayerControl++] Shulker box is full. Stopped.",
   "playercontrolpp.message.baritone.shulker_place_failed": "[PlayerControl++] Failed to place shulker box. Stopped.",
   "playercontrolpp.message.baritone.shulker_open_failed": "[PlayerControl++] Failed to open placed shulker box — aborting to prevent damage to surroundings.",
-  "playercontrolpp.message.baritone.shulker_pickup_failed": "[PlayerControl++] Shulker box not picked up within 5 seconds — stopping auto-gathering to prevent item loss."
+  "playercontrolpp.message.baritone.shulker_pickup_failed": "[PlayerControl++] Shulker box not picked up within 5 seconds — stopping auto-gathering to prevent item loss.",
+
+  "playercontrolpp.config.hotkeys.name.autoCacheNearbyContainers": "Auto Cache Nearby Containers",
+  "playercontrolpp.config.hotkeys.pretty_name.autoCacheNearbyContainers": "Auto Cache Nearby Containers",
+  "playercontrolpp.config.hotkeys.comment.autoCacheNearbyContainers": "Toggle auto-caching of nearby container contents for ChestTracker.",
+
+  "playercontrolpp.config.cache_nearby.name.containerWhitelist": "Cachable Container Whitelist",
+  "playercontrolpp.config.cache_nearby.pretty_name.containerWhitelist": "Cachable Container Whitelist",
+  "playercontrolpp.config.cache_nearby.comment.containerWhitelist": "List of container Block IDs that can be auto-cached. Click to open the list editor. Default: all vanilla storage containers.",
+
+  "playercontrolpp.message.cache_nearby.on": "[PlayerControl++] Auto Cache Nearby Containers: ON",
+  "playercontrolpp.message.cache_nearby.off": "[PlayerControl++] Auto Cache Nearby Containers: OFF",
+  "playercontrolpp.message.cache_nearby.all_cached": "[PlayerControl++] All nearby containers cached. Stopping in 3 seconds...",
+  "playercontrolpp.message.cache_nearby.auto_stop": "[PlayerControl++] Auto Cache Nearby Containers: Stopped (all nearby containers cached)",
+  "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] Auto Cache Nearby Containers: OFF (world changed)"
 }

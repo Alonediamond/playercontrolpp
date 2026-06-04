@@ -230,9 +230,10 @@ public class RecordingListGui extends Screen {
         nameField.render(context, mouseX, mouseY, delta);
         ry += ROW_H;
 
-        // Frame info
+        // Duration info
+        int durationSecs = selectedRecording.getDurationTicks() / 20;
         String info = StringUtils.translate("playercontrolpp.gui.recording.frames") + ": " +
-                selectedRecording.getFrameCount();
+                durationSecs + "s  (" + selectedRecording.getDurationTicks() + " ticks)";
         if (selectedRecording.isHighPrecision()) info += "  [HP]";
         context.drawTextWithShadow(textRenderer, Text.of(info), RIGHT_X + 4, ry + 4, 0xFFCCCCCC);
         ry += ROW_H;

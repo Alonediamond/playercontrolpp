@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.event;
 
+import com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature;
 import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.record.RecordingManager;
@@ -25,6 +26,7 @@ public class ClientEventHandler {
             AutoForwardFeature.onWorldChange();
             RouteFlowRuntime.getInstance().onWorldChange();
             AutoMaterialGatherer.getInstance().onWorldChange();
+            AutoCacheNearbyContainersFeature.onWorldChange();
         }
     }
 
@@ -34,6 +36,7 @@ public class ClientEventHandler {
             RouteFlowRuntime.getInstance().onClientTick(mc);
             RecordingManager.getInstance().onClientTick(mc);
             AutoMaterialGatherer.getInstance().tick(mc);
+            AutoCacheNearbyContainersFeature.tick(mc);
             // Apply playback yaw after input processing
             if (RecordingManager.getInstance().getPlayer().isPlaying()) {
                 RecordingManager.getInstance().getPlayer().applyYaw(mc);

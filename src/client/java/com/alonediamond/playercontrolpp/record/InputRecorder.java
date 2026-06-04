@@ -8,17 +8,40 @@ import net.minecraft.util.math.MathHelper;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Records player input every tick and compresses consecutive identical states
+ * using Run-Length Encoding (RLE). Instead of storing one frame per tick,
+ * identical consecutive ticks merge into a single RecordedSegment with a
+ * duration counter. A new segment is created only when any input field changes.
+ *
+ * HP mode additionally records PositionKeyframes every 20 ticks for
+ * position-drift correction during playback.
+ */
 public class InputRecorder {
+
+    /** HP mode: record a position keyframe every 20 ticks (1 second). */
+    private static final int KEYFRAME_INTERVAL = 20;
 
     private boolean recording;
     private boolean highPrecision;
-    private final List<RecordedFrame> frames = new ArrayList<>();
+    private int totalTicks;
+
+    // Recording metadata
     private double startX, startY, startZ;
     private float startYaw, startPitch;
     private String dimension;
     private String recordingName;
-    private int tickCounter;       // for low-precision frame skipping
-    private int frameSkip;         // 1 = every tick (HP), 3 = every 3rd tick (normal)
+
+    // RLE compression: current pending segment gets duration++ on match,
+    // new segment allocated on state change (never reused to avoid aliasing)
+    private final List<RecordedSegment> segments = new ArrayList<>();
+    private RecordedSegment currentSegment;
+    private boolean hasCurrent;
+
+    // HP position keyframes (one every KEYFRAME_INTERVAL ticks)
+    private final List<PositionKeyframe> keyframes = new ArrayList<>();
+
+    private int actionBarCounter;
 
     public boolean isRecording() { return recording; }
     public boolean isHighPrecision() { return highPrecision; }
@@ -30,9 +53,14 @@ public class InputRecorder {
 
         this.recordingName = name;
         this.highPrecision = highPrecision;
-        this.frameSkip = highPrecision ? 1 : 3; // HP: every tick, normal: every 3rd
-        this.tickCounter = 0;
-        this.frames.clear();
+        this.totalTicks = 0;
+        this.actionBarCounter = 0;
+
+        this.segments.clear();
+        this.keyframes.clear();
+        this.currentSegment = null;
+        this.hasCurrent = false;
+
         this.startX = player.getX();
         this.startY = player.getY();
         this.startZ = player.getZ();
@@ -46,6 +74,14 @@ public class InputRecorder {
 
     public RecordingFile stopRecording() {
         recording = false;
+
+        // Finalize last segment
+        if (hasCurrent) {
+            segments.add(currentSegment);
+            hasCurrent = false;
+            currentSegment = null;
+        }
+
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player != null) {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.stopped");
@@ -53,48 +89,66 @@ public class InputRecorder {
 
         RecordingFile file = new RecordingFile();
         file.setName(recordingName);
+        file.setHighPrecision(highPrecision);
+        file.setDurationTicks(totalTicks);
+        file.setDimension(dimension);
         file.setStartX(startX);
         file.setStartY(startY);
         file.setStartZ(startZ);
         file.setStartYaw(startYaw);
         file.setStartPitch(startPitch);
-        file.setDimension(dimension);
-        file.setFrames(new ArrayList<>(frames));
-        file.setHighPrecision(highPrecision);
+        file.setSegments(new ArrayList<>(segments));
+        if (highPrecision) {
+            file.setKeyframes(new ArrayList<>(keyframes));
+        }
         return file;
     }
 
     public void tick(MinecraftClient client) {
         if (!recording) return;
 
-        // Persistent action bar during recording
-        if (tickCounter % 40 == 0) { // refresh every ~2 seconds
-            MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.active");
-        }
-
-        // Frame skipping for low-precision mode
-        tickCounter++;
-        if (!highPrecision && tickCounter % frameSkip != 0) return;
-
         ClientPlayerEntity player = client.player;
         if (player == null || player.input == null) return;
 
-        RecordedFrame frame = new RecordedFrame(
-                player.input.movementForward,
-                player.input.movementSideways,
-                player.input.playerInput.jump(),
-                player.input.playerInput.sneak(),
-                player.input.playerInput.sprint(),
-                client.options.attackKey.isPressed(),
-                client.options.useKey.isPressed(),
-                MathHelper.wrapDegrees(player.getYaw()),
-                player.getPitch()
-        );
-        if (highPrecision) {
-            frame.posX = player.getX();
-            frame.posY = player.getY();
-            frame.posZ = player.getZ();
+        // Action bar refresh every ~2 seconds
+        actionBarCounter++;
+        if (actionBarCounter % 40 == 0) {
+            MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.active");
         }
-        frames.add(frame);
+
+        // Snapshot current input state
+        float fw = player.input.movementForward;
+        float sw = player.input.movementSideways;
+        boolean j = player.input.playerInput.jump();
+        boolean sn = player.input.playerInput.sneak();
+        boolean sp = player.input.playerInput.sprint();
+        boolean at = client.options.attackKey.isPressed();
+        boolean us = client.options.useKey.isPressed();
+        float y = MathHelper.wrapDegrees(player.getYaw());
+        float p = player.getPitch();
+
+        // RLE: if state unchanged, just increment the current segment's duration.
+        // If anything changed, finalize the old segment and allocate a new one.
+        // A new allocation is mandatory — reusing the old object would corrupt
+        // the segment already stored in the list (Java passes by reference).
+        if (hasCurrent && currentSegment.matches(fw, sw, j, sn, sp, y, p, at, us)) {
+            currentSegment.duration++;
+        } else {
+            // Finalize previous segment
+            if (hasCurrent) {
+                segments.add(currentSegment);
+            }
+            // Always create a new segment — never reuse, or we corrupt
+            // the segment just added to the list (Java passes by reference).
+            currentSegment = new RecordedSegment(1, fw, sw, j, sn, sp, y, p, at, us);
+            hasCurrent = true;
+        }
+
+        totalTicks++;
+
+        // HP: record keyframe every KEYFRAME_INTERVAL ticks
+        if (highPrecision && totalTicks % KEYFRAME_INTERVAL == 0) {
+            keyframes.add(new PositionKeyframe(totalTicks, player.getX(), player.getY(), player.getZ()));
+        }
     }
 }

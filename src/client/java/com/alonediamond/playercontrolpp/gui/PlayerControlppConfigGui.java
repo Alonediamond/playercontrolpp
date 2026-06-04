@@ -4,7 +4,6 @@ import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import fi.dy.masa.malilib.config.IConfigBase;
-import com.alonediamond.playercontrolpp.record.RecordingManager;
 import com.alonediamond.playercontrolpp.route.RouteManager;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase.ConfigOptionWrapper;
@@ -55,7 +54,9 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     public List<ConfigOptionWrapper> getConfigs() {
         switch (selectedTab) {
             case HOTKEYS:
-                return ConfigOptionWrapper.createFor(Configs.Hotkeys.HOTKEY_LIST);
+                List<IConfigBase> hotkeyItems = new ArrayList<>(Configs.Hotkeys.HOTKEY_LIST);
+                hotkeyItems.add(Configs.CacheNearbySettings.CONTAINER_WHITELIST);
+                return ConfigOptionWrapper.createFor(hotkeyItems);
             case ROUTE_HOTKEYS:
                 return ConfigOptionWrapper.createFor(
                         new ArrayList<>(RouteManager.getInstance().getRouteHotkeyList()));

@@ -51,11 +51,18 @@ public class Configs implements IConfigHandler {
                 KeybindSettings.PRESS_ALLOWEXTRA)
                 .apply("playercontrolpp.config.hotkeys");
 
+        public static final ConfigHotkey AUTO_CACHE_NEARBY_CONTAINERS = new ConfigHotkey(
+                "autoCacheNearbyContainers", "",
+                KeybindSettings.PRESS_ALLOWEXTRA)
+                .apply("playercontrolpp.config.hotkeys");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE, BARITONE_AUTO_GATHER);
+                OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE,
+                BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS);
 
         public static final List<IHotkey> HOTKEY_LIST = ImmutableList.of(
-                OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE, BARITONE_AUTO_GATHER);
+                OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE,
+                BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS);
     }
 
     public static class Settings {
@@ -111,6 +118,45 @@ public class Configs implements IConfigHandler {
                 ENABLE_GLOBAL_IGNORE, AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE, GLOBAL_IGNORE_LIST);
     }
 
+    public static class CacheNearbySettings {
+        public static final ConfigStringList CONTAINER_WHITELIST = new ConfigStringList(
+                "containerWhitelist", ImmutableList.of(
+                        "minecraft:chest",
+                        "minecraft:trapped_chest",
+                        "minecraft:ender_chest",
+                        "minecraft:barrel",
+                        "minecraft:hopper",
+                        "minecraft:dispenser",
+                        "minecraft:dropper",
+                        "minecraft:furnace",
+                        "minecraft:blast_furnace",
+                        "minecraft:smoker",
+                        "minecraft:brewing_stand",
+                        "minecraft:shulker_box",
+                        "minecraft:white_shulker_box",
+                        "minecraft:orange_shulker_box",
+                        "minecraft:magenta_shulker_box",
+                        "minecraft:light_blue_shulker_box",
+                        "minecraft:yellow_shulker_box",
+                        "minecraft:lime_shulker_box",
+                        "minecraft:pink_shulker_box",
+                        "minecraft:gray_shulker_box",
+                        "minecraft:light_gray_shulker_box",
+                        "minecraft:cyan_shulker_box",
+                        "minecraft:purple_shulker_box",
+                        "minecraft:blue_shulker_box",
+                        "minecraft:brown_shulker_box",
+                        "minecraft:green_shulker_box",
+                        "minecraft:red_shulker_box",
+                        "minecraft:black_shulker_box"
+                ),
+                "Block IDs of containers that can be auto-cached. Edit via the GUI button or click to open the list editor.")
+                .apply("playercontrolpp.config.cache_nearby");
+
+        public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
+                CONTAINER_WHITELIST);
+    }
+
     public static void loadFromFile() {
         Path configFile = FileUtils.getConfigDirectoryAsPath().resolve(CONFIG_FILE_NAME);
         if (Files.exists(configFile) && !Files.isDirectory(configFile)) {
@@ -119,6 +165,7 @@ public class Configs implements IConfigHandler {
                 JsonObject root = element.getAsJsonObject();
                 ConfigUtils.readConfigBase(root, "Settings", Settings.OPTIONS);
                 ConfigUtils.readConfigBase(root, "BaritoneSettings", BaritoneSettings.OPTIONS);
+                ConfigUtils.readConfigBase(root, "CacheNearbySettings", CacheNearbySettings.OPTIONS);
                 ConfigUtils.readHotkeys(root, "Hotkeys", Hotkeys.HOTKEY_LIST);
             }
         }
@@ -136,6 +183,7 @@ public class Configs implements IConfigHandler {
         root.addProperty("configVersion", CONFIG_VERSION);
         ConfigUtils.writeConfigBase(root, "Settings", Settings.OPTIONS);
         ConfigUtils.writeConfigBase(root, "BaritoneSettings", BaritoneSettings.OPTIONS);
+        ConfigUtils.writeConfigBase(root, "CacheNearbySettings", CacheNearbySettings.OPTIONS);
         ConfigUtils.writeHotkeys(root, "Hotkeys", Hotkeys.HOTKEY_LIST);
         JsonUtils.writeJsonToFile(root, configFile.toFile());
     }

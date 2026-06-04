@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.input;
 
+import com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature;
 import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.QuickTurnFeature;
@@ -14,6 +15,7 @@ import fi.dy.masa.malilib.hotkeys.KeyAction;
 import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.MinecraftClient;
 
+import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.AUTO_CACHE_NEARBY_CONTAINERS;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.AUTO_FORWARD;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.OPEN_CONFIG_GUI;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.QUICK_TURN;
@@ -28,6 +30,7 @@ public class KeybindCallbacks {
         QUICK_TURN.getKeybind().setCallback(new QuickTurnCallback());
         RECORDING_TOGGLE.getKeybind().setCallback(new RecordingToggleCallback());
         BARITONE_AUTO_GATHER.getKeybind().setCallback(new BaritoneAutoGatherCallback());
+        AUTO_CACHE_NEARBY_CONTAINERS.getKeybind().setCallback(new AutoCacheNearbyContainersCallback());
 
         // Register route hotkey callbacks
         for (RouteManager.RouteHotkey rh : RouteManager.getInstance().getRouteHotkeyList()) {
@@ -108,6 +111,17 @@ public class KeybindCallbacks {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return false;
             AutoMaterialGatherer.getInstance().toggle();
+            return true;
+        }
+    }
+
+    private static class AutoCacheNearbyContainersCallback implements IHotkeyCallback {
+        @Override
+        public boolean onKeyAction(KeyAction action, IKeybind key) {
+            if (action != KeyAction.PRESS) return false;
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null) return false;
+            AutoCacheNearbyContainersFeature.toggle(client);
             return true;
         }
     }
