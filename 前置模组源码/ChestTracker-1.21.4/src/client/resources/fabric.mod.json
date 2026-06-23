@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "id": "chesttracker",
+  "version": "${version}",
+  "name": "Chest Tracker",
+  "description": "Client-side storage management and searching.",
+  "authors": [
+    "JackFred"
+  ],
+  "contributors": [
+    "WinTone01 - Turkish Translations "
+  ],
+  "contact": {
+    "homepage": "https://modrinth.com/mod/chest-tracker",
+    "sources": "https://github.com/JackFred2/ChestTracker",
+    "issues": "https://github.com/JackFred2/ChestTracker/issues"
+  },
+  "license": "LGPL-3.0-only",
+  "icon": "assets/chesttracker/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "red.jackf.chesttracker.impl.ChestTracker"
+    ],
+    "chesttracker": [
+      "red.jackf.chesttracker.impl.DefaultChestTrackerPlugin"
+    ],
+    "modmenu": [
+      "red.jackf.chesttracker.impl.compat.mods.ChestTrackerModMenu"
+    ],
+    "whereisit_client": [
+      "red.jackf.chesttracker.impl.compat.mods.ChestTrackerWhereIsItPlugin"
+    ],
+    "shulkerboxtooltip": [
+      "red.jackf.chesttracker.impl.compat.mods.shulkerboxtooltip.ChestTrackerShulkerBoxTooltip"
+    ],
+    "jade": [
+      "red.jackf.chesttracker.impl.compat.mods.jade.ChestTrackerJadePlugin"
+    ]
+  },
+  "mixins": [
+    {
+      "config": "chesttracker.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "accessWidener": "chesttracker.accesswidener",
+  "custom": {
+    "modmenu": {
+      "links": {
+        "modmenu.curseforge": "https://www.curseforge.com/minecraft/mc-mods/chest-tracker",
+        "modmenu.github_releases": "https://github.com/JackFred2/ChestTracker/releases",
+        "modmenu.wiki": "https://docs.jackf.red/chest-tracker",
+        "modmenu.donate": "https://ko-fi.com/jackfred"
+      }
+    }
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": ">=1.21.2",
+    "java": ">=21",
+    "fabric-api": "*",
+    "yet_another_config_lib_v3": ">=3.6.0",
+    "whereisit": ">=2.6.1"
+  },
+  "recommends": {
+    "searchables": "*"
+  },
+  "suggests": {
+    "modmenu": "*",
+    "shulkerboxtooltip": "*",
+    "wthit": "*",
+    "jade": "*"
+  }
+}

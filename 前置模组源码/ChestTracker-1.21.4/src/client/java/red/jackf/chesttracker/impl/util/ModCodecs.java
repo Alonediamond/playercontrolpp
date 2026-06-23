@@ -1,0 +1,126 @@
+package red.jackf.chesttracker.impl.util;
+
+import com.mojang.datafixers.util.Either;
+import com.mojang.datafixers.util.Pair;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
+import com.mojang.serialization.Dynamic;
+import com.mojang.serialization.DynamicOps;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponentPatch;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.util.ExtraCodecs;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import red.jackf.jackfredlib.api.base.codecs.JFLCodecs;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Predicate;
+
+/**
+ * Codecs for classes that aren't ours
+ */
+public class ModCodecs {
+    /**
+     * Identical to {@link ItemStack#OPTIONAL_CODEC}, but will not enforce a max stack size of 99.
+     */
+    public static final Codec<ItemStack> OPTIONAL_ITEMSTACK_UNCAPPED_SIZE = ExtraCodecs.<ItemStack>optionalEmptyMap(Codec.lazyInitialized(
+            () -> RecordCodecBuilder.create(
+                    instance -> instance.group(
+                            Item.CODEC.fieldOf("id").forGetter(ItemStack::getItemHolder),
+                            ExtraCodecs.POSITIVE_INT.fieldOf("count").orElse(1).forGetter(ItemStack::getCount),
+                            DataComponentPatch.CODEC.optionalFieldOf("components", DataComponentPatch.EMPTY).forGetter(ItemStack::getComponentsPatch)
+                    ).apply(instance, ItemStack::new)
+            )
+    )).xmap(opt -> opt.orElse(ItemStack.EMPTY), stack -> stack.isEmpty() ? Optional.empty() : Optional.of(stack));
+
+    /**
+     * Short form block pos codec
+     */
+    public static final Codec<BlockPos> BLOCK_POS_STRING = Codec.STRING.comapFlatMap(
+            s -> {
+                String[] split = s.split(",");
+                if (split.length == 3) {
+                    try {
+                        int x = Integer.parseInt(split[0]);
+                        int y = Integer.parseInt(split[1]);
+                        int z = Integer.parseInt(split[2]);
+
+                        return DataResult.success(new BlockPos(x, y, z));
+                    } catch (NumberFormatException ex) {
+                        return DataResult.error(() -> "Invalid integer in key");
+                    }
+                } else {
+                    return DataResult.error(() -> "Invalid number of coordinates: " + split.length);
+                }
+            }, pos -> "%d,%d,%d".formatted(pos.getX(), pos.getY(), pos.getZ())
+    );
+
+    /**
+     * Compact codec for an ItemStack. Ignores the count on both serialization and deserialization. Deprecated.
+     */
+    public static final Codec<ItemStack> ITEM_STACK_IGNORE_COUNT = Codec.xor(
+            Codec.pair(
+                    BuiltInRegistries.ITEM.byNameCodec().fieldOf("id").codec(),
+                    DataComponentPatch.CODEC.fieldOf("patch").codec()
+            ),
+            BuiltInRegistries.ITEM.byNameCodec()
+    ).xmap(ModCodecs::decodeEitherItemStack, stack -> !stack.getComponentsPatch().isEmpty() ? Either.left(Pair.of(stack.getItem(), stack.getComponentsPatch())) : Either.right(stack.getItem()));
+
+    private static ItemStack decodeEitherItemStack(Either<Pair<Item, DataComponentPatch>, Item> either) {
+        if (either.left().isPresent()) {
+            var pair = either.left().get();
+            var stack = new ItemStack(pair.getFirst());
+            stack.applyComponents(pair.getSecond());
+            return stack;
+        } else {
+            return new ItemStack(either.right().orElseThrow());
+        }
+    }
+
+    /////////////
+    // METHODS //
+    /////////////
+
+    /**
+     * Creates a codec that can only decode into a single value.
+     * @param typeCodec Base codec to use
+     * @param value Value to allow
+     * @return Codec only allowing serialization to a given value
+     * @param <T> Type of serialized value
+     */
+    public static <T> Codec<T> singular(Codec<T> typeCodec, T value) {
+        return JFLCodecs.oneOf(typeCodec, Collections.singleton(value));
+    }
+
+    public static <T> Codec<Set<T>> set(Codec<T> base) {
+        return base.listOf().xmap(Set::copyOf, List::copyOf);
+    }
+
+    public static <T> Codec<T> predicate(Predicate<Dynamic<?>> decodingPredicate, Codec<T> base) {
+        return new Codec<>() {
+            @Override
+            public <A> DataResult<Pair<T, A>> decode(DynamicOps<A> ops, A input) {
+                Dynamic<A> dynamic = new Dynamic<>(ops, input);
+                if (decodingPredicate.test(dynamic)) {
+                    return base.decode(dynamic);
+                }
+                return DataResult.error(() -> "Did not match predicate: " + input);
+            }
+
+            @Override
+            public <A> DataResult<A> encode(T input, DynamicOps<A> ops, A prefix) {
+                return base.encode(input, ops, prefix);
+            }
+
+            @Override
+            public String toString() {
+                return "DecoderPredicateCodec[" + base + "]";
+            }
+        };
+    }
+}

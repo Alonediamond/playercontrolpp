@@ -34,6 +34,72 @@ public class LitematicaIntegration implements ModIntegration {
     public static void setShowActionBar(boolean show) { INSTANCE.showActionBar = show; }
 
     /**
+     * Check if any Litematica schematic placement is currently loaded.
+     */
+    public boolean isSchematicLoaded() {
+        try {
+            Class<?> dmClass = Class.forName("fi.dy.masa.litematica.data.DataManager");
+            // All DataManager methods are static — no getInstance()
+            Object spm = dmClass.getMethod("getSchematicPlacementManager").invoke(null);
+            if (spm == null) return false;
+            java.util.List<?> placements = getAllPlacementsViaReflection(spm);
+            return placements != null && !placements.isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Get the schematic world (WorldView) for querying schematic block states.
+     * Returns null if no schematic is loaded.
+     */
+    public Object getSchematicWorld() {
+        try {
+            Class<?> swhClass = Class.forName("fi.dy.masa.litematica.world.SchematicWorldHandler");
+            return swhClass.getMethod("getSchematicWorld").invoke(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Get all schematic placements. Returns the List of SchematicPlacement objects, or empty list on failure.
+     */
+    @SuppressWarnings("unchecked")
+    public java.util.List<?> getAllPlacements() {
+        try {
+            Class<?> dmClass = Class.forName("fi.dy.masa.litematica.data.DataManager");
+            Object spm = dmClass.getMethod("getSchematicPlacementManager").invoke(null);
+            if (spm == null) return java.util.Collections.emptyList();
+            return getAllPlacementsViaReflection(spm);
+        } catch (Exception e) {
+            return java.util.Collections.emptyList();
+        }
+    }
+
+    /**
+     * Try multiple known method names to get placement list from the placement manager.
+     */
+    @SuppressWarnings("unchecked")
+    private java.util.List<?> getAllPlacementsViaReflection(Object spm) {
+        String[] methodNames = {
+            "getAllSchematicPlacements",
+            "getAllSchematicsPlacements",
+            "getSchematicPlacements",
+            "getLoadedSchematicPlacements"
+        };
+        for (String name : methodNames) {
+            try {
+                Object result = spm.getClass().getMethod(name).invoke(spm);
+                if (result instanceof java.util.List) {
+                    return (java.util.List<?>) result;
+                }
+            } catch (Exception ignored) {}
+        }
+        return java.util.Collections.emptyList();
+    }
+
+    /**
      * Get Litematica's MaterialList via reflection.
      */
     public Object getMaterialList() {

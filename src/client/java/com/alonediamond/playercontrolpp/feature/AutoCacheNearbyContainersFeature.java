@@ -29,12 +29,13 @@ import java.util.Set;
  */
 public class AutoCacheNearbyContainersFeature {
 
-    /** 5-state tick-driven state machine for container caching. */
+    /** 6-state tick-driven state machine for container caching. */
     private enum State {
         SCANNING,               // Looking for uncached containers in range
         OPENING_CONTAINER,      // Sent interactBlock, waiting for GUI (up to 10 ticks)
         WAITING_AFTER_OPEN,     // GUI opened, wait 1 tick for ChestTracker to record
         CLOSING_GUI,            // Closed GUI, brief cooldown before next scan
+        COOLDOWN,               // Waiting configured delay ticks between containers
         AUTO_STOP_COUNTDOWN     // No uncached containers, counting down to auto-stop
     }
 
@@ -85,11 +86,9 @@ public class AutoCacheNearbyContainersFeature {
 
         // Respect other GUIs — only proceed if we own the current screen interaction
         if (mc.currentScreen != null) {
-            if (state == State.SCANNING || state == State.AUTO_STOP_COUNTDOWN) {
-                return;
-            }
-            // In our own states, only proceed if it's a HandledScreen
-            if (!(mc.currentScreen instanceof HandledScreen)) {
+            if (state == State.SCANNING || state == State.AUTO_STOP_COUNTDOWN || state == State.COOLDOWN) {
+                // Allow scanning/cooldown/countdown to continue (no screen interaction needed)
+            } else if (!(mc.currentScreen instanceof HandledScreen)) {
                 return;
             }
         }
@@ -99,6 +98,7 @@ public class AutoCacheNearbyContainersFeature {
             case OPENING_CONTAINER -> tickOpeningContainer(mc);
             case WAITING_AFTER_OPEN -> tickWaitingAfterOpen(mc);
             case CLOSING_GUI -> tickClosingGui(mc);
+            case COOLDOWN -> tickCooldown(mc);
             case AUTO_STOP_COUNTDOWN -> tickAutoStopCountdown(mc);
         }
     }
@@ -156,6 +156,19 @@ public class AutoCacheNearbyContainersFeature {
         stateTimer--;
         if (stateTimer <= 0) {
             currentTarget = null;
+            int delay = Configs.Settings.CACHE_DELAY.getIntegerValue();
+            if (delay > 0) {
+                state = State.COOLDOWN;
+                stateTimer = delay;
+            } else {
+                state = State.SCANNING;
+            }
+        }
+    }
+
+    private static void tickCooldown(MinecraftClient mc) {
+        stateTimer--;
+        if (stateTimer <= 0) {
             state = State.SCANNING;
         }
     }

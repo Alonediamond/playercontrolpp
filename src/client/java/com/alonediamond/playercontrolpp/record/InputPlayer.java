@@ -184,8 +184,8 @@ public class InputPlayer {
 
         if (state != State.PLAYING) return;
 
-        // HP: check keyframe position correction
-        if (recording.isHighPrecision() && keyframes != null && keyframeIndex < keyframes.size()) {
+        // HP: check keyframe position correction (always active)
+        if (keyframes != null && keyframeIndex < keyframes.size()) {
             PositionKeyframe kf = keyframes.get(keyframeIndex);
             if (totalTick >= kf.tick) {
                 double pdx = player.getX() - kf.x;

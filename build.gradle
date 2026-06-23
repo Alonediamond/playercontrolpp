@@ -35,8 +35,8 @@ dependencies {
 
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 
-    modImplementation files('../mods/malilib-fabric-1.21.4-0.23.5.jar')
-    modImplementation files('../mods/modmenu-13.0.3.jar')
+    modImplementation files('libs/malilib-fabric-1.21.4-0.23.5.jar')
+    modImplementation files('libs/modmenu-13.0.3.jar')
 }
 
 processResources {

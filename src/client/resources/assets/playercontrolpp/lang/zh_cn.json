@@ -18,6 +18,10 @@
   "playercontrolpp.config.settings.pretty_name.turnAngle": "转向角度",
   "playercontrolpp.config.settings.comment.turnAngle": "快速转向的角度（度）。",
 
+  "playercontrolpp.config.settings.name.cacheDelay": "缓存容器延迟",
+  "playercontrolpp.config.settings.pretty_name.cacheDelay": "缓存容器延迟",
+  "playercontrolpp.config.settings.comment.cacheDelay": "自动缓存时关闭当前容器后至打开下一个容器的间隔Ticks。范围：1-200，默认：1。",
+
   "playercontrolpp.config.settings.name.layerIncrement": "图层增量",
   "playercontrolpp.config.settings.pretty_name.layerIncrement": "图层增量",
   "playercontrolpp.config.settings.comment.layerIncrement": "每次路径循环完成后 Litematica 渲染层的增量。",
@@ -157,5 +161,27 @@
   "playercontrolpp.message.cache_nearby.off": "[PlayerControl++] 自动缓存附近容器：关",
   "playercontrolpp.message.cache_nearby.all_cached": "[PlayerControl++] 附近容器已缓存，3秒后自动关闭缓存功能",
   "playercontrolpp.message.cache_nearby.auto_stop": "[PlayerControl++] 自动缓存附近容器：已停止（附近容器已全部缓存）",
-  "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] 自动缓存附近容器：关（世界切换）"
+  "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] 自动缓存附近容器：关（世界切换）",
+
+  "playercontrolpp.config.hotkeys.name.waterFillToggle": "自动填水",
+  "playercontrolpp.config.hotkeys.pretty_name.waterFillToggle": "自动填水",
+  "playercontrolpp.config.hotkeys.comment.waterFillToggle": "切换自动为投影中需要含水的方块填水。",
+
+  "playercontrolpp.config.settings.name.waterFillScanRadius": "填水范围扫描半径",
+  "playercontrolpp.config.settings.pretty_name.waterFillScanRadius": "填水范围扫描半径",
+  "playercontrolpp.config.settings.comment.waterFillScanRadius": "扫描含水方块的半径（格）。使用时会被限制在玩家手长内。范围：0-5，默认：5。",
+
+  "playercontrolpp.config.settings.name.waterFillOperationDelay": "填水操作延迟",
+  "playercontrolpp.config.settings.pretty_name.waterFillOperationDelay": "填水操作延迟",
+  "playercontrolpp.config.settings.comment.waterFillOperationDelay": "两次填水操作之间的延迟Ticks。范围：1-200，默认：1。",
+
+  "playercontrolpp.message.water_fill.on": "[PlayerControl++] 自动填水：开",
+  "playercontrolpp.message.water_fill.off": "[PlayerControl++] 自动填水：关",
+  "playercontrolpp.message.water_fill.no_schematic": "[PlayerControl++] 未加载 Litematica 投影蓝图。自动填水已停止。",
+  "playercontrolpp.message.water_fill.no_bucket": "[PlayerControl++] 快捷栏和物品栏中均无水桶。自动填水已停止。",
+  "playercontrolpp.message.water_fill.completed": "[PlayerControl++] 范围内需要填水的方块已完成。自动填水已停止。",
+  "playercontrolpp.message.water_fill.sneaking": "[PlayerControl++] 自动填水已暂停（玩家正处于潜行状态）。",
+  "playercontrolpp.message.water_fill.world_change": "[PlayerControl++] 自动填水：关（世界切换）",
+
+  "playercontrolpp.message.recording.corrupt": "[PlayerControl++] 录制文件已损坏，无法加载。"
 }

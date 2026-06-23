@@ -25,8 +25,6 @@ public class RecordingListGui extends Screen {
     private static final int ITEM_H = 20;
     private static final int ROW_H = 24;
 
-    private static boolean highPrecision; // persistent across GUI opens
-
     private final Screen parent;
     private RecordingFile selectedRecording;
     private int leftScroll;
@@ -66,8 +64,7 @@ public class RecordingListGui extends Screen {
                     } else {
                         if (RecordingManager.getInstance().getPlayer().isPlaying()) return;
                         rec.startRecording(
-                                StringUtils.translate("playercontrolpp.gui.recording.new_recording"),
-                                highPrecision);
+                                StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
                         MinecraftClient.getInstance().setScreen(null); // exit all GUIs
                     }
                 })
@@ -153,14 +150,6 @@ public class RecordingListGui extends Screen {
                 Text.of(StringUtils.translate("playercontrolpp.gui.recording.title")),
                 this.width / 2, 12, 0xFFFFFFFF);
 
-        // HP warning below title (bold red)
-        if (highPrecision) {
-            String warn = StringUtils.translate("playercontrolpp.gui.recording.hp_warn");
-            int warnW = textRenderer.getWidth(warn);
-            context.drawTextWithShadow(textRenderer, Text.of(warn),
-                    this.width / 2 - warnW / 2, 24, 0xFFFF5555);
-        }
-
         // --- Left panel ---
         List<RecordingFile> recs = RecordingManager.getInstance().getRecordings();
         int listTop = TOP + 30;
@@ -176,7 +165,7 @@ public class RecordingListGui extends Screen {
             int bg = isSel ? 0x40FFFFFF : 0x0;
             int color = isSel ? 0xFF55FF55 : 0xFFCCCCCC;
             context.fill(LEFT_X + 1, y, LEFT_X + LEFT_W - 1, y + ITEM_H - 1, bg);
-            String text = rf.getName() + (rf.isHighPrecision() ? " [HP]" : "");
+            String text = rf.getName();
             context.drawTextWithShadow(textRenderer, Text.of(text), LEFT_X + 4, y + 5, color);
         }
 
@@ -187,7 +176,6 @@ public class RecordingListGui extends Screen {
         int statusColor = 0xFF55FFFF;
         if (recorder.isRecording()) {
             status = StringUtils.translate("playercontrolpp.gui.recording.recording");
-            if (recorder.isHighPrecision()) status += " [HP]";
         } else if (RecordingManager.getInstance().getPlayer().isPlaying()) {
             status = StringUtils.translate("playercontrolpp.gui.recording.playing");
         } else {
@@ -195,15 +183,6 @@ public class RecordingListGui extends Screen {
             statusColor = 0xFF888888;
         }
         context.drawTextWithShadow(textRenderer, Text.of(status), RIGHT_X + 4, TOP + 4, statusColor);
-
-        // HP toggle button (Litematica-style, always visible, top-right)
-        String hpLabel = highPrecision
-                ? StringUtils.translate("playercontrolpp.gui.recording.hp_on")
-                : StringUtils.translate("playercontrolpp.gui.recording.hp_off");
-        int hpColor = highPrecision ? 0xFFFFFF55 : 0xFF888888;
-        int hpW = textRenderer.getWidth(hpLabel);
-        int hpX = this.width - hpW - 14;
-        context.drawTextWithShadow(textRenderer, Text.of(hpLabel), hpX, TOP + 4, hpColor);
 
         // Hide Play/Stop when nothing selected
         if (selectedRecording == null) {
@@ -234,7 +213,6 @@ public class RecordingListGui extends Screen {
         int durationSecs = selectedRecording.getDurationTicks() / 20;
         String info = StringUtils.translate("playercontrolpp.gui.recording.frames") + ": " +
                 durationSecs + "s  (" + selectedRecording.getDurationTicks() + " ticks)";
-        if (selectedRecording.isHighPrecision()) info += "  [HP]";
         context.drawTextWithShadow(textRenderer, Text.of(info), RIGHT_X + 4, ry + 4, 0xFFCCCCCC);
         ry += ROW_H;
 
@@ -273,17 +251,6 @@ public class RecordingListGui extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // HP toggle click
-        String hpLabel = highPrecision
-                ? StringUtils.translate("playercontrolpp.gui.recording.hp_on")
-                : StringUtils.translate("playercontrolpp.gui.recording.hp_off");
-        int hpW = textRenderer.getWidth(hpLabel);
-        int hpX = this.width - hpW - 14;
-        if (mouseX >= hpX && mouseY >= TOP + 4 && mouseY <= TOP + 18) {
-            highPrecision = !highPrecision;
-            return true;
-        }
-
         // Left panel clicks
         List<RecordingFile> recs = RecordingManager.getInstance().getRecordings();
         int listTop = TOP + 30;

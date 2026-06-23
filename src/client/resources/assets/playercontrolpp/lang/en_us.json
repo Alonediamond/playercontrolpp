@@ -18,6 +18,10 @@
   "playercontrolpp.config.settings.pretty_name.turnAngle": "Turn Angle",
   "playercontrolpp.config.settings.comment.turnAngle": "Turn angle in degrees for Quick Turn.",
 
+  "playercontrolpp.config.settings.name.cacheDelay": "Cache Container Delay",
+  "playercontrolpp.config.settings.pretty_name.cacheDelay": "Cache Container Delay",
+  "playercontrolpp.config.settings.comment.cacheDelay": "Delay in ticks between closing one container and opening the next during auto-caching. Range: 1-200, default: 1.",
+
   "playercontrolpp.config.settings.name.layerIncrement": "Layer Increment",
   "playercontrolpp.config.settings.pretty_name.layerIncrement": "Layer Increment",
   "playercontrolpp.config.settings.comment.layerIncrement": "Litematica render layer increment amount after each route cycle.",
@@ -157,5 +161,27 @@
   "playercontrolpp.message.cache_nearby.off": "[PlayerControl++] Auto Cache Nearby Containers: OFF",
   "playercontrolpp.message.cache_nearby.all_cached": "[PlayerControl++] All nearby containers cached. Stopping in 3 seconds...",
   "playercontrolpp.message.cache_nearby.auto_stop": "[PlayerControl++] Auto Cache Nearby Containers: Stopped (all nearby containers cached)",
-  "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] Auto Cache Nearby Containers: OFF (world changed)"
+  "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] Auto Cache Nearby Containers: OFF (world changed)",
+
+  "playercontrolpp.config.hotkeys.name.waterFillToggle": "Auto Water Fill",
+  "playercontrolpp.config.hotkeys.pretty_name.waterFillToggle": "Auto Water Fill",
+  "playercontrolpp.config.hotkeys.comment.waterFillToggle": "Toggle auto water filling for waterloggable blocks in Litematica schematics.",
+
+  "playercontrolpp.config.settings.name.waterFillScanRadius": "Water Fill Scan Radius",
+  "playercontrolpp.config.settings.pretty_name.waterFillScanRadius": "Water Fill Scan Radius",
+  "playercontrolpp.config.settings.comment.waterFillScanRadius": "Scan radius in blocks for finding waterloggable blocks. Clamped to player reach distance. Range: 0-5, default: 5.",
+
+  "playercontrolpp.config.settings.name.waterFillOperationDelay": "Water Fill Operation Delay",
+  "playercontrolpp.config.settings.pretty_name.waterFillOperationDelay": "Water Fill Operation Delay",
+  "playercontrolpp.config.settings.comment.waterFillOperationDelay": "Delay in ticks between water fill operations. Range: 1-200, default: 1.",
+
+  "playercontrolpp.message.water_fill.on": "[PlayerControl++] Auto Water Fill: ON",
+  "playercontrolpp.message.water_fill.off": "[PlayerControl++] Auto Water Fill: OFF",
+  "playercontrolpp.message.water_fill.no_schematic": "[PlayerControl++] No Litematica schematic loaded. Auto Water Fill stopped.",
+  "playercontrolpp.message.water_fill.no_bucket": "[PlayerControl++] No water bucket found in inventory. Auto Water Fill stopped.",
+  "playercontrolpp.message.water_fill.completed": "[PlayerControl++] All waterloggable blocks filled. Auto Water Fill stopped.",
+  "playercontrolpp.message.water_fill.sneaking": "[PlayerControl++] Auto Water Fill paused (player sneaking).",
+  "playercontrolpp.message.water_fill.world_change": "[PlayerControl++] Auto Water Fill: OFF (world changed)",
+
+  "playercontrolpp.message.recording.corrupt": "[PlayerControl++] Recording file is corrupt or damaged and cannot be loaded."
 }

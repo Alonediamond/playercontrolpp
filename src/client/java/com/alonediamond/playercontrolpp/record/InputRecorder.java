@@ -14,16 +14,17 @@ import java.util.List;
  * identical consecutive ticks merge into a single RecordedSegment with a
  * duration counter. A new segment is created only when any input field changes.
  *
- * HP mode additionally records PositionKeyframes every 20 ticks for
- * position-drift correction during playback.
+ * Position keyframes are recorded every 20 ticks for position-drift correction
+ * during playback.
+ *
+ * Segments are stored in a chunked RingBuffer (pre-allocated in blocks of
+ * CHUNK_SIZE) to reduce GC pressure during long recordings.
  */
 public class InputRecorder {
 
-    /** HP mode: record a position keyframe every 20 ticks (1 second). */
-    private static final int KEYFRAME_INTERVAL = 20;
+    private static final int CHUNK_SIZE = 1024;
 
     private boolean recording;
-    private boolean highPrecision;
     private int totalTicks;
 
     // Recording metadata
@@ -34,29 +35,32 @@ public class InputRecorder {
 
     // RLE compression: current pending segment gets duration++ on match,
     // new segment allocated on state change (never reused to avoid aliasing)
-    private final List<RecordedSegment> segments = new ArrayList<>();
+    private final List<RecordedSegment[]> chunks = new ArrayList<>();
+    private int segmentCount;
     private RecordedSegment currentSegment;
     private boolean hasCurrent;
 
-    // HP position keyframes (one every KEYFRAME_INTERVAL ticks)
+    // Position keyframes (one every 20 ticks)
     private final List<PositionKeyframe> keyframes = new ArrayList<>();
 
     private int actionBarCounter;
 
     public boolean isRecording() { return recording; }
-    public boolean isHighPrecision() { return highPrecision; }
 
-    public void startRecording(String name, boolean highPrecision) {
+    /** Always returns true — all recordings are now precision mode. */
+    public boolean isHighPrecision() { return true; }
+
+    public void startRecording(String name) {
         MinecraftClient client = MinecraftClient.getInstance();
         ClientPlayerEntity player = client.player;
         if (player == null) return;
 
         this.recordingName = name;
-        this.highPrecision = highPrecision;
         this.totalTicks = 0;
         this.actionBarCounter = 0;
 
-        this.segments.clear();
+        this.chunks.clear();
+        this.segmentCount = 0;
         this.keyframes.clear();
         this.currentSegment = null;
         this.hasCurrent = false;
@@ -77,7 +81,7 @@ public class InputRecorder {
 
         // Finalize last segment
         if (hasCurrent) {
-            segments.add(currentSegment);
+            addSegment(currentSegment);
             hasCurrent = false;
             currentSegment = null;
         }
@@ -89,7 +93,6 @@ public class InputRecorder {
 
         RecordingFile file = new RecordingFile();
         file.setName(recordingName);
-        file.setHighPrecision(highPrecision);
         file.setDurationTicks(totalTicks);
         file.setDimension(dimension);
         file.setStartX(startX);
@@ -97,10 +100,8 @@ public class InputRecorder {
         file.setStartZ(startZ);
         file.setStartYaw(startYaw);
         file.setStartPitch(startPitch);
-        file.setSegments(new ArrayList<>(segments));
-        if (highPrecision) {
-            file.setKeyframes(new ArrayList<>(keyframes));
-        }
+        file.setSegments(getSegmentList());
+        file.setKeyframes(new ArrayList<>(keyframes));
         return file;
     }
 
@@ -136,7 +137,7 @@ public class InputRecorder {
         } else {
             // Finalize previous segment
             if (hasCurrent) {
-                segments.add(currentSegment);
+                addSegment(currentSegment);
             }
             // Always create a new segment — never reuse, or we corrupt
             // the segment just added to the list (Java passes by reference).
@@ -146,9 +147,35 @@ public class InputRecorder {
 
         totalTicks++;
 
-        // HP: record keyframe every KEYFRAME_INTERVAL ticks
-        if (highPrecision && totalTicks % KEYFRAME_INTERVAL == 0) {
+        // Record keyframe every 20 ticks
+        if (totalTicks % 20 == 0) {
             keyframes.add(new PositionKeyframe(totalTicks, player.getX(), player.getY(), player.getZ()));
         }
+    }
+
+    // --- Chunked segment storage (append-only, never loses data) ---
+
+    /** Add a finalized segment to the chunked storage. */
+    private void addSegment(RecordedSegment seg) {
+        int chunkIndex = segmentCount / CHUNK_SIZE;
+        int slot = segmentCount % CHUNK_SIZE;
+        while (chunkIndex >= chunks.size()) {
+            chunks.add(new RecordedSegment[CHUNK_SIZE]);
+        }
+        chunks.get(chunkIndex)[slot] = seg;
+        segmentCount++;
+    }
+
+    /** Flatten all chunks into a single ordered list. */
+    public List<RecordedSegment> getSegmentList() {
+        List<RecordedSegment> result = new ArrayList<>(segmentCount);
+        for (int i = 0; i < chunks.size(); i++) {
+            RecordedSegment[] chunk = chunks.get(i);
+            int limit = (i == chunks.size() - 1) ? (segmentCount % CHUNK_SIZE == 0 ? CHUNK_SIZE : segmentCount % CHUNK_SIZE) : CHUNK_SIZE;
+            for (int j = 0; j < limit; j++) {
+                result.add(chunk[j]);
+            }
+        }
+        return result;
     }
 }

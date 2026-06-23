@@ -3,6 +3,7 @@ package com.alonediamond.playercontrolpp.input;
 import com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature;
 import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.AutoWaterFillFeature;
 import com.alonediamond.playercontrolpp.feature.QuickTurnFeature;
 import com.alonediamond.playercontrolpp.gui.PlayerControlppConfigGui;
 import com.alonediamond.playercontrolpp.record.InputRecorder;
@@ -20,6 +21,7 @@ import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.AUTO_FORWA
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.OPEN_CONFIG_GUI;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.QUICK_TURN;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.RECORDING_TOGGLE;
+import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.WATER_FILL_TOGGLE;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.BARITONE_AUTO_GATHER;
 
 public class KeybindCallbacks {
@@ -31,6 +33,7 @@ public class KeybindCallbacks {
         RECORDING_TOGGLE.getKeybind().setCallback(new RecordingToggleCallback());
         BARITONE_AUTO_GATHER.getKeybind().setCallback(new BaritoneAutoGatherCallback());
         AUTO_CACHE_NEARBY_CONTAINERS.getKeybind().setCallback(new AutoCacheNearbyContainersCallback());
+        WATER_FILL_TOGGLE.getKeybind().setCallback(new WaterFillToggleCallback());
 
         // Register route hotkey callbacks
         for (RouteManager.RouteHotkey rh : RouteManager.getInstance().getRouteHotkeyList()) {
@@ -97,7 +100,7 @@ public class KeybindCallbacks {
             } else {
                 // Prevent recording during playback
                 if (RecordingManager.getInstance().getPlayer().isPlaying()) return false;
-                rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"), false);
+                rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
                 client.setScreen(null); // exit all GUIs
             }
             return true;
@@ -122,6 +125,17 @@ public class KeybindCallbacks {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return false;
             AutoCacheNearbyContainersFeature.toggle(client);
+            return true;
+        }
+    }
+
+    private static class WaterFillToggleCallback implements IHotkeyCallback {
+        @Override
+        public boolean onKeyAction(KeyAction action, IKeybind key) {
+            if (action != KeyAction.PRESS) return false;
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null) return false;
+            AutoWaterFillFeature.toggle(client);
             return true;
         }
     }

@@ -1,20 +1,23 @@
 package com.alonediamond.playercontrolpp.record;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
+import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.NbtSizeTracker;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Recording data model. Index metadata (id, name, highPrecision, durationTicks, dimension)
- * is stored in index.json and always loaded. Segments and keyframes are stored in individual
- * recording files and only loaded on demand for playback.
+ * Recording data model. Index metadata (id, name, durationTicks, dimension)
+ * is stored in index.json and always loaded. Segments and keyframes are stored
+ * in individual .pcr files (NBT binary) and only loaded on demand for playback.
  */
 public class RecordingFile {
     private String id;
     private String name;
-    private boolean highPrecision;
     private int durationTicks;
     private String dimension;
     private double startX, startY, startZ;
@@ -34,9 +37,6 @@ public class RecordingFile {
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
-
-    public boolean isHighPrecision() { return highPrecision; }
-    public void setHighPrecision(boolean v) { highPrecision = v; }
 
     public int getDurationTicks() { return durationTicks; }
     public void setDurationTicks(int v) { durationTicks = v; }
@@ -65,74 +65,58 @@ public class RecordingFile {
     /** Number of segments (RLE-compressed units). */
     public int getSegmentCount() { return segments.size(); }
 
-    // --- Index JSON (lightweight, for index.json) ---
+    // --- NBT binary I/O (for individual .pcr files) ---
 
-    public JsonObject toIndexJson() {
-        JsonObject obj = new JsonObject();
-        obj.addProperty("id", id);
-        obj.addProperty("name", name);
-        obj.addProperty("highPrecision", highPrecision);
-        obj.addProperty("durationTicks", durationTicks);
-        obj.addProperty("dimension", dimension);
-        return obj;
-    }
+    /** Write full recording to NBT file. */
+    public void writeToFile(Path path) throws IOException {
+        NbtCompound root = new NbtCompound();
+        root.putString("name", name);
+        root.putInt("durationTicks", durationTicks);
+        root.putString("dimension", dimension);
+        root.putDouble("startX", startX);
+        root.putDouble("startY", startY);
+        root.putDouble("startZ", startZ);
+        root.putFloat("startYaw", startYaw);
+        root.putFloat("startPitch", startPitch);
 
-    public static RecordingFile fromIndexJson(JsonObject obj) {
-        RecordingFile rf = new RecordingFile();
-        if (obj.has("id")) rf.setId(obj.get("id").getAsString());
-        if (obj.has("name")) rf.setName(obj.get("name").getAsString());
-        if (obj.has("highPrecision")) rf.setHighPrecision(obj.get("highPrecision").getAsBoolean());
-        if (obj.has("durationTicks")) rf.setDurationTicks(obj.get("durationTicks").getAsInt());
-        if (obj.has("dimension")) rf.setDimension(obj.get("dimension").getAsString());
-        return rf;
-    }
-
-    // --- Full JSON (for individual recording files) ---
-
-    public JsonObject toFullJson() {
-        JsonObject obj = toIndexJson();
-        obj.addProperty("startX", startX);
-        obj.addProperty("startY", startY);
-        obj.addProperty("startZ", startZ);
-        obj.addProperty("startYaw", startYaw);
-        obj.addProperty("startPitch", startPitch);
-
-        JsonArray segArr = new JsonArray();
+        NbtList segList = new NbtList();
         for (RecordedSegment seg : segments) {
-            segArr.add(seg.toJson());
+            segList.add(seg.toNbt());
         }
-        obj.add("segments", segArr);
+        root.put("segments", segList);
 
-        if (highPrecision && !keyframes.isEmpty()) {
-            JsonArray kfArr = new JsonArray();
-            for (PositionKeyframe kf : keyframes) {
-                kfArr.add(kf.toJson());
-            }
-            obj.add("keyframes", kfArr);
+        NbtList kfList = new NbtList();
+        for (PositionKeyframe kf : keyframes) {
+            kfList.add(kf.toNbt());
         }
-        return obj;
+        root.put("keyframes", kfList);
+
+        NbtIo.writeCompressed(root, path);
     }
 
-    public static RecordingFile fromFullJson(JsonObject obj) {
-        RecordingFile rf = fromIndexJson(obj);
-        if (obj.has("startX")) rf.setStartX(obj.get("startX").getAsDouble());
-        if (obj.has("startY")) rf.setStartY(obj.get("startY").getAsDouble());
-        if (obj.has("startZ")) rf.setStartZ(obj.get("startZ").getAsDouble());
-        if (obj.has("startYaw")) rf.setStartYaw(obj.get("startYaw").getAsFloat());
-        if (obj.has("startPitch")) rf.setStartPitch(obj.get("startPitch").getAsFloat());
+    /** Read full recording from NBT file. */
+    public static RecordingFile readFromFile(Path path) throws IOException {
+        NbtCompound root = NbtIo.readCompressed(path, NbtSizeTracker.ofUnlimitedBytes());
+        RecordingFile rf = new RecordingFile();
+        rf.name = root.getString("name");
+        rf.durationTicks = root.getInt("durationTicks");
+        rf.dimension = root.getString("dimension");
+        rf.startX = root.getDouble("startX");
+        rf.startY = root.getDouble("startY");
+        rf.startZ = root.getDouble("startZ");
+        rf.startYaw = root.getFloat("startYaw");
+        rf.startPitch = root.getFloat("startPitch");
 
-        if (obj.has("segments")) {
-            JsonArray arr = obj.getAsJsonArray("segments");
-            for (int i = 0; i < arr.size(); i++) {
-                rf.segments.add(RecordedSegment.fromJson(arr.get(i).getAsJsonObject()));
-            }
+        NbtList segList = root.getList("segments", 10); // 10 = NbtCompound type
+        for (int i = 0; i < segList.size(); i++) {
+            rf.segments.add(RecordedSegment.fromNbt(segList.getCompound(i)));
         }
-        if (obj.has("keyframes")) {
-            JsonArray arr = obj.getAsJsonArray("keyframes");
-            for (int i = 0; i < arr.size(); i++) {
-                rf.keyframes.add(PositionKeyframe.fromJson(arr.get(i).getAsJsonObject()));
-            }
+
+        NbtList kfList = root.getList("keyframes", 10);
+        for (int i = 0; i < kfList.size(); i++) {
+            rf.keyframes.add(PositionKeyframe.fromNbt(kfList.getCompound(i)));
         }
+
         return rf;
     }
 }
