@@ -2,7 +2,7 @@
 
 PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构建 **5 个** Minecraft 版本的模组 jar。
 
-模组功能与设计说明详见仓库根目录上一层的 `PlayerControl++模组详细介绍.md`。
+模组功能与设计说明详见 [PlayerControl++模组详细介绍.md](PlayerControl++模组详细介绍.md)。
 
 ## 支持的版本
 
