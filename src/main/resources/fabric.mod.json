@@ -4,30 +4,47 @@
   "version": "${version}",
 
   "name": "${name}",
-  "description": "Template for my fabric mods",
+  "description": "A lightweight client-side mod that enhances player controls with auto-forward, quick-turn, route flow, input recording and Litematica/Baritone automation.",
   "authors": [
-    "Fallen_Breath"
+    "Alonediamond"
   ],
   "contact": {
-    "homepage": "https://modrinth.com",
-    "sources": "https://github.com/Fallen-Breath/fabric-mod-template"
+    "sources": "https://github.com/Alonediamond/playercontrolpp"
   },
-  "license": "LGPL-3.0",
+  "license": "MIT",
 
-  "icon": "icon.png",
+  "icon": "assets/playercontrolpp/icon.png",
 
-  "environment": "*",
+  "environment": "client",
   "entrypoints": {
     "main": [
-      "me.fallenbreath.template_mod.TemplateMod"
+      "com.alonediamond.playercontrolpp.Playercontrolpp"
+    ],
+    "client": [
+      "com.alonediamond.playercontrolpp.client.PlayercontrolppClient"
+    ],
+    "modmenu": [
+      "com.alonediamond.playercontrolpp.gui.ModMenuIntegration"
     ]
   },
   "mixins": [
-    "template_mod.mixins.json"
+    {
+      "config": "playercontrolpp.mixins.json",
+      "environment": "client"
+    }
   ],
 
   "depends": {
-    "fabricloader": ">=0.11.4",
-    "minecraft": "${minecraft_dependency}"
+    "fabricloader": ">=0.19.3",
+    "minecraft": "${minecraft_dependency}",
+    "fabric-api": "*",
+    "malilib": "${malilib_dependency}"
+  },
+  "suggests": {
+    "modmenu": "${modmenu_dependency}",
+    "baritone": "*",
+    "litematica": "*",
+    "chesttracker": "*",
+    "quickshulker": "*"
   }
 }

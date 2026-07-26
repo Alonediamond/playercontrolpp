@@ -31,3 +31,6 @@ bin/
 # fabric
 
 run/
+
+# NOTE: libs/ is intentionally NOT ignored — the malilib / ModMenu jars for every
+# supported Minecraft version are committed so the project builds after a plain clone.
