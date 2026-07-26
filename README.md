@@ -34,11 +34,11 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 
 ```
 build/libs/
-├── PlayerControlpp-v1.4-mc1.21.1-SNAPSHOT.jar
-├── PlayerControlpp-v1.4-mc1.21.4-SNAPSHOT.jar
-├── PlayerControlpp-v1.4-mc1.21.11-SNAPSHOT.jar
-├── PlayerControlpp-v1.4-mc26.1.2-SNAPSHOT.jar
-└── PlayerControlpp-v1.4-mc26.2-SNAPSHOT.jar
+├── PlayerControlpp-v1.5-mc1.21.1-SNAPSHOT.jar
+├── PlayerControlpp-v1.5-mc1.21.4-SNAPSHOT.jar
+├── PlayerControlpp-v1.5-mc1.21.11-SNAPSHOT.jar
+├── PlayerControlpp-v1.5-mc26.1.2-SNAPSHOT.jar
+└── PlayerControlpp-v1.5-mc26.2-SNAPSHOT.jar
 ```
 
 设置环境变量 `BUILD_RELEASE=true` 可去掉 `-SNAPSHOT` 后缀。
@@ -51,17 +51,37 @@ build/libs/
 ├── common.gradle              # 所有子项目共用的构建逻辑
 ├── gradle.properties          # 模组元信息（mod_id / mod_version / …）
 ├── libs/                      # 各版本的 malilib + ModMenu jar（已提交，克隆后可直接构建）
+├── tools/MakeIcon.java        # 生成 assets/playercontrolpp/icon.png，可改配色/构图后重跑
 ├── versions/
 │   ├── mainProject            # 内容为 "26.2"
 │   └── <mc>/gradle.properties # 该版本的 MC 版本号、依赖版本、jar 文件名
 └── src/main/
     ├── java/com/alonediamond/playercontrolpp/
     │   ├── compat/            # ★ 跨版本兼容层，见下节
+    │   ├── input/SimulatedInput.java   # ★ 模拟按键的唯一写入点
+    │   ├── feature/ClientFeature.java  # ★ 功能生命周期接口 + FeatureRegistry
     │   └── …                  # 其余为与版本无关的业务代码
     └── resources/
         ├── fabric.mod.json    # 用 ${…} 占位符，由 processResources 按版本填充
         └── playercontrolpp.mixins.json
 ```
+
+重新生成图标：
+
+```bash
+javac -d /tmp/icon tools/MakeIcon.java
+java -cp /tmp/icon MakeIcon src/main/resources/assets/playercontrolpp/icon.png
+```
+
+## 改动这份代码时要知道的两件事
+
+1. **不要直接调用 `KeyMapping.setDown()`。** 所有模拟按键都经
+   `input/SimulatedInput`：功能只声明 `hold(key, owner)` / `release(key, owner)`，
+   每 tick 末尾由 `apply()` 统一落地。这样多个功能同时想按同一个键时不会互相踩踏，
+   功能中止时 `releaseAll(owner)` 一行就能保证不留卡键。
+2. **新增功能实现 `ClientFeature` 并在 `InitHandler.registerFeatures()` 注册**，
+   不要往 `ClientEventHandler` 里加 tick 调用。注册顺序即 tick 顺序，
+   世界切换的清理由注册表统一广播。
 
 ## 跨版本兼容层 `compat/`
 
@@ -80,6 +100,10 @@ build/libs/
 | `InventoryCompat` | `Inventory.selected` 字段 → `getSelectedSlot()` / `setSelectedSlot()` | 1.21.5 |
 | `InputCompat` | `Input.jumping` / `shiftKeyDown` 字段 → `input.keyPresses` (`PlayerInput` record) | 1.21.2 |
 | `MaLiLibCompat` | malilib `JsonUtils` 移包到 `util.data.json` | 1.21.11 (malilib 0.27) |
+
+兼容层没有覆盖、也不需要覆盖的一处：`Inventory.SELECTION_SIZE`（快捷栏大小）
+从 1.21.4 起才存在，1.21.1 没有，所以用自有常量 `PlayerUtil.HOTBAR_SIZE`；
+`Inventory.INVENTORY_SIZE` 五个版本都有，直接用官方常量。
 
 另外三处差异直接写在业务代码里（因为要拆分方法签名，无法藏进工具类）：
 
