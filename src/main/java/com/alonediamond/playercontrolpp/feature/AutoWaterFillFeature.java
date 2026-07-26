@@ -239,6 +239,11 @@ public class AutoWaterFillFeature {
             return;
         }
 
+        // Count the attempt before making it, not after it succeeds. The countdown state resets
+        // its own timer whenever it re-finds a target, so an attempt that keeps failing would
+        // otherwise ping-pong between the two states forever, spamming the action bar.
+        shulkerAttempts++;
+
         // QuickShulker addresses slots by container-screen index, not inventory index.
         int screenSlot = shulkerSlot < PlayerUtil.HOTBAR_SIZE
                 ? InventoryMenu.USE_ROW_SLOT_START + shulkerSlot
@@ -248,7 +253,6 @@ public class AutoWaterFillFeature {
             beginAutoStopCountdown();
             return;
         }
-        shulkerAttempts++;
         stateTimer = SHULKER_OPEN_WAIT_TICKS;
         state = State.SHULKERING;
     }
