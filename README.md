@@ -144,4 +144,9 @@ this.delegate.text(font, text, x, y, color, shadow);     // 生效分支：正�
 
 ## License
 
-模组代码 MIT，作者 Alonediamond。
+模组代码 MIT，作者 Alonediamond，见 [LICENSE](LICENSE)。
+
+> 构建脚本（`build.gradle` / `common.gradle` / `versions/` / `.github/`）源自
+> Fallen_Breath 的 fabric-mod-template，其原始仓库以 LGPL-3.0 发布。
+> 本仓库的 `LICENSE` 是模组自身代码的 MIT 授权；若需要严格区分脚手架部分的授权，
+> 请参考上游仓库的许可条款。
