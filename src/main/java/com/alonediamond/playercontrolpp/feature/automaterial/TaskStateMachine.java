@@ -4,11 +4,16 @@ import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 
 /**
- * Drives the 11-state task machine for auto material gathering.
- * Orchestrates calls to the specialized modules based on the current state.
- * Also manages the ShulkerBoxStorage sub-system for auto-storing when inventory is full.
+ * Drives the auto-gathering state machine, dispatching each state to the module that owns it and
+ * running the ShulkerBoxStorage sub-machine when the inventory fills up.
  */
 public class TaskStateMachine {
+
+    /**
+     * Ticks to wait after shulker storage finishes, so the server's inventory update has arrived
+     * before we count what is actually held.
+     */
+    private static final int STORAGE_SYNC_TICKS = 15;
 
     private final GatherContext ctx;
     private final MaterialAnalyzer materialAnalyzer;
@@ -18,10 +23,11 @@ public class TaskStateMachine {
     private final ItemTransferExecutor transferExecutor;
     private final ShulkerBoxStorage shulkerStorage;
 
-    // When true, the next tick(s) will process the post-storage sync-and-verify
+    /** True while the post-storage sync-and-verify is pending. */
     private boolean pendingStorageDone;
-    // Ticks to wait after shulker storage DONE for server-to-client inventory NBT sync
     private int storageSyncTicks;
+    /** Fallback when a FAILED transition does not say why. */
+    private static final String DEFAULT_FAILURE_KEY = "playercontrolpp.message.baritone.pathing_stuck";
 
     public TaskStateMachine(GatherContext ctx,
                             MaterialAnalyzer materialAnalyzer,
@@ -40,6 +46,16 @@ public class TaskStateMachine {
     }
 
     public void setState(State newState) {
+        setState(newState, null);
+    }
+
+    /**
+     * @param reasonKey lang key explaining a FAILED transition. FAILED is where every kind of
+     *                  single-item failure converges — container would not open, contents did not
+     *                  match, search found nothing — but it used to always report "pathing stuck",
+     *                  sending users to debug Baritone over an unrelated problem.
+     */
+    public void setState(State newState, String reasonKey) {
         ctx.state = newState;
         switch (newState) {
             case ANALYZING:
@@ -58,29 +74,35 @@ public class TaskStateMachine {
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.transferring");
                 break;
             case VERIFYING:
-                break;
             case NEXT_ITEM:
                 break;
             case COMPLETED:
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.completed");
                 ctx.active = false;
-                pathingController.cancelPathing();
+                stopEverything();
                 break;
             case FAILED:
-                MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.pathing_stuck");
-                pathingController.cancelPathing();
-                containerOpener.closeAnyContainer(ctx.client);
+                MessageUtil.sendActionBar(ctx.client,
+                        reasonKey != null ? reasonKey : DEFAULT_FAILURE_KEY);
+                stopEverything();
                 ctx.adjacentContainerTargets = null;
                 ctx.adjacentTryIndex = 0;
                 break;
             case STOPPED:
                 ctx.active = false;
-                pathingController.cancelPathing();
-                containerOpener.closeAnyContainer(ctx.client);
+                stopEverything();
                 break;
             default:
                 break;
         }
+    }
+
+    /** Cancel pathing, close any container, and drop every simulated key hold. */
+    private void stopEverything() {
+        pathingController.cancelPathing();
+        containerOpener.closeAnyContainer(ctx.client);
+        containerOpener.releaseKeys();
+        shulkerStorage.releaseKeys();
     }
 
     public void tick() {
@@ -93,15 +115,14 @@ public class TaskStateMachine {
 
         // --- Post-storage sync-and-verify (runs independently of isActive()) ---
         if (pendingStorageDone) {
-            if (storageSyncTicks < 15) {
+            if (storageSyncTicks < STORAGE_SYNC_TICKS) {
                 storageSyncTicks++;
                 return;
             }
             pendingStorageDone = false;
             storageSyncTicks = 0;
 
-            boolean satisfied = transferExecutor.isCurrentItemSatisfied(ctx);
-            if (satisfied) {
+            if (transferExecutor.isCurrentItemSatisfied(ctx)) {
                 ctx.currentItemIndex++;
                 setState(State.NEXT_ITEM);
             } else {
@@ -123,7 +144,7 @@ public class TaskStateMachine {
             return;
         }
 
-        // --- Handle transfer cooldown and container opening retry ---
+        // --- Container open cooldown ---
         if (ctx.transferCooldown > 0) {
             ctx.transferCooldown--;
             if (ctx.containerJustOpened && ctx.transferCooldown <= 0) {
@@ -164,7 +185,7 @@ public class TaskStateMachine {
                 break;
 
             case OPENING_CONTAINER:
-                // Handled by transferCooldown mechanism
+                // Driven by the transferCooldown mechanism above.
                 break;
 
             case FAILED:
@@ -172,20 +193,17 @@ public class TaskStateMachine {
                 break;
 
             case STOPPED:
-                break;
-
             default:
                 break;
         }
     }
 
     /**
-     * Called when inventory is detected to be full.
-     * If auto-store-to-shulker is enabled, starts the shulker box storage process.
-     * Otherwise stops the auto-gatherer with an inventory-full message.
+     * Called when the inventory is detected full. Hands over to shulker storage if the user
+     * enabled it, otherwise stops with an inventory-full message.
      */
     public void onInventoryFull() {
-
+        // A whole shulker box was just taken, so storing into one would immediately undo it.
         if (ctx.justTookShulkerBox) {
             ctx.justTookShulkerBox = false;
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.inventory_full");
@@ -196,9 +214,7 @@ public class TaskStateMachine {
         if (ShulkerBoxStorage.isEnabled()) {
             pathingController.cancelPathing();
             containerOpener.closeAnyContainer(ctx.client);
-
-            boolean started = shulkerStorage.startStorage(ctx);
-            if (started) {
+            if (shulkerStorage.startStorage(ctx)) {
                 return;
             }
         }

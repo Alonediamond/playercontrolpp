@@ -19,7 +19,7 @@ public abstract class MixinLocalPlayer {
         InputPlayer playback = RecordingManager.getInstance().getPlayer();
         if (playback.isPlaying()) {
             self.setShiftKeyDown(playback.getSneak());
-            if (playback.getSprint() && self.isSprinting() == false) {
+            if (playback.getSprint() && !self.isSprinting()) {
                 self.setSprinting(true);
             }
             return;

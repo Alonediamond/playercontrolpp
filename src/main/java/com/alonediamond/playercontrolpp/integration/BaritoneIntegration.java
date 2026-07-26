@@ -58,7 +58,12 @@ public class BaritoneIntegration implements ModIntegration {
                 cmdManager.getClass()
                         .getMethod("execute", String.class)
                         .invoke(cmdManager, cmd);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // Both the API and the command fallback failed, which means this Baritone fork
+                // does not expose either. Staying silent is deliberate: the caller
+                // (BaritonePathingController) notices that pathing never started and reports
+                // that to the player, which is a far more useful message than a reflection trace.
+            }
         }
     }
 

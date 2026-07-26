@@ -1,12 +1,13 @@
 package com.alonediamond.playercontrolpp.record;
 
 import com.alonediamond.playercontrolpp.compat.NbtCompat;
+import com.alonediamond.playercontrolpp.util.AtomicFiles;
 
 import com.google.gson.JsonObject;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtAccounter;
+import net.minecraft.nbt.NbtIo;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -14,9 +15,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Recording data model. Index metadata (id, name, durationTicks, dimension)
- * is stored in index.json and always loaded. Segments and keyframes are stored
- * in individual .pcr files (NBT binary) and only loaded on demand for playback.
+ * One recording.
+ *
+ * <p>Split storage: the index metadata (id, name, duration, dimension) lives in index.json and is
+ * always in memory, while segments and keyframes live in a per-recording {@code .pcr} NBT file
+ * that is only read when the user presses Play.
  */
 public class RecordingFile {
     private String id;
@@ -40,11 +43,6 @@ public class RecordingFile {
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
-
-    /** Always returns true — all recordings are now precision mode. */
-    public boolean isHighPrecision() { return true; }
-    /** No-op — kept for backward compatibility. */
-    public void setHighPrecision(boolean v) { /* always true */ }
 
     public int getDurationTicks() { return durationTicks; }
     public void setDurationTicks(int v) { durationTicks = v; }
@@ -70,9 +68,6 @@ public class RecordingFile {
     public List<PositionKeyframe> getKeyframes() { return keyframes; }
     public void setKeyframes(List<PositionKeyframe> keyframes) { this.keyframes = keyframes; }
 
-    /** Number of segments (RLE-compressed units). */
-    public int getSegmentCount() { return segments.size(); }
-
     // --- Index JSON (lightweight, for index.json) ---
 
     public JsonObject toIndexJson() {
@@ -95,8 +90,14 @@ public class RecordingFile {
 
     // --- NBT binary I/O (for individual .pcr files) ---
 
-    /** Write full recording to NBT file. */
-    public void writeToFile(Path path) throws IOException {
+    /**
+     * Serialize everything into a detached NBT tree.
+     *
+     * <p>Kept separate from writing so the caller can build the tag on the client thread and hand
+     * the finished tag to a background writer. Passing this object itself to another thread would
+     * be a data race: {@code name} and {@code segments} stay mutable and reachable from the GUI.
+     */
+    public CompoundTag toNbt() {
         CompoundTag root = new CompoundTag();
         root.putString("name", name);
         root.putInt("durationTicks", durationTicks);
@@ -118,11 +119,15 @@ public class RecordingFile {
             kfList.add(kf.toNbt());
         }
         root.put("keyframes", kfList);
-
-        NbtIo.writeCompressed(root, path);
+        return root;
     }
 
-    /** Read full recording from NBT file. */
+    /** Write {@code root} to {@code path}, replacing any existing file atomically. */
+    public static void write(CompoundTag root, Path path) throws IOException {
+        AtomicFiles.writeVia(path, tmp -> NbtIo.writeCompressed(root, tmp));
+    }
+
+    /** Read a full recording back. */
     public static RecordingFile readFromFile(Path path) throws IOException {
         CompoundTag root = NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
         RecordingFile rf = new RecordingFile();

@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.integration;
 
+import com.alonediamond.playercontrolpp.Playercontrolpp;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -122,7 +123,12 @@ public class ChestTrackerIntegration implements ModIntegration {
 
             positions.sort(Comparator.comparingDouble(p -> p.distSqr(playerPos)));
 
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            // ChestTracker is absent or its internals moved. Returning whatever was collected so
+            // far degrades to "found nothing here", which the caller already handles by moving on
+            // to the next item.
+            Playercontrolpp.LOGGER.debug("ChestTracker memory lookup failed for {}", targetItem, e);
+        }
         return positions;
     }
 

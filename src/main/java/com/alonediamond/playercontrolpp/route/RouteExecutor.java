@@ -20,8 +20,15 @@ public class RouteExecutor {
     private static final double STUCK_THRESHOLD_SQ = 0.01;
     private static final int STUCK_TICKS = 60;
     private static final int STUCK_JUMP_TICKS = 100;
-    private static final double YAW_CORRECTION_SPEED = 15.0;
     private static final double YAW_DEAD_ZONE = 2.0;
+
+    // Turn rate in degrees per tick, tiered by how far off course we are: snap hard at a waypoint,
+    // ease in on small corrections so the walk does not weave.
+    private static final double YAW_SPEED_SMALL = 15.0;
+    private static final double YAW_SPEED_MEDIUM = 18.0;
+    private static final double YAW_SPEED_LARGE = 25.0;
+    private static final double YAW_MEDIUM_THRESHOLD = 15.0;
+    private static final double YAW_LARGE_THRESHOLD = 45.0;
 
     private final Route route;
     private State state = State.IDLE;
@@ -169,16 +176,24 @@ public class RouteExecutor {
         }
     }
 
+    /**
+     * Turn to face {@code target} instantly.
+     *
+     * <p>{@code yRotO} has to be set too. The camera interpolates between {@code yRotO} and
+     * {@code yRot} across the frames of a tick, so setting only {@code yRot} turns a snap into a
+     * 50 ms smear — visible as a smooth sweep at every waypoint rather than the intended cut.
+     */
     private void snapYawToTarget(Minecraft client, RouteNode target) {
         LocalPlayer player = client.player;
         if (player == null) return;
 
         double dx = target.x - player.getX();
         double dz = target.z - player.getZ();
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        yaw = Mth.wrapDegrees(yaw);
+        float yaw = Mth.wrapDegrees((float) Math.toDegrees(Math.atan2(-dx, dz)));
         player.setYRot(yaw);
         player.setYHeadRot(yaw);
+        player.yRotO = yaw;
+        player.yHeadRotO = yaw;
     }
 
     private void adjustYaw(Minecraft client, RouteNode target) {
@@ -194,14 +209,11 @@ public class RouteExecutor {
 
         if (Math.abs(diff) < YAW_DEAD_ZONE) return;
 
-        // Tiered correction speed: aggressive snap for large yaw gaps (>45 deg),
-        // medium speed for moderate gaps (>15 deg), gentle for small corrections.
-        // This avoids overshooting while still turning quickly at waypoints.
-        double speed = YAW_CORRECTION_SPEED;
-        if (Math.abs(diff) > 45.0) {
-            speed = 25.0;
-        } else if (Math.abs(diff) > 15.0) {
-            speed = 18.0;
+        double speed = YAW_SPEED_SMALL;
+        if (Math.abs(diff) > YAW_LARGE_THRESHOLD) {
+            speed = YAW_SPEED_LARGE;
+        } else if (Math.abs(diff) > YAW_MEDIUM_THRESHOLD) {
+            speed = YAW_SPEED_MEDIUM;
         }
 
         float correction = (float) Math.copySign(

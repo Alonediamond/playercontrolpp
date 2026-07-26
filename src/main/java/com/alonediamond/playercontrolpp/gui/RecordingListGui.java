@@ -70,7 +70,7 @@ public class RecordingListGui extends Screen {
                         dirty = true;
                         refreshFields();
                     } else {
-                        if (RecordingManager.getInstance().getPlayer().isPlaying()) return;
+                        if (RecordingManager.getInstance().getPlayer().isBusy()) return;
                         rec.startRecording(
                                 StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
                         ScreenCompat.setScreen(Minecraft.getInstance(), null); // exit all GUIs
@@ -209,7 +209,7 @@ public class RecordingListGui extends Screen {
         int statusColor = 0xFF55FFFF;
         if (recorder.isRecording()) {
             status = StringUtils.translate("playercontrolpp.gui.recording.recording");
-        } else if (RecordingManager.getInstance().getPlayer().isPlaying()) {
+        } else if (RecordingManager.getInstance().getPlayer().isBusy()) {
             status = StringUtils.translate("playercontrolpp.gui.recording.playing");
         } else {
             status = StringUtils.translate("playercontrolpp.gui.recording.idle");

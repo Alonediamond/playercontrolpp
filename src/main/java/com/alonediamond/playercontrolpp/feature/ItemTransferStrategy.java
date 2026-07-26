@@ -1,67 +1,65 @@
 package com.alonediamond.playercontrolpp.feature;
 
-import net.minecraft.world.item.ItemStack;
-
 /**
- * Calculates how many items to take from containers.
- * Designed to be extensible — add new strategies by implementing new static methods
- * and switching via configuration in the future.
+ * Decides how much of an item to take from a container.
+ *
+ * <p>Deliberately free of Minecraft types so the arithmetic can be reasoned about — and tested —
+ * on its own.
  */
-public class ItemTransferStrategy {
+public final class ItemTransferStrategy {
+
+    /** Storage slots in a shulker box. */
+    public static final int SHULKER_SLOT_COUNT = 27;
+
+    private ItemTransferStrategy() {}
 
     /**
-     * Default strategy: take stacks with generous rounding-up.
+     * Plan a pickup, rounding up to whole stacks so the player is not left one item short.
+     *
      * <ul>
-     *   <li>If need &le; 64: take 1 stack (64 items) — round up to one full stack</li>
-     *   <li>If need 65–1728: take ceil(need / 64) stacks</li>
-     *   <li>If need &gt; 1728: prefer whole shulker boxes (27 slots &times; 64 = 1728 items each),
-     *       fall back to stacks for the remainder</li>
-     *   <li>Always take at least 1 stack even if only 1 item is missing</li>
+     *   <li>Up to one shulker box worth: {@code ceil(need / stackSize)} stacks, minimum 1.</li>
+     *   <li>More than that: as many <em>whole</em> boxes as fit inside the need, then stacks for
+     *       whatever is left over.</li>
      * </ul>
      *
-     * @param neededTotal  total number of this item still needed
-     * @param stackMaxSize max stack size for this item (usually 64)
-     * @return a {@link TransferPlan} describing how many shulker boxes and stacks to take
+     * <p>The box count uses floor, not ceil. With ceil, needing 1729 items asked for
+     * {@code ceil(1729/1728) = 2} boxes — 3456 items, twice the requirement — and left
+     * {@code remaining} negative, so the leftover-stacks branch was unreachable dead code.
+     *
+     * @param neededTotal  how many of this item are still missing
+     * @param stackMaxSize max stack size for this item (64 for most, 1 for buckets)
+     * @return how many whole boxes and loose stacks to take
      */
     public static TransferPlan calculate(int neededTotal, int stackMaxSize) {
         if (neededTotal <= 0) return TransferPlan.NONE;
 
-        int shulkerCapacity = 27 * stackMaxSize; // one shulker box = 27 stacks
-        int fullStacksNeeded;
-        int shulkerBoxesToTake = 0;
+        int shulkerCapacity = SHULKER_SLOT_COUNT * stackMaxSize;
+        int shulkerBoxesToTake = neededTotal / shulkerCapacity;
+        int remaining = neededTotal - shulkerBoxesToTake * shulkerCapacity;
+        int fullStacksNeeded = ceilDiv(remaining, stackMaxSize);
 
-        if (neededTotal > shulkerCapacity) {
-            // Need more than one shulker box worth — take full boxes
-            shulkerBoxesToTake = (neededTotal + shulkerCapacity - 1) / shulkerCapacity; // ceil division
-            // After taking boxes, calculate remaining stacks
-            int takenSoFar = shulkerBoxesToTake * shulkerCapacity;
-            int remaining = neededTotal - takenSoFar;
-            if (remaining > 0) {
-                fullStacksNeeded = (remaining + stackMaxSize - 1) / stackMaxSize;
-            } else {
-                fullStacksNeeded = 0;
-            }
-        } else {
-            // Less than one shulker box — use stacks
-            fullStacksNeeded = (neededTotal + stackMaxSize - 1) / stackMaxSize;
-            // Always take at least 1 stack
-            if (fullStacksNeeded < 1) fullStacksNeeded = 1;
+        // Never plan a no-op: one item missing still means one stack.
+        if (shulkerBoxesToTake == 0 && fullStacksNeeded == 0) {
+            fullStacksNeeded = 1;
         }
 
         return new TransferPlan(shulkerBoxesToTake, fullStacksNeeded, shulkerCapacity, stackMaxSize);
     }
 
-    /**
-     * Describes how many items to transfer.
-     */
+    /** Integer division rounding away from zero. {@code b} must be positive. */
+    public static int ceilDiv(int a, int b) {
+        return (a + b - 1) / b;
+    }
+
+    /** How many items to move, expressed as whole boxes plus loose stacks. */
     public static class TransferPlan {
         public static final TransferPlan NONE = new TransferPlan(0, 0, 0, 0);
 
-        /** How many full shulker boxes to take (each 27&times;stackSize items). */
+        /** Whole shulker boxes to take, each holding {@link #shulkerCapacity} items. */
         public final int shulkerBoxes;
-        /** Remaining full stacks to take (each stackSize items). */
+        /** Loose stacks to take on top of the boxes, each holding {@link #stackSize} items. */
         public final int stacks;
-        /** Capacity of one shulker box in this item. */
+        /** Capacity of one shulker box for this item. */
         public final int shulkerCapacity;
         /** Max stack size for this item. */
         public final int stackSize;

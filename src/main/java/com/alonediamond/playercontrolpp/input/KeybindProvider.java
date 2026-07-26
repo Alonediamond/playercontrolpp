@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.input;
 
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.route.RouteManager;
 import fi.dy.masa.malilib.hotkeys.IHotkey;
 import fi.dy.masa.malilib.hotkeys.IKeybindManager;
@@ -9,6 +10,11 @@ import fi.dy.masa.malilib.hotkeys.IKeybindProvider;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Tells malilib which keys this mod uses. Route hotkeys are enumerated from
+ * {@code RouteManager} on every call, so adding or deleting a route only needs
+ * {@code updateUsedKeys()} — this is the single registration path for them.
+ */
 public class KeybindProvider implements IKeybindProvider {
 
     private static final String MOD_NAME = "PlayerControl++";
@@ -21,10 +27,6 @@ public class KeybindProvider implements IKeybindProvider {
         for (IHotkey hotkey : RouteManager.getInstance().getRouteHotkeyList()) {
             manager.addKeybindToMap(hotkey.getKeybind());
         }
-        // Register Baritone hotkey if mods are present
-        if (com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.areAllThreeModsPresent()) {
-            manager.addKeybindToMap(Configs.Hotkeys.BARITONE_AUTO_GATHER.getKeybind());
-        }
     }
 
     @Override
@@ -32,10 +34,11 @@ public class KeybindProvider implements IKeybindProvider {
         List<IHotkey> allHotkeys = new ArrayList<>(Configs.Hotkeys.HOTKEY_LIST);
         allHotkeys.addAll(RouteManager.getInstance().getRouteHotkeyList());
         manager.addHotkeysForCategory(MOD_NAME, "playercontrolpp.gui.tab.hotkeys", allHotkeys);
-        // Register Baritone category if mods are present
-        if (com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.areAllThreeModsPresent()) {
-            List<IHotkey> baritoneKeys = List.of(Configs.Hotkeys.BARITONE_AUTO_GATHER);
-            manager.addHotkeysForCategory(MOD_NAME, "playercontrolpp.gui.tab.baritone", baritoneKeys);
+
+        // The Baritone category only makes sense with all three companion mods installed.
+        if (AutoMaterialGatherer.areAllThreeModsPresent()) {
+            manager.addHotkeysForCategory(MOD_NAME, "playercontrolpp.gui.tab.baritone",
+                    List.of(Configs.Hotkeys.BARITONE_AUTO_GATHER));
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.route;
 
+import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
@@ -7,7 +8,11 @@ import net.minecraft.client.player.LocalPlayer;
 
 import java.util.*;
 
-public class RouteFlowRuntime {
+/**
+ * Runs the active route executors and reports the forward/sprint input they want.
+ * The keys themselves are pressed by {@code ClientEventHandler}.
+ */
+public class RouteFlowRuntime implements ClientFeature {
     private static final RouteFlowRuntime INSTANCE = new RouteFlowRuntime();
 
     private final Map<String, RouteExecutor> executors = new LinkedHashMap<>();
@@ -80,13 +85,10 @@ public class RouteFlowRuntime {
         }
     }
 
-    /**
-     * Called from direction-checking code to provide the currently desired forward input.
-     */
-    public float getForwardInput() {
-        return forwardActive ? 1.0F : 0.0F;
-    }
+    @Override
+    public boolean isActive() { return forwardActive; }
 
+    @Override
     public void onClientTick(Minecraft client) {
         if (executors.isEmpty()) return;
 
@@ -163,9 +165,8 @@ public class RouteFlowRuntime {
         }
     }
 
-    /**
-     * Called when world changes (dimension switch, disconnect, etc.)
-     */
+    /** Called on dimension switch, disconnect, or world load. */
+    @Override
     public void onWorldChange() {
         if (!executors.isEmpty()) {
             Minecraft client = Minecraft.getInstance();

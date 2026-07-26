@@ -1,53 +1,52 @@
 package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.compat.InventoryCompat;
-
-import com.alonediamond.playercontrolpp.compat.ContainerContentsCompat;
-
-import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
-
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-
+import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.PlacementBounds;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
+import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.core.NonNullList;
-import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.core.Vec3i;
-import net.minecraft.world.level.BlockGetter;
-// ClickType is not publicly exported in 26.1 API; use Inventory methods directly
-
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
 
 import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
- * Automatically fills waterloggable blocks in loaded Litematica schematics.
- * Uses a 6-state tick-driven state machine.
+ * Waterlogs blocks that a loaded Litematica schematic wants waterlogged but the world does not
+ * have filled yet.
  *
- * State flow: SCANNING -> FINDING_BUCKET -> ROTATING -> PLACING_WATER -> COOLDOWN -> SCANNING
- * When no waterloggable blocks remain -> AUTO_STOP_COUNTDOWN (3-second timer).
+ * <pre>
+ * SCANNING -&gt; FINDING_BUCKET -&gt; [SHULKERING] -&gt; ROTATING -&gt; PLACING_WATER -&gt; COOLDOWN -&gt; SCANNING
+ * </pre>
+ *
+ * <p>SHULKERING is entered only when no loose water bucket is left but one is sitting inside a
+ * shulker box in the inventory and QuickShulker is installed to open it in place.
+ *
+ * <p>When nothing in range needs water the feature enters AUTO_STOP_COUNTDOWN and keeps
+ * re-scanning at a reduced rate for three seconds, so walking to the next spot resumes it
+ * without another hotkey press.
  */
 public class AutoWaterFillFeature {
 
@@ -61,26 +60,49 @@ public class AutoWaterFillFeature {
         AUTO_STOP_COUNTDOWN
     }
 
+    /** Auto-stop grace period: 3 seconds at 20 tps. */
+    private static final int AUTO_STOP_TICKS = 60;
+    /** During the countdown, only re-scan this often — it is otherwise a per-tick 11³ sweep. */
+    private static final int COUNTDOWN_SCAN_INTERVAL = 5;
+    /** Ticks to wait for a QuickShulker-opened container screen before giving up. */
+    private static final int SHULKER_OPEN_WAIT_TICKS = 20;
+    /** How many times to try pulling a bucket out of a shulker box before stopping. */
+    private static final int MAX_SHULKER_ATTEMPTS = 3;
+    /** Max rotation per tick while aiming, in degrees. */
+    private static final float MAX_TURN_STEP = 20.0f;
+    /** Aim tolerance before clicking, in degrees. */
+    private static final float AIM_YAW_TOLERANCE = 2.0f;
+    private static final float AIM_PITCH_TOLERANCE = 1.0f;
+    /**
+     * How long a block stays on the "just tried it" list. The server takes a few ticks to echo
+     * the new waterlogged state back, and without this the next scan re-targets the same block
+     * and right-clicks it again.
+     */
+    private static final int RETRY_BLOCK_COOLDOWN = 20;
+
     private static boolean enabled;
     private static State state = State.SCANNING;
     private static int stateTimer;
     private static int autoStopCountdown;
+    private static int tickCounter;
+    private static int shulkerAttempts;
     private static BlockPos currentTarget;
-    private static final List<BlockPos> waterloggableBlocks = new ArrayList<>();
+    /** pos -&gt; the tick at which it becomes a candidate again. */
+    private static final Map<BlockPos, Integer> recentlyAttempted = new HashMap<>();
     private static final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
-    // Cached reflection Method for calling getBlockState on schematic world
+    /** Cached handle for {@code schematicWorld.getBlockState(BlockPos)}. */
     private static Method schematicGetBlockStateMethod;
     private static Object lastSchematicWorld;
 
-    /** Bounding box of a single schematic placement in world coordinates. */
-    private record PlacementBounds(BlockPos origin, int sizeX, int sizeY, int sizeZ) {
-        boolean contains(BlockPos pos) {
-            return pos.getX() >= origin.getX() && pos.getX() < origin.getX() + sizeX
-                    && pos.getY() >= origin.getY() && pos.getY() < origin.getY() + sizeY
-                    && pos.getZ() >= origin.getZ() && pos.getZ() < origin.getZ() + sizeZ;
-        }
-    }
+    /** Registered with {@link FeatureRegistry}; see {@code InitHandler}. */
+    public static final ClientFeature FEATURE = new ClientFeature() {
+        @Override public void onClientTick(Minecraft mc) { tick(mc); }
+        @Override public void onWorldChange() { AutoWaterFillFeature.onWorldChange(); }
+        @Override public boolean isActive() { return enabled; }
+    };
+
+    private AutoWaterFillFeature() {}
 
     public static boolean isEnabled() {
         return enabled;
@@ -95,11 +117,7 @@ public class AutoWaterFillFeature {
                 return;
             }
             MessageUtil.sendActionBar(client, "playercontrolpp.message.water_fill.on");
-            state = State.SCANNING;
-            stateTimer = 0;
-            autoStopCountdown = 0;
-            currentTarget = null;
-            waterloggableBlocks.clear();
+            resetState();
         } else {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.water_fill.off");
             resetState();
@@ -121,8 +139,9 @@ public class AutoWaterFillFeature {
         state = State.SCANNING;
         stateTimer = 0;
         autoStopCountdown = 0;
+        shulkerAttempts = 0;
         currentTarget = null;
-        waterloggableBlocks.clear();
+        recentlyAttempted.clear();
         schematicGetBlockStateMethod = null;
         lastSchematicWorld = null;
     }
@@ -130,20 +149,22 @@ public class AutoWaterFillFeature {
     public static void tick(Minecraft mc) {
         if (!enabled || mc.player == null || mc.level == null) return;
 
-        // Safety: pause while sneaking
+        // Safety: pause while sneaking, so the player can always take back control.
         if (mc.player.isShiftKeyDown()) return;
 
-        // Safety: disable if player is dead
         if (mc.player.isDeadOrDying()) {
             enabled = false;
             resetState();
             return;
         }
 
+        tickCounter++;
+        expireRetryCooldowns();
+
         switch (state) {
             case SCANNING -> tickScanning(mc);
             case FINDING_BUCKET -> tickFindingBucket(mc);
-            case SHULKERING -> getWaterBucketFromShulkerBox(mc);
+            case SHULKERING -> tickShulkering(mc);
             case ROTATING -> tickRotating(mc);
             case PLACING_WATER -> tickPlacingWater(mc);
             case COOLDOWN -> tickCooldown(mc);
@@ -152,67 +173,21 @@ public class AutoWaterFillFeature {
     }
 
     // -------------------------------------------------------------------------
-    // State: SHULKERING(getWaterBucketFromShulkerBox)
-    // -------------------------------------------------------------------------
-
-    private static void getWaterBucketFromShulkerBox(Minecraft mc) {
-        --stateTimer;
-        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)){
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
-            state = State.AUTO_STOP_COUNTDOWN;
-            return;
-        }
-
-        if (!(stateTimer <=0)){
-            AbstractContainerMenu handler = mc.player.containerMenu;
-            if (handler == null) {
-                mc.player.closeContainer();
-                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
-                state = State.AUTO_STOP_COUNTDOWN;
-            }
-
-            if (handler instanceof InventoryMenu) System.out.println("InventoryMenu");
-            List<Slot> slots = handler.slots;
-            for (int i = 0; i < slots.size(); i++) {
-                Slot slot = slots.get(i);
-                if (slot.container == mc.player.getInventory()) continue;
-
-                ItemStack stack = slot.getItem();
-                if (stack.isEmpty()) continue;
-                if (isWaterBucket(stack)) {
-                    SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
-                }
-            }
-            mc.player.closeContainer();
-            state = State.ROTATING;
-        }else {
-            state = State.AUTO_STOP_COUNTDOWN;
-        }
-    }
-
-    // -------------------------------------------------------------------------
     // State: SCANNING
     // -------------------------------------------------------------------------
 
     private static void tickScanning(Minecraft mc) {
-        int configRadius = Configs.Settings.WATER_FILL_SCAN_RADIUS.getIntegerValue();
-        double playerReach = mc.player.isCreative() ? 5.0 : 4.5;
-        int radius = Math.min(configRadius, (int) Math.floor(playerReach));
-
-        BlockPos playerPos = mc.player.blockPosition();
-        waterloggableBlocks.clear();
-        currentTarget = null;
-
-        List<BlockPos> found = scanWaterloggableBlocks(mc, playerPos, radius);
-        waterloggableBlocks.addAll(found);
-
-        if (waterloggableBlocks.isEmpty()) {
-            state = State.AUTO_STOP_COUNTDOWN;
-            autoStopCountdown = 60; // 3 seconds at 20 tps
+        currentTarget = findNearestTarget(mc);
+        if (currentTarget == null) {
+            beginAutoStopCountdown();
         } else {
-            currentTarget = waterloggableBlocks.get(0);
             state = State.FINDING_BUCKET;
         }
+    }
+
+    private static void beginAutoStopCountdown() {
+        state = State.AUTO_STOP_COUNTDOWN;
+        autoStopCountdown = AUTO_STOP_TICKS;
     }
 
     // -------------------------------------------------------------------------
@@ -222,101 +197,132 @@ public class AutoWaterFillFeature {
     private static void tickFindingBucket(Minecraft mc) {
         Inventory inv = mc.player.getInventory();
 
-        // 1) Search hotbar (main slots 0-8)
-        for (int i = 0; i <= 8; i++) {
-            ItemStack stack = inv.getItem(i);
-            if (!stack.isEmpty() && isWaterBucket(stack)) {
+        // 1) Already in the hotbar — just select it.
+        for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
+            if (isWaterBucket(inv.getItem(i))) {
                 selectHotbarSlot(mc, i);
+                shulkerAttempts = 0;
                 state = State.ROTATING;
                 return;
             }
         }
 
-        // 2) Not in hotbar, search main inventory (slots 9-35)
+        // 2) In the main inventory — swap it down into the hotbar.
         int bucketSlot = -1;
-        for (int i = 9; i <= 35; i++) {
-            ItemStack stack = inv.getItem(i);
-            if (!stack.isEmpty() && isWaterBucket(stack)) {
+        for (int i = PlayerUtil.HOTBAR_SIZE; i < Inventory.INVENTORY_SIZE; i++) {
+            if (isWaterBucket(inv.getItem(i))) {
                 bucketSlot = i;
                 break;
             }
         }
-
-        int bucketCountFromShulkers = 0;
-        int haveBucketShulkerBoxScreenSlot = 0;
-        if (bucketSlot < 0) {
-            //尝试寻找潜影盒
-            for (int i = 0; i < 36; i++) {
-                ItemStack s = mc.player.getInventory().getItem(i);
-                if (s.getItem() instanceof BlockItem bi && bi.getBlock() instanceof net.minecraft.world.level.block.ShulkerBoxBlock) {
-                    ItemContainerContents c = s.get(DataComponents.CONTAINER);
-                    if (c != null) {
-                        for (ItemStack inner : ContainerContentsCompat.nonEmptyItems(c)) {
-                            if (inner.is(Items.WATER_BUCKET)){
-                                bucketCountFromShulkers += inner.getCount();
-                                haveBucketShulkerBoxScreenSlot = i;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if (bucketCountFromShulkers <= 0){
-                // No water bucket anywhere
-                MessageUtil.sendActionBar(mc, "playercontrolpp.message.water_fill.no_bucket");
-                enabled = false;
-                resetState();
-                return;
-            }
-        }
-
-        // 3) Find swap target in hotbar (empty slot first, then selected slot)
-        int targetHotbar = -1;
-        for (int i = 0; i <= 8; i++) {
-            if (inv.getItem(i).isEmpty()) {
-                targetHotbar = i;
-                break;
-            }
-        }
-        if (targetHotbar < 0) {
-            targetHotbar = InventoryCompat.getSelectedSlot(inv);
-        }
-
-        if (bucketCountFromShulkers <= 0){
-            // 4) Swap inventory slot with hotbar slot
+        if (bucketSlot >= 0) {
+            int targetHotbar = firstFreeHotbarSlot(inv);
             swapSlotWithHotbar(mc, bucketSlot, targetHotbar);
-            // Select the hotbar slot we just put the bucket into
             selectHotbarSlot(mc, targetHotbar);
+            shulkerAttempts = 0;
             state = State.ROTATING;
-        }else {
-            if (!quickShulker.isLoaded()) {
-                state = State.AUTO_STOP_COUNTDOWN;
-                return;
-            }
-            if (!quickShulker.openShulkerBox(haveBucketShulkerBoxScreenSlot)) {
-                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
-                state = State.AUTO_STOP_COUNTDOWN;
-                return;
-            }else {
-                stateTimer = 10;
-                state = State.SHULKERING;
-            }
+            return;
         }
 
+        // 3) Last resort: a bucket inside a shulker box, opened in place via QuickShulker.
+        int shulkerSlot = findShulkerSlotWithWaterBucket(inv);
+        if (shulkerSlot < 0) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.water_fill.no_bucket");
+            enabled = false;
+            resetState();
+            return;
+        }
+        if (!quickShulker.isLoaded() || shulkerAttempts >= MAX_SHULKER_ATTEMPTS) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.water_fill.no_bucket");
+            enabled = false;
+            resetState();
+            return;
+        }
+
+        // QuickShulker addresses slots by container-screen index, not inventory index.
+        int screenSlot = shulkerSlot < PlayerUtil.HOTBAR_SIZE
+                ? InventoryMenu.USE_ROW_SLOT_START + shulkerSlot
+                : shulkerSlot;
+        if (!quickShulker.openShulkerBox(screenSlot)) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
+            beginAutoStopCountdown();
+            return;
+        }
+        shulkerAttempts++;
+        stateTimer = SHULKER_OPEN_WAIT_TICKS;
+        state = State.SHULKERING;
+    }
+
+    /** @return an empty hotbar slot, or the currently selected one if the hotbar is full. */
+    private static int firstFreeHotbarSlot(Inventory inv) {
+        for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
+            if (inv.getItem(i).isEmpty()) return i;
+        }
+        return InventoryCompat.getSelectedSlot(inv);
+    }
+
+    /** @return the inventory index of a shulker box holding a water bucket, or -1. */
+    private static int findShulkerSlotWithWaterBucket(Inventory inv) {
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inv.getItem(i);
+            if (ItemUtil.isShulkerBox(stack) && ItemUtil.containsInside(stack, Items.WATER_BUCKET)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
-     * Select a hotbar slot and sync the selection to the server.
-     * Setting the selected slot directly only changes the client side;
-     * without the ServerboundSetCarriedItemPacket, the server still thinks
-     * the player is holding whatever was selected before — causing
-     * useItemOn to silently fail.
+     * Select a hotbar slot and tell the server about it.
+     *
+     * <p>Setting the selected slot only changes the client; without
+     * ServerboundSetCarriedItemPacket the server still believes the previous item is held, and
+     * {@code useItemOn} silently does nothing.
      */
     private static void selectHotbarSlot(Minecraft mc, int slot) {
         InventoryCompat.setSelectedSlot(mc.player.getInventory(), slot);
         if (mc.getConnection() != null) {
             mc.getConnection().send(
                     new net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket(slot));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // State: SHULKERING
+    // -------------------------------------------------------------------------
+
+    /**
+     * Waits for the QuickShulker-opened screen, pulls out exactly one water bucket, closes up
+     * and goes back through FINDING_BUCKET so the bucket ends up selected in the hotbar.
+     */
+    private static void tickShulkering(Minecraft mc) {
+        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
+            // The packet round-trip takes a few ticks; only fail once the wait runs out.
+            if (--stateTimer <= 0) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
+                beginAutoStopCountdown();
+            }
+            return;
+        }
+
+        AbstractContainerMenu handler = mc.player.containerMenu;
+        boolean tookOne = false;
+        for (Slot slot : handler.slots) {
+            // Skip the player-inventory half of the screen; we only want the box's own slots.
+            if (slot.container == mc.player.getInventory()) continue;
+            if (!isWaterBucket(slot.getItem())) continue;
+            SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
+            tookOne = true;
+            break; // one bucket is all we need — the original emptied the whole box
+        }
+
+        mc.player.closeContainer();
+        if (tookOne) {
+            state = State.FINDING_BUCKET;
+        } else {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.water_fill.no_bucket");
+            enabled = false;
+            resetState();
         }
     }
 
@@ -339,14 +345,10 @@ public class AutoWaterFillFeature {
         float targetYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
 
-        // Smooth rotation toward target (max 20 degrees per tick)
         float currentYaw = mc.player.getYRot();
         float currentPitch = mc.player.getXRot();
-        float deltaYaw = Mth.wrapDegrees(targetYaw - currentYaw);
-        float deltaPitch = targetPitch - currentPitch;
-        float maxStep = 20.0f;
-        float stepYaw = Mth.clamp(deltaYaw, -maxStep, maxStep);
-        float stepPitch = Mth.clamp(deltaPitch, -maxStep, maxStep);
+        float stepYaw = Mth.clamp(Mth.wrapDegrees(targetYaw - currentYaw), -MAX_TURN_STEP, MAX_TURN_STEP);
+        float stepPitch = Mth.clamp(targetPitch - currentPitch, -MAX_TURN_STEP, MAX_TURN_STEP);
 
         float newYaw = currentYaw + stepYaw;
         float newPitch = Mth.clamp(currentPitch + stepPitch, -90.0f, 90.0f);
@@ -355,10 +357,9 @@ public class AutoWaterFillFeature {
         mc.player.setXRot(newPitch);
         mc.player.setYHeadRot(newYaw);
 
-        // Check if facing is close enough
-        float remainingYaw = Math.abs(Mth.wrapDegrees(targetYaw - mc.player.getYRot()));
-        float remainingPitch = Math.abs(targetPitch - mc.player.getXRot());
-        if (remainingYaw <= 2.0f && remainingPitch <= 1.0f) {
+        float remainingYaw = Math.abs(Mth.wrapDegrees(targetYaw - newYaw));
+        float remainingPitch = Math.abs(targetPitch - newPitch);
+        if (remainingYaw <= AIM_YAW_TOLERANCE && remainingPitch <= AIM_PITCH_TOLERANCE) {
             state = State.PLACING_WATER;
         }
     }
@@ -373,67 +374,42 @@ public class AutoWaterFillFeature {
             return;
         }
 
-        // Verify bucket is still in hand
-        ItemStack held = mc.player.getMainHandItem();
-        if (held.isEmpty() || !isWaterBucket(held)) {
-            waterloggableBlocks.remove(currentTarget);
-            currentTarget = null;
-            state = State.SCANNING;
+        // The bucket emptied, or something else got selected — keep the target, re-arm the hand.
+        if (!isWaterBucket(mc.player.getMainHandItem())) {
+            state = State.FINDING_BUCKET;
             return;
         }
 
-        // Verify world block state: not already waterlogged
         BlockState worldState = mc.level.getBlockState(currentTarget);
-        if (worldState.hasProperty(BlockStateProperties.WATERLOGGED) && worldState.getValue(BlockStateProperties.WATERLOGGED)) {
-            waterloggableBlocks.remove(currentTarget);
-            currentTarget = null;
-            state = State.SCANNING;
+        if (isWaterlogged(worldState)) {
+            abandonTarget();
+            return;
+        }
+        if (!schematicWantsWaterAt(mc, currentTarget, worldState)) {
+            abandonTarget();
             return;
         }
 
-        // Verify schematic state via cached reflection
-        Object schematicWorld = LitematicaIntegration.getInstance().getSchematicWorld();
-        if (schematicWorld != null) {
-            if (schematicWorld != lastSchematicWorld || schematicGetBlockStateMethod == null) {
-                lastSchematicWorld = schematicWorld;
-                try {
-                    schematicGetBlockStateMethod = schematicWorld.getClass()
-                            .getMethod("getBlockState", BlockPos.class);
-                } catch (Exception e) {
-                    schematicGetBlockStateMethod = null;
-                }
-            }
-            if (schematicGetBlockStateMethod != null) {
-                try {
-                    Object stateObj = schematicGetBlockStateMethod.invoke(
-                            schematicWorld, currentTarget);
-                    if (stateObj instanceof BlockState schemState) {
-                        boolean sameBlock = worldState.getBlock() == schemState.getBlock();
-                        boolean wantsWaterlog = schemState.hasProperty(BlockStateProperties.WATERLOGGED)
-                                && schemState.getValue(BlockStateProperties.WATERLOGGED);
-                        if (!sameBlock || !wantsWaterlog) {
-                            waterloggableBlocks.remove(currentTarget);
-                            currentTarget = null;
-                            state = State.SCANNING;
-                            return;
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
-        }
-
-        // Simulate right-click on the target block.
-        // Both useItemOn AND useItem are needed: useItemOn sends
-        // the block-targeted packet, useItem ensures the item's use-on-block
-        // action (BucketItem.useOnBlock) is triggered server-side for waterlogging.
+        // Both calls are needed: useItemOn sends the block-targeted packet, useItem makes the
+        // server run BucketItem's use-on-block path that actually waterlogs.
         Vec3 center = Vec3.atCenterOf(currentTarget);
         BlockHitResult hitResult = new BlockHitResult(center, Direction.UP, currentTarget, false);
         mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
         mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
 
-        int delay = Configs.Settings.WATER_FILL_OPERATION_DELAY.getIntegerValue();
+        markAttempted(currentTarget);
+        currentTarget = null;
         state = State.COOLDOWN;
-        stateTimer = delay;
+        stateTimer = Configs.Settings.WATER_FILL_OPERATION_DELAY.getIntegerValue();
+    }
+
+    /** Give up on the current target without counting it as an attempt worth cooling down. */
+    private static void abandonTarget() {
+        if (currentTarget != null) {
+            markAttempted(currentTarget);
+            currentTarget = null;
+        }
+        state = State.SCANNING;
     }
 
     // -------------------------------------------------------------------------
@@ -441,13 +417,7 @@ public class AutoWaterFillFeature {
     // -------------------------------------------------------------------------
 
     private static void tickCooldown(Minecraft mc) {
-        stateTimer--;
-        if (stateTimer <= 0) {
-            // Remove the just-processed block and scan for the next one
-            if (currentTarget != null) {
-                waterloggableBlocks.remove(currentTarget);
-                currentTarget = null;
-            }
+        if (--stateTimer <= 0) {
             state = State.SCANNING;
         }
     }
@@ -459,20 +429,15 @@ public class AutoWaterFillFeature {
     private static void tickAutoStopCountdown(Minecraft mc) {
         autoStopCountdown--;
 
-        // Re-scan: if new blocks appear, cancel countdown and resume
-        int configRadius = Configs.Settings.WATER_FILL_SCAN_RADIUS.getIntegerValue();
-        double playerReach = mc.player.isCreative() ? 5.0 : 4.5;
-        int radius = Math.min(configRadius, (int) Math.floor(playerReach));
-        BlockPos playerPos = mc.player.blockPosition();
-
-        List<BlockPos> found = scanWaterloggableBlocks(mc, playerPos, radius);
-        if (!found.isEmpty()) {
-            // New blocks appeared, cancel auto-stop
-            waterloggableBlocks.clear();
-            waterloggableBlocks.addAll(found);
-            currentTarget = waterloggableBlocks.get(0);
-            state = State.FINDING_BUCKET;
-            return;
+        // Re-scan periodically rather than every tick: the sweep is the expensive part and the
+        // player cannot walk far in a quarter of a second.
+        if (autoStopCountdown % COUNTDOWN_SCAN_INTERVAL == 0) {
+            BlockPos found = findNearestTarget(mc);
+            if (found != null) {
+                currentTarget = found;
+                state = State.FINDING_BUCKET;
+                return;
+            }
         }
 
         if (autoStopCountdown <= 0) {
@@ -483,136 +448,145 @@ public class AutoWaterFillFeature {
     }
 
     // =========================================================================
-    // Helper methods
+    // Scanning
     // =========================================================================
 
     /**
-     * Scans for waterloggable blocks that match the schematic but are not yet
-     * waterlogged in the world.
+     * Sweeps the reach-limited cube around the player for the closest block the schematic wants
+     * waterlogged and the world does not have filled.
      *
-     * @param mc         the Minecraft client instance
-     * @param playerPos  the player's block position
-     * @param radius     the scan radius (clamped to player reach)
-     * @return sorted list of BlockPos candidates (nearest first)
+     * <p>Single pass with a reused {@link BlockPos.MutableBlockPos}: the old version allocated a
+     * BlockPos per candidate, collected every hit into a list and then sorted the whole list only
+     * to read element 0.
+     *
+     * @return the nearest candidate, or {@code null} if there is none
      */
-    private static List<BlockPos> scanWaterloggableBlocks(Minecraft mc, BlockPos playerPos, int radius) {
-        List<BlockPos> result = new ArrayList<>();
+    private static BlockPos findNearestTarget(Minecraft mc) {
+        BlockGetter schematicWorld = schematicWorldOrNull();
+        if (schematicWorld == null) return null;
 
-        BlockGetter schematicWorld = null;
-        try {
-            Object sw = LitematicaIntegration.getInstance().getSchematicWorld();
-            if (sw instanceof BlockGetter bv) {
-                schematicWorld = bv;
-            }
-        } catch (Exception ignored) {
-        }
+        List<PlacementBounds> bounds = LitematicaIntegration.getInstance().getPlacementBounds();
+        if (bounds.isEmpty()) return null;
 
-        if (schematicWorld == null) return result;
+        int configRadius = Configs.Settings.WATER_FILL_SCAN_RADIUS.getIntegerValue();
+        int radius = Math.min(configRadius, (int) Math.floor(PlayerUtil.blockReach(mc.player)));
+        BlockPos playerPos = mc.player.blockPosition();
+        int px = playerPos.getX(), py = playerPos.getY(), pz = playerPos.getZ();
+        int radiusSq = radius * radius;
 
-        List<PlacementBounds> bounds = getPlacementBounds();
-        if (bounds.isEmpty()) return result;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        BlockPos best = null;
+        int bestDistSq = Integer.MAX_VALUE;
 
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dy = -radius; dy <= radius; dy++) {
                 for (int dz = -radius; dz <= radius; dz++) {
-                    double distSq = dx * dx + dy * dy + dz * dz;
-                    if (distSq > radius * radius) continue;
+                    int distSq = dx * dx + dy * dy + dz * dz;
+                    if (distSq > radiusSq || distSq >= bestDistSq) continue;
 
-                    BlockPos pos = playerPos.offset(dx, dy, dz);
+                    cursor.set(px + dx, py + dy, pz + dz);
+                    if (recentlyAttempted.containsKey(cursor)) continue;
+                    if (!inAnyPlacement(bounds, cursor)) continue;
 
-                    // Only process positions within a schematic placement
-                    boolean inPlacement = false;
-                    for (PlacementBounds b : bounds) {
-                        if (b.contains(pos)) {
-                            inPlacement = true;
-                            break;
-                        }
-                    }
-                    if (!inPlacement) continue;
-
-                    BlockState worldState = mc.level.getBlockState(pos);
                     BlockState schematicState;
                     try {
-                        schematicState = schematicWorld.getBlockState(pos);
+                        schematicState = schematicWorld.getBlockState(cursor);
                     } catch (Exception e) {
-                        continue;
+                        continue; // outside the schematic's own bounds
                     }
+                    if (!isWaterlogged(schematicState)) continue;
 
-                    // Check: schematic wants waterlogging, world block matches, world NOT waterlogged
-                    if (schematicState.hasProperty(BlockStateProperties.WATERLOGGED)
-                            && schematicState.getValue(BlockStateProperties.WATERLOGGED)
-                            && worldState.getBlock().equals(schematicState.getBlock())
-                            && (!worldState.hasProperty(BlockStateProperties.WATERLOGGED) || !worldState.getValue(BlockStateProperties.WATERLOGGED))) {
-                        result.add(pos.immutable());
-                    }
+                    BlockState worldState = mc.level.getBlockState(cursor);
+                    if (worldState.getBlock() != schematicState.getBlock()) continue;
+                    if (isWaterlogged(worldState)) continue;
+
+                    best = cursor.immutable(); // must copy: the cursor keeps moving
+                    bestDistSq = distSq;
                 }
             }
         }
+        return best;
+    }
 
-        result.sort(Comparator.comparingDouble(p -> p.distSqr(playerPos)));
-        return result;
+    private static boolean inAnyPlacement(List<PlacementBounds> bounds, BlockPos pos) {
+        for (int i = 0; i < bounds.size(); i++) {
+            if (bounds.get(i).contains(pos)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isWaterlogged(BlockState state) {
+        return state.hasProperty(BlockStateProperties.WATERLOGGED)
+                && state.getValue(BlockStateProperties.WATERLOGGED);
+    }
+
+    private static BlockGetter schematicWorldOrNull() {
+        Object schematicWorld = LitematicaIntegration.getInstance().getSchematicWorld();
+        return schematicWorld instanceof BlockGetter view ? view : null;
     }
 
     /**
-     * Retrieves the world-space bounding boxes of all loaded Litematica schematic
-     * placements via reflection.
+     * Confirms against the schematic that {@code pos} really should be waterlogged, and that the
+     * world block there is the one the schematic expects. Re-checked immediately before clicking
+     * because the scan may be several ticks old by then.
      */
-    private static List<PlacementBounds> getPlacementBounds() {
-        List<PlacementBounds> result = new ArrayList<>();
-        try {
-            Class<?> dmClass = Class.forName("fi.dy.masa.litematica.data.DataManager");
-            // All DataManager methods are static — no getInstance()
-            Object spm = dmClass.getMethod("getSchematicPlacementManager").invoke(null);
-            if (spm == null) return result;
+    private static boolean schematicWantsWaterAt(Minecraft mc, BlockPos pos, BlockState worldState) {
+        Object schematicWorld = LitematicaIntegration.getInstance().getSchematicWorld();
+        if (schematicWorld == null) return true; // no schematic to contradict us
 
-            // Try multiple method names for getting placement list
-            List<?> placements = null;
-            String[] spmMethods = {"getAllSchematicPlacements", "getAllSchematicsPlacements",
-                    "getSchematicPlacements", "getLoadedSchematicPlacements"};
-            for (String name : spmMethods) {
-                try {
-                    Object r = spm.getClass().getMethod(name).invoke(spm);
-                    if (r instanceof List) { placements = (List<?>) r; break; }
-                } catch (Exception ignored) {}
+        if (schematicWorld != lastSchematicWorld || schematicGetBlockStateMethod == null) {
+            lastSchematicWorld = schematicWorld;
+            try {
+                schematicGetBlockStateMethod = schematicWorld.getClass()
+                        .getMethod("getBlockState", BlockPos.class);
+            } catch (NoSuchMethodException e) {
+                schematicGetBlockStateMethod = null;
             }
-            if (placements == null) return result;
+        }
+        if (schematicGetBlockStateMethod == null) return true;
 
-            for (Object placement : placements) {
-                try {
-                    BlockPos origin = (BlockPos) placement.getClass().getMethod("getOrigin").invoke(placement);
-                    Object schematic = placement.getClass().getMethod("getSchematic").invoke(placement);
-                    Vec3i size = (Vec3i) schematic.getClass().getMethod("getTotalSize").invoke(schematic);
-                    result.add(new PlacementBounds(origin, size.getX(), size.getY(), size.getZ()));
-                } catch (Exception ignored) {
-                    // Skip placements that fail reflection
-                }
+        try {
+            Object stateObj = schematicGetBlockStateMethod.invoke(schematicWorld, pos);
+            if (stateObj instanceof BlockState schemState) {
+                return worldState.getBlock() == schemState.getBlock() && isWaterlogged(schemState);
             }
         } catch (Exception ignored) {
-            // Litematica not available — return empty
+            // Litematica internals changed shape — fall through and trust the scan.
         }
-        return result;
+        return true;
     }
 
-    /**
-     * Returns {@code true} if the given ItemStack is a water bucket.
-     */
+    // =========================================================================
+    // Retry cooldown bookkeeping
+    // =========================================================================
+
+    private static void markAttempted(BlockPos pos) {
+        recentlyAttempted.put(pos.immutable(), tickCounter + RETRY_BLOCK_COOLDOWN);
+    }
+
+    private static void expireRetryCooldowns() {
+        if (recentlyAttempted.isEmpty()) return;
+        recentlyAttempted.values().removeIf(expiry -> expiry <= tickCounter);
+    }
+
+    // =========================================================================
+    // Misc helpers
+    // =========================================================================
+
     private static boolean isWaterBucket(ItemStack stack) {
-        return stack.getItem() == Items.WATER_BUCKET;
+        return ItemUtil.is(stack, Items.WATER_BUCKET);
     }
 
     /**
-     * Swaps the item in {@code inventorySlot} (Inventory.items index 9-35)
-     * with the item in {@code hotbarSlot} (Inventory.items index 0-8).
+     * Swap the item in {@code inventorySlot} (Inventory index 9-35) with the one in
+     * {@code hotbarSlot} (Inventory index 0-8), via three container clicks so the server agrees.
      */
     private static void swapSlotWithHotbar(Minecraft mc, int inventorySlot, int hotbarSlot) {
-        /*Inventory inv = mc.player.getInventory();
-        ItemStack invStack = inv.getItem(inventorySlot);
-        ItemStack hotStack = inv.getItem(hotbarSlot);
-        inv.setItem(inventorySlot, hotStack);
-        inv.setItem(hotbarSlot, invStack);*/
         int syncId = mc.player.inventoryMenu.containerId;
-        int screenInvSlot = inventorySlot;          // main[9-35] → screen 9-35
-        int screenHotbarSlot = 36 + hotbarSlot;      // main[0-8]  → screen 36-44
+        // Inventory indices and screen slot indices are not the same numbering:
+        //   main[9-35] -> screen 9-35, main[0-8] -> screen 36-44.
+        int screenInvSlot = inventorySlot;
+        int screenHotbarSlot = InventoryMenu.USE_ROW_SLOT_START + hotbarSlot;
         SlotActionCompat.pickup(mc, syncId, screenInvSlot);
         SlotActionCompat.pickup(mc, syncId, screenHotbarSlot);
         SlotActionCompat.pickup(mc, syncId, screenInvSlot);

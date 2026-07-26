@@ -9,14 +9,17 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 
 /**
- * Auto Material Gathering — public facade.
- * Internally delegates to the automaterial sub-modules:
- * GatherContext, TaskStateMachine, MaterialAnalyzer, ContainerSearcher,
- * BaritonePathingController, ContainerOpener, ItemTransferExecutor.
+ * Auto material gathering — the public face of the {@code automaterial} package.
  *
- * All public API is preserved exactly as before the refactor.
+ * <p>Delegates to {@code GatherContext}, {@code TaskStateMachine} and the specialised modules
+ * around them ({@code MaterialAnalyzer}, {@code ContainerSearcher},
+ * {@code BaritonePathingController}, {@code ContainerOpener}, {@code ItemTransferExecutor},
+ * {@code ShulkerBoxStorage}).
+ *
+ * <p>Requires Baritone, Litematica and ChestTracker; without all three the hotkey reports the
+ * missing dependency instead of doing nothing.
  */
-public class AutoMaterialGatherer {
+public class AutoMaterialGatherer implements ClientFeature {
     private static final AutoMaterialGatherer INSTANCE = new AutoMaterialGatherer();
 
     public enum State {
@@ -51,6 +54,8 @@ public class AutoMaterialGatherer {
     public static AutoMaterialGatherer getInstance() { return INSTANCE; }
 
     public State getState() { return ctx.state; }
+
+    @Override
     public boolean isActive() { return ctx.active; }
 
     public boolean toggle() {
@@ -90,11 +95,13 @@ public class AutoMaterialGatherer {
         MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.stopped");
     }
 
-    public void tick(Minecraft mc) {
+    @Override
+    public void onClientTick(Minecraft mc) {
         ctx.client = mc;
         stateMachine.tick();
     }
 
+    @Override
     public void onWorldChange() {
         if (ctx.active) {
             stop();

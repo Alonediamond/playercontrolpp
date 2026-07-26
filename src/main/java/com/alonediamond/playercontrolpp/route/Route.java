@@ -8,11 +8,25 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * One patrol route: an ordered list of waypoints plus its playback options and hotkey.
+ *
+ * <p>Invariant: there are always at least {@link #MIN_NODES} waypoints, because the executor and
+ * the editor both index the list directly. The list itself is handed out read-only and can only be
+ * changed through {@link #insertNode} / {@link #removeNode}, so the invariant cannot be broken from
+ * outside — previously {@code getNodes()} returned the live list and the GUI could shrink it to one
+ * entry.
+ */
 public class Route {
-    private String id;
+
+    /** A route needs a start and an end. */
+    public static final int MIN_NODES = 2;
+
+    private final String id;
     private String name;
     private boolean enabled;
     private final List<RouteNode> nodes = new ArrayList<>();
@@ -25,8 +39,7 @@ public class Route {
     private ConfigHotkey hotkey;
 
     public Route(String name) {
-        this.id = UUID.randomUUID().toString();
-        initDefaults(name);
+        this(UUID.randomUUID().toString(), name);
     }
 
     private Route(String id, String name) {
@@ -38,8 +51,9 @@ public class Route {
         this.name = name;
         this.enabled = false;
         this.nodes.clear();
-        this.nodes.add(new RouteNode());
-        this.nodes.add(new RouteNode());
+        for (int i = 0; i < MIN_NODES; i++) {
+            this.nodes.add(new RouteNode());
+        }
         this.dimensionId = "";
         this.arrivalRadius = 1.0;
         this.loopCount = 1;
@@ -66,20 +80,36 @@ public class Route {
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
-    public List<RouteNode> getNodes() { return nodes; }
+    /** @return the waypoints, read-only. Use {@link #insertNode} / {@link #removeNode} to edit. */
+    public List<RouteNode> getNodes() { return Collections.unmodifiableList(nodes); }
 
-    public RouteNode getStartPos() { return nodes.get(0); }
-    public void setStartPos(double x, double y, double z) {
-        nodes.get(0).x = x;
-        nodes.get(0).y = y;
-        nodes.get(0).z = z;
+    public int getNodeCount() { return nodes.size(); }
+
+    /** @return the waypoint at {@code index}; its coordinates are mutable in place. */
+    public RouteNode getNode(int index) { return nodes.get(index); }
+
+    /**
+     * Insert a waypoint.
+     *
+     * @return whether it was inserted; refused for an index outside the list
+     */
+    public boolean insertNode(int index, RouteNode node) {
+        if (index < 0 || index > nodes.size()) return false;
+        nodes.add(index, node);
+        return true;
     }
 
-    public RouteNode getEndPos() { return nodes.get(1); }
-    public void setEndPos(double x, double y, double z) {
-        nodes.get(1).x = x;
-        nodes.get(1).y = y;
-        nodes.get(1).z = z;
+    /**
+     * Remove a waypoint.
+     *
+     * @return whether it was removed; refused when it would drop below {@link #MIN_NODES}, or for
+     *         an index outside the list
+     */
+    public boolean removeNode(int index) {
+        if (nodes.size() <= MIN_NODES) return false;
+        if (index < 0 || index >= nodes.size()) return false;
+        nodes.remove(index);
+        return true;
     }
 
     public String getDimensionId() { return dimensionId; }
@@ -106,17 +136,18 @@ public class Route {
     public ConfigHotkey getHotkey() { return hotkey; }
 
     /**
-     * Calculate the total number of segments to traverse.
-     * With k nodes: one forward traversal = k-1 segments.
-     * loopCount 1 = single forward pass through all waypoints
-     * loopCount N>1 = N round trips (forward + backward)
-     * loopCount 0 = infinite (returns -1)
+     * How many waypoint-to-waypoint legs make up a full run.
+     *
+     * <p>With k waypoints one forward pass is k-1 legs.
+     * loopCount 1 is a single forward pass, N &gt; 1 is N round trips, and 0 means never stop.
+     *
+     * @return the leg count, or -1 for an infinite route
      */
     public int getTotalSegments() {
         int waypointSegments = Math.max(1, nodes.size() - 1);
-        if (loopCount == 0) return -1;    // infinite
-        if (loopCount == 1) return waypointSegments; // single forward pass
-        return loopCount * 2 * waypointSegments;     // N round trips
+        if (loopCount == 0) return -1;
+        if (loopCount == 1) return waypointSegments;
+        return loopCount * 2 * waypointSegments;
     }
 
     public JsonObject toJson() {
@@ -146,7 +177,6 @@ public class Route {
         String routeName = obj.has("name") ? obj.get("name").getAsString() : "Unnamed Route";
         Route route = new Route(routeId, routeName);
 
-        if (obj.has("name")) route.name = obj.get("name").getAsString();
         if (obj.has("enabled")) route.setEnabled(obj.get("enabled").getAsBoolean());
         if (obj.has("dimensionId")) route.dimensionId = obj.get("dimensionId").getAsString();
         if (obj.has("arrivalRadius")) route.setArrivalRadius(obj.get("arrivalRadius").getAsDouble());
@@ -161,8 +191,8 @@ public class Route {
             for (int i = 0; i < nodesArr.size(); i++) {
                 route.nodes.add(RouteNode.fromJson(nodesArr.get(i).getAsJsonObject()));
             }
-            // Ensure at least 2 nodes
-            while (route.nodes.size() < 2) {
+            // Restore the invariant if the file was hand-edited down to too few waypoints.
+            while (route.nodes.size() < MIN_NODES) {
                 route.nodes.add(new RouteNode());
             }
         }

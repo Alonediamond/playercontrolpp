@@ -18,9 +18,6 @@
   "playercontrolpp.config.settings.pretty_name.turnAngle": "Turn Angle",
   "playercontrolpp.config.settings.comment.turnAngle": "Turn angle in degrees for Quick Turn.",
 
-  "playercontrolpp.config.settings.name.layerIncrement": "Layer Increment",
-  "playercontrolpp.config.settings.pretty_name.layerIncrement": "Layer Increment",
-  "playercontrolpp.config.settings.comment.layerIncrement": "Litematica render layer increment amount after each route cycle.",
 
   "playercontrolpp.config.hotkeys.name.openConfigGui": "Open Config GUI",
   "playercontrolpp.config.hotkeys.pretty_name.openConfigGui": "Open Config GUI",
@@ -82,9 +79,6 @@
   "playercontrolpp.gui.recording.recording": "Status: Recording...",
   "playercontrolpp.gui.recording.playing": "Status: Playing...",
   "playercontrolpp.gui.recording.idle": "Status: Idle",
-  "playercontrolpp.gui.recording.hp_on": "[HP Mode: ON]",
-  "playercontrolpp.gui.recording.hp_off": "[HP Mode: OFF]",
-  "playercontrolpp.gui.recording.hp_warn": "! HP MODE ACTIVE - tracks exact position each frame, larger files, higher replay accuracy !",
 
   "playercontrolpp.gui.tab.baritone": "Baritone",
   "playercontrolpp.gui.baritone.warning": "WARNING: This mode is a cheat feature. If using on a multiplayer server, ensure you have the server owner or admin's consent.",
@@ -101,7 +95,6 @@
   "playercontrolpp.message.baritone.opening": "[PlayerControl++] Opening container...",
   "playercontrolpp.message.baritone.transferring": "[PlayerControl++] Transferring items...",
   "playercontrolpp.message.baritone.completed": "[PlayerControl++] Material gathering complete. Please collect remaining materials manually if needed.",
-  "playercontrolpp.message.baritone.completed_full": "[PlayerControl++] Material gathering complete - inventory full. Please clear inventory and try again.",
   "playercontrolpp.message.baritone.no_hud": "[PlayerControl++] Please enable the Material List Info HUD in Litematica first.",
   "playercontrolpp.message.baritone.inventory_full": "[PlayerControl++] Inventory is full. Please clear some space first.",
   "playercontrolpp.message.baritone.pathing_stuck": "[PlayerControl++] Pathfinding stuck or failed. Please change position and try again.",
@@ -139,8 +132,6 @@
   "playercontrolpp.message.baritone.shulker_no_box": "[PlayerControl++] No usable shulker box found in inventory. Stopped.",
   "playercontrolpp.message.baritone.shulker_no_position": "[PlayerControl++] No valid position to place shulker box. Stopped.",
   "playercontrolpp.message.baritone.shulker_mine_failed": "[PlayerControl++] Failed to mine shulker box. Stopped.",
-  "playercontrolpp.message.baritone.shulker_resume": "[PlayerControl++] Inventory space freed, resuming auto-gathering.",
-  "playercontrolpp.message.baritone.shulker_box_full": "[PlayerControl++] Shulker box is full. Stopped.",
   "playercontrolpp.message.baritone.shulker_place_failed": "[PlayerControl++] Failed to place shulker box. Stopped.",
   "playercontrolpp.message.baritone.shulker_open_failed": "[PlayerControl++] Failed to open placed shulker box — aborting to prevent damage to surroundings.",
   "playercontrolpp.message.baritone.shulker_pickup_failed": "[PlayerControl++] Shulker box not picked up within 5 seconds — stopping auto-gathering to prevent item loss.",
@@ -180,8 +171,16 @@
   "playercontrolpp.message.water_fill.no_schematic": "[PlayerControl++] No Litematica schematic loaded. Auto Water Fill stopped.",
   "playercontrolpp.message.water_fill.no_bucket": "[PlayerControl++] No water bucket found in inventory. Auto Water Fill stopped.",
   "playercontrolpp.message.water_fill.completed": "[PlayerControl++] All waterloggable blocks filled. Auto Water Fill stopped.",
-  "playercontrolpp.message.water_fill.sneaking": "[PlayerControl++] Auto Water Fill paused (player sneaking).",
   "playercontrolpp.message.water_fill.world_change": "[PlayerControl++] Auto Water Fill: OFF (world changed)",
 
-  "playercontrolpp.message.recording.corrupt": "[PlayerControl++] Recording file is corrupt or damaged and cannot be loaded."
+  "playercontrolpp.message.recording.corrupt": "[PlayerControl++] Recording file is corrupt or damaged and cannot be loaded.",
+
+  "playercontrolpp.config.settings.name.playbackPositionCorrection": "Playback Position Correction",
+  "playercontrolpp.config.settings.pretty_name.playbackPositionCorrection": "Playback Position Correction",
+  "playercontrolpp.config.settings.comment.playbackPositionCorrection": "Teleport the player back onto the recorded path when playback drifts more than 2 blocks.\nOFF by default: playback reproduces input, not positions, so some drift is normal. Correcting it rewrites the client position, which disagrees with the server and may look like flying to anti-cheat. Recommended for single-player only.",
+
+  "playercontrolpp.message.playback.drift": "[PlayerControl++] Playback has drifted well off the recorded path (terrain or latency). Enable Playback Position Correction in settings if you want it snapped back.",
+  "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] The recording index could not be read and has been set aside as index.json.corrupt-N. The recording files themselves are untouched.",
+  "playercontrolpp.message.recording.save_failed": "[PlayerControl++] Failed to write the recording to disk; see the log for details.",
+  "playercontrolpp.message.baritone.pathing_not_started": "[PlayerControl++] Baritone never started pathing. Check that it is enabled and that the target is reachable."
 }

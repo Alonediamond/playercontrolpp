@@ -1,45 +1,58 @@
 package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
+import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 
 /**
- * Auto-caches nearby container contents by simulating right-click to open each
- * container in range, waiting for the ChestTracker mod to record items, then
- * auto-closing. Uses a 5-state tick-driven state machine and a per-session
- * visited set to avoid re-opening the same container.
+ * Opens every whitelisted container in reach so ChestTracker can record its contents, then
+ * closes it again. A per-session visited set stops it from re-opening the same one.
  *
- * State flow: SCANNING → OPENING_CONTAINER → WAITING_AFTER_OPEN → CLOSING_GUI → SCANNING
- * When no uncached containers remain in range → AUTO_STOP_COUNTDOWN (3-second timer).
+ * <pre>
+ * SCANNING -&gt; OPENING_CONTAINER -&gt; WAITING_AFTER_OPEN -&gt; CLOSING_GUI -&gt; [COOLDOWN] -&gt; SCANNING
+ * </pre>
+ *
+ * <p>With nothing left uncached it enters AUTO_STOP_COUNTDOWN, which keeps looking at a reduced
+ * rate for three seconds so walking to the next room resumes it automatically.
  */
 public class AutoCacheNearbyContainersFeature {
 
-    /** 6-state tick-driven state machine for container caching. */
     private enum State {
         SCANNING,               // Looking for uncached containers in range
-        OPENING_CONTAINER,      // Sent interactBlock, waiting for GUI (up to 10 ticks)
-        WAITING_AFTER_OPEN,     // GUI opened, wait 1 tick for ChestTracker to record
-        CLOSING_GUI,            // Closed GUI, brief cooldown before next scan
-        COOLDOWN,               // Waiting configured delay ticks between containers
-        AUTO_STOP_COUNTDOWN     // No uncached containers, counting down to auto-stop
+        OPENING_CONTAINER,      // Click sent, waiting for the screen
+        WAITING_AFTER_OPEN,     // Screen up, give ChestTracker a tick to record
+        CLOSING_GUI,            // Closed, brief settle before the next scan
+        COOLDOWN,               // Configured delay between containers
+        AUTO_STOP_COUNTDOWN     // Nothing left; counting down to switch off
     }
+
+    /** Auto-stop grace period: 3 seconds at 20 tps. */
+    private static final int AUTO_STOP_TICKS = 60;
+    /** During the countdown, only re-scan this often — the sweep is the expensive part. */
+    private static final int COUNTDOWN_SCAN_INTERVAL = 5;
+    /** Ticks to wait for the container screen after clicking. */
+    private static final int OPEN_WAIT_TICKS = 10;
+    /** Ticks to leave the screen open so ChestTracker sees the contents. */
+    private static final int RECORD_WAIT_TICKS = 1;
+    /** Ticks to settle after closing before scanning again. */
+    private static final int CLOSE_SETTLE_TICKS = 2;
 
     private static boolean enabled;
     private static final Set<BlockPos> visitedContainers = new HashSet<>();
@@ -48,6 +61,26 @@ public class AutoCacheNearbyContainersFeature {
     private static int stateTimer;
     private static int autoStopCountdown;
 
+    /**
+     * The whitelist resolved from ids to block instances.
+     *
+     * <p>The scan used to build the block's registry id as a String and look that up — a registry
+     * reverse-lookup plus a String allocation for each of the ~1300 positions in the cube, every
+     * tick. Resolving once to {@code Set<Block>} makes the inner check an identity-hash lookup.
+     */
+    private static Set<Block> whitelistBlocks = Collections.emptySet();
+    /** The config value {@link #whitelistBlocks} was built from, to detect edits. */
+    private static List<String> whitelistSource;
+
+    /** Registered with {@link FeatureRegistry}; see {@code InitHandler}. */
+    public static final ClientFeature FEATURE = new ClientFeature() {
+        @Override public void onClientTick(Minecraft mc) { tick(mc); }
+        @Override public void onWorldChange() { AutoCacheNearbyContainersFeature.onWorldChange(); }
+        @Override public boolean isActive() { return enabled; }
+    };
+
+    private AutoCacheNearbyContainersFeature() {}
+
     public static boolean isEnabled() {
         return enabled;
     }
@@ -55,17 +88,11 @@ public class AutoCacheNearbyContainersFeature {
     public static void toggle(Minecraft client) {
         enabled = !enabled;
         if (enabled) {
-            visitedContainers.clear();
-            currentTarget = null;
-            state = State.SCANNING;
-            stateTimer = 0;
-            autoStopCountdown = 0;
+            resetState();
             MessageUtil.sendActionBar(client, "playercontrolpp.message.cache_nearby.on");
         } else {
             closeGuiIfOpen(client);
-            visitedContainers.clear();
-            currentTarget = null;
-            state = State.SCANNING;
+            resetState();
             MessageUtil.sendActionBar(client, "playercontrolpp.message.cache_nearby.off");
         }
     }
@@ -73,9 +100,7 @@ public class AutoCacheNearbyContainersFeature {
     public static void onWorldChange() {
         if (enabled) {
             enabled = false;
-            visitedContainers.clear();
-            currentTarget = null;
-            state = State.SCANNING;
+            resetState();
             Minecraft client = Minecraft.getInstance();
             if (client.player != null) {
                 MessageUtil.sendActionBar(client, "playercontrolpp.message.cache_nearby.world_change");
@@ -83,16 +108,25 @@ public class AutoCacheNearbyContainersFeature {
         }
     }
 
+    private static void resetState() {
+        visitedContainers.clear();
+        currentTarget = null;
+        state = State.SCANNING;
+        stateTimer = 0;
+        autoStopCountdown = 0;
+    }
+
     public static void tick(Minecraft mc) {
         if (!enabled || mc.player == null || mc.level == null) return;
 
-        // Respect other GUIs — only proceed if we own the current screen interaction
-        if (ScreenCompat.getScreen(mc) != null) {
-            if (state == State.SCANNING || state == State.AUTO_STOP_COUNTDOWN || state == State.COOLDOWN) {
-                // Allow scanning/cooldown/countdown to continue (no screen interaction needed)
-            } else if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen)) {
-                return;
-            }
+        // Respect other GUIs: scanning and waiting need no screen, but the interactive states
+        // must not run while the player has something else open.
+        if (ScreenCompat.getScreen(mc) != null
+                && state != State.SCANNING
+                && state != State.COOLDOWN
+                && state != State.AUTO_STOP_COUNTDOWN
+                && !(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen)) {
+            return;
         }
 
         switch (state) {
@@ -106,57 +140,49 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     private static void tickScanning(Minecraft mc) {
-        double range = getInteractionRange(mc);
-        BlockPos playerPos = mc.player.blockPosition();
-        List<BlockPos> nearbyContainers = scanContainers(mc, playerPos, range);
-
-        if (nearbyContainers.isEmpty()) {
-            // No uncached containers nearby
-            if (state == State.SCANNING) {
-                state = State.AUTO_STOP_COUNTDOWN;
-                autoStopCountdown = 60; // 3 seconds at 20 tps
-                MessageUtil.sendActionBar(mc, "playercontrolpp.message.cache_nearby.all_cached");
-            }
+        BlockPos target = findNearestUncachedContainer(mc);
+        if (target == null) {
+            state = State.AUTO_STOP_COUNTDOWN;
+            autoStopCountdown = AUTO_STOP_TICKS;
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.cache_nearby.all_cached");
         } else {
-            // Cancel auto-stop if we were counting down
-            currentTarget = nearbyContainers.get(0);
-            openContainer(mc, currentTarget);
+            currentTarget = target;
+            openContainer(mc, target);
             state = State.OPENING_CONTAINER;
-            stateTimer = 10; // Wait up to 10 ticks for GUI to open
+            stateTimer = OPEN_WAIT_TICKS;
         }
     }
 
     private static void tickOpeningContainer(Minecraft mc) {
         stateTimer--;
         if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
-            // GUI opened successfully
-            if (currentTarget != null) {
-                visitedContainers.add(currentTarget);
-            }
+            markVisited();
             state = State.WAITING_AFTER_OPEN;
-            stateTimer = 1; // Wait 1 tick with GUI open
+            stateTimer = RECORD_WAIT_TICKS;
         } else if (stateTimer <= 0) {
-            // Failed to open within timeout, mark as visited and move on
-            if (currentTarget != null) {
-                visitedContainers.add(currentTarget);
-            }
+            // Never opened — mark it anyway so we do not retry it forever.
+            markVisited();
             currentTarget = null;
             state = State.SCANNING;
         }
     }
 
+    private static void markVisited() {
+        if (currentTarget != null) {
+            visitedContainers.add(currentTarget);
+        }
+    }
+
     private static void tickWaitingAfterOpen(Minecraft mc) {
-        stateTimer--;
-        if (stateTimer <= 0) {
+        if (--stateTimer <= 0) {
             closeGuiIfOpen(mc);
             state = State.CLOSING_GUI;
-            stateTimer = 2; // Brief cooldown after closing
+            stateTimer = CLOSE_SETTLE_TICKS;
         }
     }
 
     private static void tickClosingGui(Minecraft mc) {
-        stateTimer--;
-        if (stateTimer <= 0) {
+        if (--stateTimer <= 0) {
             currentTarget = null;
             int delay = Configs.Settings.CACHE_DELAY.getIntegerValue();
             if (delay > 0) {
@@ -169,8 +195,7 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     private static void tickCooldown(Minecraft mc) {
-        stateTimer--;
-        if (stateTimer <= 0) {
+        if (--stateTimer <= 0) {
             state = State.SCANNING;
         }
     }
@@ -178,52 +203,85 @@ public class AutoCacheNearbyContainersFeature {
     private static void tickAutoStopCountdown(Minecraft mc) {
         autoStopCountdown--;
 
-        // Re-scan to check if new containers appeared
-        double range = getInteractionRange(mc);
-        BlockPos playerPos = mc.player.blockPosition();
-        List<BlockPos> nearbyContainers = scanContainers(mc, playerPos, range);
-
-        if (!nearbyContainers.isEmpty()) {
-            // New container found, cancel auto-stop
+        if (autoStopCountdown % COUNTDOWN_SCAN_INTERVAL == 0
+                && findNearestUncachedContainer(mc) != null) {
             state = State.SCANNING;
             return;
         }
 
         if (autoStopCountdown <= 0) {
             enabled = false;
-            visitedContainers.clear();
-            currentTarget = null;
-            state = State.SCANNING;
+            resetState();
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.cache_nearby.auto_stop");
         }
     }
 
-    private static List<BlockPos> scanContainers(Minecraft mc, BlockPos playerPos, double range) {
-        List<BlockPos> result = new ArrayList<>();
-        int rangeInt = (int) Math.ceil(range);
-        Set<String> whitelist = new HashSet<>(Configs.CacheNearbySettings.CONTAINER_WHITELIST.getStrings());
+    /**
+     * Single pass over the reach-limited cube, keeping only the closest hit.
+     *
+     * <p>Reuses one {@link BlockPos.MutableBlockPos} instead of allocating per position, and
+     * returns the nearest directly rather than collecting every hit and sorting a list whose
+     * first element was the only one ever read.
+     *
+     * @return the closest whitelisted container not yet visited, or {@code null}
+     */
+    private static BlockPos findNearestUncachedContainer(Minecraft mc) {
+        Set<Block> whitelist = whitelistBlocks();
+        if (whitelist.isEmpty()) return null;
+
         Level level = mc.level;
+        double range = PlayerUtil.blockReach(mc.player);
+        int rangeInt = (int) Math.ceil(range);
+        double rangeSq = range * range;
+
+        BlockPos playerPos = mc.player.blockPosition();
+        int px = playerPos.getX(), py = playerPos.getY(), pz = playerPos.getZ();
+
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
 
         for (int dx = -rangeInt; dx <= rangeInt; dx++) {
             for (int dy = -rangeInt; dy <= rangeInt; dy++) {
                 for (int dz = -rangeInt; dz <= rangeInt; dz++) {
                     double distSq = dx * dx + dy * dy + dz * dz;
-                    if (distSq > range * range) continue;
+                    if (distSq > rangeSq || distSq >= bestDistSq) continue;
 
-                    BlockPos pos = playerPos.offset(dx, dy, dz);
-                    if (visitedContainers.contains(pos)) continue;
+                    cursor.set(px + dx, py + dy, pz + dz);
+                    if (visitedContainers.contains(cursor)) continue;
+                    if (!whitelist.contains(level.getBlockState(cursor).getBlock())) continue;
 
-                    String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
-                    if (whitelist.contains(blockId)) {
-                        result.add(pos);
-                    }
+                    best = cursor.immutable(); // must copy: the cursor keeps moving
+                    bestDistSq = distSq;
                 }
             }
         }
+        return best;
+    }
 
-        // Sort by distance from player (nearest first)
-        result.sort(Comparator.comparingDouble(p -> p.distSqr(playerPos)));
-        return result;
+    /**
+     * @return the whitelist as block instances, rebuilt only when the config string list changes.
+     *
+     * <p>Resolves by walking the block registry once and keeping the entries whose id is listed.
+     * That avoids per-version differences in the {@code Registry.get(id)} return type, which is
+     * plain {@code Optional<Block>} on some of the supported versions and a Holder on others.
+     */
+    private static Set<Block> whitelistBlocks() {
+        List<String> configured = Configs.CacheNearbySettings.CONTAINER_WHITELIST.getStrings();
+        if (configured.equals(whitelistSource)) {
+            return whitelistBlocks;
+        }
+
+        whitelistSource = List.copyOf(configured);
+        Set<String> ids = new HashSet<>(whitelistSource);
+        Set<Block> resolved = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Block block : BuiltInRegistries.BLOCK) {
+            if (ids.contains(BuiltInRegistries.BLOCK.getKey(block).toString())) {
+                resolved.add(block);
+            }
+        }
+        whitelistBlocks = resolved;
+        return whitelistBlocks;
     }
 
     private static void openContainer(Minecraft mc, BlockPos target) {
@@ -253,11 +311,6 @@ public class AutoCacheNearbyContainersFeature {
         if (ax >= ay && ax >= az) return dx > 0 ? Direction.EAST : Direction.WEST;
         if (ay >= ax && ay >= az) return dy > 0 ? Direction.UP : Direction.DOWN;
         return dz > 0 ? Direction.SOUTH : Direction.NORTH;
-    }
-
-    private static double getInteractionRange(Minecraft mc) {
-        if (mc.player == null) return 4.5;
-        return mc.player.isCreative() ? 5.0 : 4.5;
     }
 
     private static void closeGuiIfOpen(Minecraft mc) {

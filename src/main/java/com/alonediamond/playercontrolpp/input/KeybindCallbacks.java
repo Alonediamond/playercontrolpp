@@ -11,7 +11,6 @@ import com.alonediamond.playercontrolpp.gui.PlayerControlppConfigGui;
 import com.alonediamond.playercontrolpp.record.InputRecorder;
 import com.alonediamond.playercontrolpp.record.RecordingFile;
 import com.alonediamond.playercontrolpp.record.RecordingManager;
-import com.alonediamond.playercontrolpp.route.RouteManager;
 import fi.dy.masa.malilib.hotkeys.IHotkeyCallback;
 import fi.dy.masa.malilib.hotkeys.IKeybind;
 import fi.dy.masa.malilib.hotkeys.KeyAction;
@@ -37,10 +36,9 @@ public class KeybindCallbacks {
         AUTO_CACHE_NEARBY_CONTAINERS.getKeybind().setCallback(new AutoCacheNearbyContainersCallback());
         WATER_FILL_TOGGLE.getKeybind().setCallback(new WaterFillToggleCallback());
 
-        // Register route hotkey callbacks
-        for (RouteManager.RouteHotkey rh : RouteManager.getInstance().getRouteHotkeyList()) {
-            rh.getKeybind().setCallback(new RouteToggleCallback(rh));
-        }
+        // Route hotkey callbacks are attached by RouteManager when a route is created or loaded,
+        // which is the only moment they exist. There used to be a second loop here as well, but
+        // it ran before loadRoutes() and so always iterated an empty list.
     }
 
     private static class AutoForwardCallback implements IHotkeyCallback {
@@ -100,8 +98,8 @@ public class KeybindCallbacks {
                 RecordingFile rf = rec.stopRecording();
                 RecordingManager.getInstance().addRecording(rf);
             } else {
-                // Prevent recording during playback
-                if (RecordingManager.getInstance().getPlayer().isPlaying()) return false;
+                // Prevent recording during playback, including while it is still loading
+                if (RecordingManager.getInstance().getPlayer().isBusy()) return false;
                 rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
                 ScreenCompat.setScreen(client, null); // exit all GUIs
             }
@@ -142,28 +140,4 @@ public class KeybindCallbacks {
         }
     }
 
-    private static class RouteToggleCallback implements IHotkeyCallback {
-        private final RouteManager.RouteHotkey routeHotkey;
-
-        RouteToggleCallback(RouteManager.RouteHotkey routeHotkey) {
-            this.routeHotkey = routeHotkey;
-        }
-
-        @Override
-        public boolean onKeyAction(KeyAction action, IKeybind key) {
-            if (action != KeyAction.PRESS) {
-                return false;
-            }
-            Minecraft client = Minecraft.getInstance();
-            if (client.player == null) {
-                return false;
-            }
-            RouteManager.getInstance().getRoutes().stream()
-                    .filter(r -> r.getId().equals(routeHotkey.getRoute().getId()))
-                    .findFirst()
-                    .ifPresent(r -> com.alonediamond.playercontrolpp.route.RouteFlowRuntime
-                            .getInstance().toggleRoute(r));
-            return true;
-        }
-    }
 }

@@ -1,43 +1,43 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.compat.InventoryCompat;
-
-import com.alonediamond.playercontrolpp.compat.ContainerContentsCompat;
-
-import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
-
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-
+import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.StorageMode;
+import com.alonediamond.playercontrolpp.feature.ItemTransferStrategy;
+import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
-import net.minecraft.tags.ItemTags;
-import net.minecraft.world.level.block.state.BlockState;
+import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.item.component.ItemContainerContents;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Handles auto-storing gathered building materials into shulker boxes
- * when inventory is full during auto material gathering.
+ * Frees inventory space during auto-gathering by moving already-collected building materials into
+ * a shulker box.
  *
- * <p>Flow:</p>
  * <pre>
- * FINDING_SHULKER → FINDING_POSITION → SWITCHING_SHULKER → PLACING
- * → OPENING → TRANSFERRING → CLOSING → MINING → WAITING_PICKUP → DONE/FAILED
+ * FINDING_SHULKER -&gt; FINDING_POSITION -&gt; SWITCHING_SHULKER -&gt; PLACING
+ *                 -&gt; OPENING -&gt; TRANSFERRING -&gt; CLOSING -&gt; MINING -&gt; WAITING_PICKUP -&gt; DONE
  * </pre>
+ *
+ * <p>With QuickShulker installed and selected in the config the middle of that is skipped: the box
+ * is opened in place (FINDING_SHULKER -&gt; QUICK_OPEN -&gt; TRANSFERRING -&gt; CLOSING -&gt; DONE), which
+ * avoids placing and mining a block altogether.
  */
 public class ShulkerBoxStorage {
 
@@ -47,9 +47,38 @@ public class ShulkerBoxStorage {
         MINING, WAITING_PICKUP, DONE
     }
 
+    public enum StorageResult {
+        ACTIVE, DONE, FAILED
+    }
+
+    /** Slots in a shulker box's own container screen: indices 0..26. */
+    private static final int BOX_SLOT_COUNT = ItemTransferStrategy.SHULKER_SLOT_COUNT;
+    /** First player-inventory slot in a shulker box screen (27 box slots come first). */
+    private static final int BOX_SCREEN_PLAYER_START = BOX_SLOT_COUNT;
+    /** Last player-inventory slot in a shulker box screen. */
+    private static final int BOX_SCREEN_PLAYER_END = BOX_SLOT_COUNT + Inventory.INVENTORY_SIZE - 1;
+    /** Safety cap on quick-move clicks in one storage cycle. */
+    private static final int MAX_TRANSFERS_PER_CYCLE = 200;
+
+    /** Retries when looking for somewhere to put the box down. */
+    private static final int MAX_POSITION_RETRIES = 3;
+    /** Retries when QuickShulker's open packet does not take. */
+    private static final int MAX_QUICK_OPEN_RETRIES = 5;
+    /** Ticks after clicking before checking whether the box really got placed. */
+    private static final int PLACE_VERIFY_TICKS = 4;
+    /** Total attempts at placing before failing. */
+    private static final int MAX_PLACE_ATTEMPTS = 10;
+    /** Ticks to wait for the box's screen to appear. */
+    private static final int OPEN_VERIFY_LIMIT = 30;
+    /** Ticks to keep mining before assuming something is wrong. */
+    private static final int MAX_MINING_TICKS = 100;
+    /** Ticks to wait for the mined box to be picked up. */
+    private static final int MAX_PICKUP_WAIT_TICKS = 100;
+
     private StorageState state = StorageState.IDLE;
     private boolean active;
-    private StorageResult terminalResult = StorageResult.ACTIVE; // set when reaching a terminal outcome
+    /** Set once a terminal outcome is reached, so tick() can report it exactly once. */
+    private StorageResult terminalResult = StorageResult.ACTIVE;
     private int cooldown;
     private int retryCount;
     private int miningTicks;
@@ -59,16 +88,15 @@ public class ShulkerBoxStorage {
     private final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
     private boolean useQuickShulkerMode;
     private boolean anyItemsTransferred;
+    /** Inventory slots whose box turned out to be full; remembered across cycles. */
     private final java.util.Set<Integer> knownFullSlots = new java.util.HashSet<>();
 
     private int shulkerSlotIndex = -1;
-    private int hotbarSlotIndex = -1;
-    private BlockPos placedPos;           // where the shulker box was placed
-    private BlockPos placeAgainst;        // the block we clicked against to place
-    private Direction placeClickFace;     // which face of placeAgainst we clicked
+    private BlockPos placedPos;           // where the box was placed
+    private BlockPos placeAgainst;        // the block clicked against to place it
+    private Direction placeClickFace;     // which face of placeAgainst was clicked
     private int transferIndex;
     private int prevSelectedSlot;
-    private int pickaxeSlot = -1;
 
     public boolean isActive() { return active; }
 
@@ -76,7 +104,7 @@ public class ShulkerBoxStorage {
         return Configs.BaritoneSettings.AUTO_STORE_TO_SHULKER.getBooleanValue();
     }
 
-    /** Whether QuickShulker storage mode is active. Requires config set to QUICKSHULKER + mod installed. */
+    /** @return whether QuickShulker mode applies: selected in the config <em>and</em> installed. */
     public static boolean isQuickShulkerModeEnabled() {
         StorageMode mode = (StorageMode) Configs.BaritoneSettings.SHULKER_STORAGE_MODE.getOptionListValue();
         return mode == StorageMode.QUICKSHULKER
@@ -96,15 +124,13 @@ public class ShulkerBoxStorage {
         waitTicks = 0;
         openVerifyTicks = 0;
         shulkerSlotIndex = -1;
-        hotbarSlotIndex = -1;
         placedPos = null;
         placeAgainst = null;
         placeClickFace = null;
         transferIndex = 0;
         prevSelectedSlot = InventoryCompat.getSelectedSlot(mc.player.getInventory());
-        pickaxeSlot = -1;
         anyItemsTransferred = false;
-        // NOTE: knownFullSlots is NOT cleared — full boxes stay full across cycles
+        // knownFullSlots is deliberately kept: a box that was full last cycle is still full.
         useQuickShulkerMode = isQuickShulkerModeEnabled();
 
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_start");
@@ -120,43 +146,23 @@ public class ShulkerBoxStorage {
         if (mc.player.isDeadOrDying()) { abort(mc); return StorageResult.FAILED; }
 
         switch (state) {
-            case IDLE:
-                state = StorageState.FINDING_SHULKER;
-                break;
-            case FINDING_SHULKER:
-                doFindShulker(mc, ctx);
-                break;
-            case FINDING_POSITION:
-                doFindPosition(mc);
-                break;
-            case SWITCHING_SHULKER:
-                doSwitchToShulker(mc);
-                break;
-            case PLACING:
-                doPlace(mc);
-                break;
-            case OPENING:
-                doOpen(mc);
-                break;
-            case QUICK_OPEN:
-                doQuickOpen(mc);
-                break;
-            case TRANSFERRING:
-                doTransfer(mc, ctx);
-                break;
-            case CLOSING:
-                doClose(mc);
-                break;
-            case MINING:
-                doMine(mc);
-                break;
-            case WAITING_PICKUP:
-                return doWaitPickup(mc);
-            case DONE:
+            case IDLE -> state = StorageState.FINDING_SHULKER;
+            case FINDING_SHULKER -> doFindShulker(mc, ctx);
+            case FINDING_POSITION -> doFindPosition(mc);
+            case SWITCHING_SHULKER -> doSwitchToShulker(mc);
+            case PLACING -> doPlace(mc);
+            case OPENING -> doOpen(mc);
+            case QUICK_OPEN -> doQuickOpen(mc);
+            case TRANSFERRING -> doTransfer(mc, ctx);
+            case CLOSING -> doClose(mc);
+            case MINING -> doMine(mc);
+            case WAITING_PICKUP -> { return doWaitPickup(mc); }
+            case DONE -> {
                 active = false;
                 return StorageResult.DONE;
+            }
         }
-        // If a state handler set a terminal result, propagate it immediately
+
         if (!active && terminalResult != StorageResult.ACTIVE) {
             return terminalResult;
         }
@@ -165,10 +171,26 @@ public class ShulkerBoxStorage {
 
     // ---- Phases ----
 
+    private void doFindShulker(Minecraft mc, GatherContext ctx) {
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (knownFullSlots.contains(i)) continue;
+            ItemStack stack = mc.player.getInventory().getItem(i);
+            if (!ItemUtil.isShulkerBox(stack)) continue;
+            // Never store into a box we are supposed to be collecting.
+            if (isOnMissingList(stack, ctx)) continue;
+            // Fullness is judged from the open screen, not the item's NBT, which can be stale.
+            shulkerSlotIndex = i;
+            state = useQuickShulkerMode ? StorageState.QUICK_OPEN : StorageState.FINDING_POSITION;
+            return;
+        }
+        MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_box");
+        terminalResult = StorageResult.FAILED;
+        active = false;
+    }
+
     /**
-     * QuickShulker mode: send OpenShulkerPacket directly for the shulker box
-     * at its current inventory position. No item swapping — compute the
-     * PlayerScreenHandler slot index and send the packet.
+     * QuickShulker mode: open the box where it sits. No swapping — just translate the inventory
+     * index into a player-screen slot index and send QuickShulker's own packet.
      */
     private void doQuickOpen(Minecraft mc) {
         if (!quickShulker.isLoaded()) {
@@ -176,14 +198,10 @@ public class ShulkerBoxStorage {
             return;
         }
 
-        // Compute screen handler slot for PlayerScreenHandler:
-        //   inventory index 0-8  (hotbar)       → screen slot 36-44
-        //   inventory index 9-35 (main inventory) → screen slot 9-35
-        int screenSlot = shulkerSlotIndex < 9 ? 36 + shulkerSlotIndex : shulkerSlotIndex;
-
+        int screenSlot = playerScreenSlot(shulkerSlotIndex);
         if (!quickShulker.openShulkerBox(screenSlot)) {
             retryCount++;
-            if (retryCount < 5) {
+            if (retryCount < MAX_QUICK_OPEN_RETRIES) {
                 cooldown = 3;
                 return;
             }
@@ -198,44 +216,19 @@ public class ShulkerBoxStorage {
         state = StorageState.TRANSFERRING;
     }
 
-    private void doFindShulker(Minecraft mc, GatherContext ctx) {
-        for (int i = 0; i < 36; i++) {
-            if (knownFullSlots.contains(i)) {
-                continue;
-            }
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (stack.isEmpty() || !isShulkerBox(stack)) continue;
-            if (isOnMissingList(stack, ctx)) {
-                continue;
-            }
-            // Don't check hasSpaceInShulkerBox — NBT may be stale.
-            // Fullness is determined by the actual GUI (isShulkerBoxFull) when opened.
-            shulkerSlotIndex = i;
-            state = useQuickShulkerMode ? StorageState.QUICK_OPEN : StorageState.FINDING_POSITION;
-            return;
-        }
-        MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_box");
-        terminalResult = StorageResult.FAILED;
-        active = false;
-    }
-
     /**
-     * Find a valid ground-level placement position in front of the player.
-     * Places on the ground (player feet Y level), never on the block the player stands on.
+     * Find somewhere at the player's own feet level to put the box, in front first, then behind
+     * and to the sides. Never on the block the player is standing on.
      */
     private void doFindPosition(Minecraft mc) {
         BlockPos playerFeet = mc.player.blockPosition();
 
-        // Determine horizontal facing direction from yaw
         float yaw = mc.player.getYRot();
         double rad = Math.toRadians(yaw);
         int facingX = (int) -Math.round(Math.sin(rad));
         int facingZ = (int) Math.round(Math.cos(rad));
-
-        // If facing has no horizontal component, default south
         if (facingX == 0 && facingZ == 0) { facingZ = 1; }
 
-        // Try positions at distance 1 and 2 in the facing direction
         int[][] offsets = {
             {facingX, facingZ},
             {facingX * 2, facingZ * 2},
@@ -244,22 +237,23 @@ public class ShulkerBoxStorage {
             {-facingZ, facingX},         // left
         };
 
+        double reachSq = PlayerUtil.blockReachSq(mc.player);
+
         for (int[] off : offsets) {
             int ox = off[0], oz = off[1];
             BlockPos ground = playerFeet.offset(ox, -1, oz);
             BlockPos placeAt = playerFeet.offset(ox, 0, oz);
 
-            // Don't place on the block the player is standing on
             if (placeAt.equals(playerFeet)) continue;
 
             BlockState groundState = mc.level.getBlockState(ground);
             BlockState placeState = mc.level.getBlockState(placeAt);
 
-            if (!groundState.isSolid()) continue;
+            // isFaceSturdy is the non-deprecated way to ask "can something stand on top of this";
+            // the old isSolid() was Mojang's legacy approximation and is cached less well.
+            if (!groundState.isFaceSturdy(mc.level, ground, Direction.UP)) continue;
             if (!placeState.isAir() && !placeState.canBeReplaced()) continue;
-
-            // Verify the player can reach this position (within ~5 blocks)
-            if (playerFeet.distSqr(placeAt) > 25) continue;
+            if (playerFeet.distSqr(placeAt) > reachSq) continue;
 
             placedPos = placeAt;
             placeAgainst = ground;
@@ -269,27 +263,28 @@ public class ShulkerBoxStorage {
             return;
         }
 
-        // No valid position found
         retryCount++;
-        if (retryCount >= 3) {
+        if (retryCount >= MAX_POSITION_RETRIES) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_position");
             fail(mc);
             return;
         }
-        // Look down and wait a moment, then retry
+        // Look down and give the ground a moment to load, then try again.
         mc.player.setXRot(90f);
         cooldown = 10;
     }
 
     private void doSwitchToShulker(Minecraft mc) {
-        if (shulkerSlotIndex < 9) {
-            hotbarSlotIndex = shulkerSlotIndex;
-            InventoryCompat.setSelectedSlot(mc.player.getInventory(), hotbarSlotIndex);
+        if (shulkerSlotIndex < PlayerUtil.HOTBAR_SIZE) {
+            InventoryCompat.setSelectedSlot(mc.player.getInventory(), shulkerSlotIndex);
         } else {
-            hotbarSlotIndex = InventoryCompat.getSelectedSlot(mc.player.getInventory());
-            SlotActionCompat.pickup(mc, mc.player.containerMenu.containerId, 36 + hotbarSlotIndex);
-            SlotActionCompat.pickup(mc, mc.player.containerMenu.containerId, shulkerSlotIndex);
-            SlotActionCompat.pickup(mc, mc.player.containerMenu.containerId, 36 + hotbarSlotIndex);
+            // Swap the box down into whichever hotbar slot is selected, via three clicks.
+            int hotbarSlot = InventoryCompat.getSelectedSlot(mc.player.getInventory());
+            int containerId = mc.player.containerMenu.containerId;
+            int hotbarScreenSlot = InventoryMenu.USE_ROW_SLOT_START + hotbarSlot;
+            SlotActionCompat.pickup(mc, containerId, hotbarScreenSlot);
+            SlotActionCompat.pickup(mc, containerId, shulkerSlotIndex);
+            SlotActionCompat.pickup(mc, containerId, hotbarScreenSlot);
         }
         cooldown = 3;
         state = StorageState.PLACING;
@@ -298,7 +293,6 @@ public class ShulkerBoxStorage {
     private void doPlace(Minecraft mc) {
         if (placedPos == null || placeAgainst == null) { fail(mc); return; }
 
-        // Verify the shulker box actually got placed
         if (retryCount == 0) {
             faceToward(mc, Vec3.atCenterOf(placedPos));
 
@@ -312,24 +306,22 @@ public class ShulkerBoxStorage {
             try {
                 mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
             } catch (Exception e) {
-                mc.options.keyUse.setDown(true);
+                // Fall back to vanilla's own raycast; released by releaseKeys() when we stop.
+                SimulatedInput.hold(mc.options.keyUse, this);
                 cooldown = 2;
                 return;
             }
         }
 
-        // Wait a few ticks then verify placement
         retryCount++;
-        if (retryCount < 4) {
+        if (retryCount < PLACE_VERIFY_TICKS) {
             cooldown = 2;
             return;
         }
 
-        // Verify: the block at placedPos should no longer be air (shulker box was placed)
-        BlockState placedState = mc.level.getBlockState(placedPos);
-        if (placedState.isAir()) {
-            // Placement failed — retry once
-            if (retryCount < 10) {
+        // Placed successfully if the target is no longer air.
+        if (mc.level.getBlockState(placedPos).isAir()) {
+            if (retryCount < MAX_PLACE_ATTEMPTS) {
                 cooldown = 3;
                 return;
             }
@@ -338,6 +330,7 @@ public class ShulkerBoxStorage {
             return;
         }
 
+        SimulatedInput.release(mc.options.keyUse, this);
         retryCount = 0;
         cooldown = 3;
         state = StorageState.OPENING;
@@ -346,7 +339,6 @@ public class ShulkerBoxStorage {
     private void doOpen(Minecraft mc) {
         if (placedPos == null) { fail(mc); return; }
 
-        // Face and open the placed shulker box
         faceToward(mc, Vec3.atCenterOf(placedPos));
 
         Direction nearestFace = getNearestFace(mc, placedPos);
@@ -360,7 +352,7 @@ public class ShulkerBoxStorage {
         try {
             mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
         } catch (Exception e) {
-            mc.options.keyUse.setDown(true);
+            SimulatedInput.hold(mc.options.keyUse, this);
             cooldown = 2;
             return;
         }
@@ -373,37 +365,28 @@ public class ShulkerBoxStorage {
     }
 
     private void doTransfer(Minecraft mc, GatherContext ctx) {
-        // Keep player facing the shulker box
         if (placedPos != null) {
             faceToward(mc, Vec3.atCenterOf(placedPos));
         }
 
-        // Wait for GUI to open — with verification timeout
         if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
             openVerifyTicks++;
-            if (openVerifyTicks > 30) {
+            if (openVerifyTicks > OPEN_VERIFY_LIMIT) {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
                 fail(mc);
-                return;
             }
             return;
         }
-        // GUI opened successfully
         openVerifyTicks = 0;
+        SimulatedInput.release(mc.options.keyUse, this);
 
         AbstractContainerMenu handler = mc.player.containerMenu;
-        if (handler == null) {
-            mc.player.closeContainer();
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
-            fail(mc);
-            return;
-        }
 
         if (isShulkerBoxFull()) {
             mc.player.closeContainer();
             knownFullSlots.add(shulkerSlotIndex);
             if (!anyItemsTransferred) {
-                // Check if any remaining candidate boxes exist before looping back
+                // Nothing fit here; only loop back if another box is worth trying.
                 if (!hasCandidateShulker(mc, ctx)) {
                     MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_box");
                     fail(mc);
@@ -411,15 +394,15 @@ public class ShulkerBoxStorage {
                 }
                 cooldown = 3;
                 state = StorageState.FINDING_SHULKER;
-                anyItemsTransferred = false;
                 return;
             }
             state = StorageState.CLOSING;
             return;
         }
 
-        // Scan player inventory slots (27-62) for building materials
-        for (int i = 27; i <= 62 && transferIndex < 200; i++) {
+        // Move one matching stack per tick from the player half of the screen into the box.
+        for (int i = BOX_SCREEN_PLAYER_START;
+             i <= BOX_SCREEN_PLAYER_END && transferIndex < MAX_TRANSFERS_PER_CYCLE; i++) {
             transferIndex++;
             Slot slot = handler.getSlot(i);
             if (slot == null) continue;
@@ -433,11 +416,11 @@ public class ShulkerBoxStorage {
                 cooldown = 2;
                 return;
             } catch (Exception e) {
-                continue;
+                // This slot refused; try the next one.
             }
         }
 
-        // Done transferring — mark box full if no empty slots remain (can't accept new item types)
+        // A box with no empty slot left cannot accept a new item type either.
         if (!hasEmptySlotInShulkerBox()) {
             knownFullSlots.add(shulkerSlotIndex);
         }
@@ -451,19 +434,17 @@ public class ShulkerBoxStorage {
         }
 
         if (useQuickShulkerMode) {
+            // Nothing was placed, so there is nothing to mine or pick up.
             InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
             terminalResult = StorageResult.DONE;
             state = StorageState.DONE;
             return;
         }
 
-        // Manual mode: switch to pickaxe and mine
         cooldown = 3;
-        pickaxeSlot = -1;
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
             ItemStack stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty() && stack.is(ItemTags.PICKAXES)) {
-                pickaxeSlot = i;
                 InventoryCompat.setSelectedSlot(mc.player.getInventory(), i);
                 break;
             }
@@ -475,16 +456,14 @@ public class ShulkerBoxStorage {
     private void doMine(Minecraft mc) {
         if (placedPos == null) { active = false; return; }
 
-        // Face the placed shulker box
         faceToward(mc, Vec3.atCenterOf(placedPos));
-
         Direction face = getNearestFace(mc, placedPos);
 
         if (miningTicks == 0) {
             mc.gameMode.startDestroyBlock(placedPos, face);
         }
 
-        mc.options.keyAttack.setDown(true);
+        SimulatedInput.hold(mc.options.keyAttack, this);
         miningTicks++;
 
         if (miningTicks % 2 == 0) {
@@ -492,7 +471,7 @@ public class ShulkerBoxStorage {
         }
 
         if (mc.level.getBlockState(placedPos).isAir()) {
-            mc.options.keyAttack.setDown(false);
+            SimulatedInput.release(mc.options.keyAttack, this);
             InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
             waitTicks = 0;
             state = StorageState.WAITING_PICKUP;
@@ -500,9 +479,7 @@ public class ShulkerBoxStorage {
             return;
         }
 
-        if (miningTicks > 100) {
-            mc.options.keyAttack.setDown(false);
-            InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
+        if (miningTicks > MAX_MINING_TICKS) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_mine_failed");
             fail(mc);
         }
@@ -511,18 +488,19 @@ public class ShulkerBoxStorage {
     private StorageResult doWaitPickup(Minecraft mc) {
         waitTicks++;
 
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (!stack.isEmpty() && isShulkerBox(stack)) {
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (ItemUtil.isShulkerBox(mc.player.getInventory().getItem(i))) {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_done");
+                releaseKeys();
                 active = false;
                 state = StorageState.DONE;
                 return StorageResult.DONE;
             }
         }
 
-        if (waitTicks > 100) {
+        if (waitTicks > MAX_PICKUP_WAIT_TICKS) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_pickup_failed");
+            releaseKeys();
             active = false;
             state = StorageState.DONE;
             return StorageResult.FAILED;
@@ -534,34 +512,42 @@ public class ShulkerBoxStorage {
     // ---- Helpers ----
 
     /**
-     * Check if there is any usable shulker box that hasn't been marked full
-     * and that isn't on the missing list. Used to avoid cycling through
-     * already-known-full boxes.
+     * Translate an inventory index into its slot index in the player's own inventory screen:
+     * hotbar 0-8 sits at screen 36-44, main inventory 9-35 keeps its number.
      */
+    private static int playerScreenSlot(int inventoryIndex) {
+        return inventoryIndex < PlayerUtil.HOTBAR_SIZE
+                ? InventoryMenu.USE_ROW_SLOT_START + inventoryIndex
+                : inventoryIndex;
+    }
+
+    /** @return whether another box is worth opening, so we do not cycle through known-full ones. */
     private boolean hasCandidateShulker(Minecraft mc, GatherContext ctx) {
         if (mc.player == null) return false;
-        for (int i = 0; i < 36; i++) {
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             if (knownFullSlots.contains(i)) continue;
             ItemStack stack = mc.player.getInventory().getItem(i);
-            if (stack.isEmpty() || !isShulkerBox(stack)) continue;
+            if (!ItemUtil.isShulkerBox(stack)) continue;
             if (isOnMissingList(stack, ctx)) continue;
             return true;
         }
         return false;
     }
 
+    /** Drop every key this feature holds. */
+    public void releaseKeys() {
+        SimulatedInput.releaseAll(this);
+    }
+
     private void abort(Minecraft mc) {
-        mc.options.keyAttack.setDown(false);
-        mc.options.keyUp.setDown(false);
-        mc.options.keyShift.setDown(false);
-        mc.options.keyUse.setDown(false);
+        releaseKeys();
         if (mc.player != null) {
             InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
         }
         active = false;
     }
 
-    /** Abort with a FAILED terminal result — signals the state machine to stop entirely. */
+    /** Abort with a FAILED result, telling the task machine to stop entirely. */
     private void fail(Minecraft mc) {
         terminalResult = StorageResult.FAILED;
         abort(mc);
@@ -569,39 +555,23 @@ public class ShulkerBoxStorage {
 
     public void cancel(Minecraft mc) { abort(mc); }
 
-    /** Called when auto-gathering starts fresh — clears cross-cycle state. */
+    /** Called when auto-gathering starts fresh, clearing state kept across cycles. */
     public void resetKnownFullSlots() {
         knownFullSlots.clear();
     }
 
-    private boolean isShulkerBox(ItemStack stack) {
-        Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        return id.getPath().contains("shulker_box");
-    }
-
     private boolean isOnMissingList(ItemStack stack, GatherContext ctx) {
         for (MaterialItemEntry entry : ctx.missingItems) {
-            if (itemsMatch(stack, entry.item)) return true;
+            if (ItemUtil.is(stack, entry.item)) return true;
         }
         return false;
     }
 
-    private boolean hasSpaceInShulkerBox(ItemStack shulkerBox) {
-        ItemContainerContents container = shulkerBox.getComponents().get(DataComponents.CONTAINER);
-        if (container == null) return true;
-        int filledSlots = 0;
-        for (ItemStack inner : ContainerContentsCompat.nonEmptyItems(container)) {
-            filledSlots++;
-            if (inner.getCount() < inner.getMaxStackSize()) return true;
-        }
-        return filledSlots < 27;
-    }
-
-    /** Check if the open shulker box has at least one completely empty slot (can accept new item types). */
+    /** @return whether the open box has a completely empty slot, i.e. room for a new item type. */
     private boolean hasEmptySlotInShulkerBox() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.player.containerMenu == null) return false;
-        for (int i = 0; i < 27; i++) {
+        for (int i = 0; i < BOX_SLOT_COUNT; i++) {
             Slot slot = mc.player.containerMenu.getSlot(i);
             if (slot == null || !slot.hasItem()) return true;
         }
@@ -611,7 +581,7 @@ public class ShulkerBoxStorage {
     private boolean isShulkerBoxFull() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.player.containerMenu == null) return true;
-        for (int i = 0; i < 27; i++) {
+        for (int i = 0; i < BOX_SLOT_COUNT; i++) {
             Slot slot = mc.player.containerMenu.getSlot(i);
             if (slot == null || !slot.hasItem()) return false;
             if (slot.getItem().getCount() < slot.getItem().getMaxStackSize()) return false;
@@ -620,15 +590,7 @@ public class ShulkerBoxStorage {
     }
 
     private Direction getNearestFace(Minecraft mc, BlockPos pos) {
-        Vec3 eye = mc.player.getEyePosition();
-        Vec3 center = Vec3.atCenterOf(pos);
-        double dx = eye.x - center.x;
-        double dy = eye.y - center.y;
-        double dz = eye.z - center.z;
-        double ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
-        if (ax >= ay && ax >= az) return dx > 0 ? Direction.EAST : Direction.WEST;
-        if (ay >= ax && ay >= az) return dy > 0 ? Direction.UP : Direction.DOWN;
-        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
+        return ContainerOpener.nearestFace(mc.player.getEyePosition(), pos);
     }
 
     private void faceToward(Minecraft mc, Vec3 target) {
@@ -642,16 +604,5 @@ public class ShulkerBoxStorage {
         mc.player.setYRot(yaw);
         mc.player.setYHeadRot(yaw);
         mc.player.setXRot(pitch);
-    }
-
-    private boolean itemsMatch(ItemStack stack, net.minecraft.world.item.Item targetItem) {
-        if (stack.getItem() == targetItem) return true;
-        Identifier stackId = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        Identifier targetId = BuiltInRegistries.ITEM.getKey(targetItem);
-        return stackId.equals(targetId);
-    }
-
-    public enum StorageResult {
-        ACTIVE, DONE, FAILED
     }
 }

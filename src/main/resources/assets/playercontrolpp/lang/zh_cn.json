@@ -18,9 +18,6 @@
   "playercontrolpp.config.settings.pretty_name.turnAngle": "转向角度",
   "playercontrolpp.config.settings.comment.turnAngle": "快速转向的角度（度）。",
 
-  "playercontrolpp.config.settings.name.layerIncrement": "图层增量",
-  "playercontrolpp.config.settings.pretty_name.layerIncrement": "图层增量",
-  "playercontrolpp.config.settings.comment.layerIncrement": "每次路径循环完成后 Litematica 渲染层的增量。",
 
   "playercontrolpp.config.hotkeys.name.openConfigGui": "打开配置界面",
   "playercontrolpp.config.hotkeys.pretty_name.openConfigGui": "打开配置界面",
@@ -82,9 +79,6 @@
   "playercontrolpp.gui.recording.recording": "状态：录制中...",
   "playercontrolpp.gui.recording.playing": "状态：播放中...",
   "playercontrolpp.gui.recording.idle": "状态：空闲",
-  "playercontrolpp.gui.recording.hp_on": "[高精度：开]",
-  "playercontrolpp.gui.recording.hp_off": "[高精度：关]",
-  "playercontrolpp.gui.recording.hp_warn": "! 高精度模式已开启 - 每帧记录精确位置，文件较大，回放精度更高 !",
 
   "playercontrolpp.gui.tab.baritone": "Baritone联动功能",
   "playercontrolpp.gui.baritone.warning": "！本模式为作弊功能，若在多人服务器使用请确保经得服主或管理员同意",
@@ -101,7 +95,6 @@
   "playercontrolpp.message.baritone.opening": "[PlayerControl++] 正在打开容器...",
   "playercontrolpp.message.baritone.transferring": "[PlayerControl++] 正在转移物品...",
   "playercontrolpp.message.baritone.completed": "[PlayerControl++] 备货完毕，如还有缺失材料请自行收集。",
-  "playercontrolpp.message.baritone.completed_full": "[PlayerControl++] 备货完毕 - 但背包已满，请先清理背包再试。",
   "playercontrolpp.message.baritone.no_hud": "[PlayerControl++] 请开启投影的材料清单信息HUD。",
   "playercontrolpp.message.baritone.inventory_full": "[PlayerControl++] 背包已满，请先清理。",
   "playercontrolpp.message.baritone.pathing_stuck": "[PlayerControl++] 寻路因某些原因被卡住，请更换位置重试。",
@@ -139,8 +132,6 @@
   "playercontrolpp.message.baritone.shulker_no_box": "[PlayerControl++] 背包中未找到可用潜影盒。已停止。",
   "playercontrolpp.message.baritone.shulker_no_position": "[PlayerControl++] 未找到合法的潜影盒放置位置。已停止。",
   "playercontrolpp.message.baritone.shulker_mine_failed": "[PlayerControl++] 挖掘潜影盒失败。已停止。",
-  "playercontrolpp.message.baritone.shulker_resume": "[PlayerControl++] 背包空间已释放，继续自动备货。",
-  "playercontrolpp.message.baritone.shulker_box_full": "[PlayerControl++] 潜影盒已满。已停止。",
   "playercontrolpp.message.baritone.shulker_place_failed": "[PlayerControl++] 潜影盒放置失败。已停止。",
   "playercontrolpp.message.baritone.shulker_open_failed": "[PlayerControl++] 未能打开已放置的潜影盒 — 中止以防止破坏周围方块。",
   "playercontrolpp.message.baritone.shulker_pickup_failed": "[PlayerControl++] 5秒内未拾取到潜影盒 — 停止自动备货以防止物品丢失。",
@@ -180,8 +171,16 @@
   "playercontrolpp.message.water_fill.no_schematic": "[PlayerControl++] 未加载 Litematica 投影蓝图。自动填水已停止。",
   "playercontrolpp.message.water_fill.no_bucket": "[PlayerControl++] 快捷栏和物品栏中均无水桶。自动填水已停止。",
   "playercontrolpp.message.water_fill.completed": "[PlayerControl++] 范围内需要填水的方块已完成。自动填水已停止。",
-  "playercontrolpp.message.water_fill.sneaking": "[PlayerControl++] 自动填水已暂停（玩家正处于潜行状态）。",
   "playercontrolpp.message.water_fill.world_change": "[PlayerControl++] 自动填水：关（世界切换）",
 
-  "playercontrolpp.message.recording.corrupt": "[PlayerControl++] 录制文件已损坏，无法加载。"
+  "playercontrolpp.message.recording.corrupt": "[PlayerControl++] 录制文件已损坏，无法加载。",
+
+  "playercontrolpp.config.settings.name.playbackPositionCorrection": "回放位置修正",
+  "playercontrolpp.config.settings.pretty_name.playbackPositionCorrection": "回放位置修正",
+  "playercontrolpp.config.settings.comment.playbackPositionCorrection": "回放偏离录制路径超过 2 格时，把玩家拉回关键帧位置。\n默认关闭：回放复现的是按键输入而非坐标，产生偏移属于正常现象；直接改写客户端坐标会与服务端权威位置不一致，可能被反作弊判定为飞行。建议仅在单人世界开启。",
+
+  "playercontrolpp.message.playback.drift": "[PlayerControl++] 回放已明显偏离录制路径（地形或延迟导致）。若需要自动拉回，请在设置中开启「回放位置修正」。",
+  "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] 录制索引读取失败，已另存为 index.json.corrupt-N，录制文件本身未受影响。",
+  "playercontrolpp.message.recording.save_failed": "[PlayerControl++] 录制写入磁盘失败，详情见日志。",
+  "playercontrolpp.message.baritone.pathing_not_started": "[PlayerControl++] Baritone 始终未开始寻路，请确认其已启用且目标可达。"
 }

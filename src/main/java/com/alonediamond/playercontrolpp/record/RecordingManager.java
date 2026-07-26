@@ -1,36 +1,45 @@
 package com.alonediamond.playercontrolpp.record;
 
+import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.MaLiLibCompat;
-
+import com.alonediamond.playercontrolpp.feature.ClientFeature;
+import com.alonediamond.playercontrolpp.util.AtomicFiles;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.Minecraft;
+import net.minecraft.nbt.CompoundTag;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 /**
- * Manages recording persistence with a lightweight JSON index for fast GUI loading
- * and NBT binary (.pcr) files for individual recording data.
+ * Recording persistence: a small JSON index the GUI can read instantly, plus one NBT
+ * {@code .pcr} file per recording holding the bulk data.
  *
- * Storage layout (under config/playercontrolpp/recordings/):
- *   index.json       — recording metadata only (name, duration, dimension)
- *   record_001.pcr   — full recording data (segments + keyframes) in NBT binary
- *   record_002.pcr   — ...
+ * <pre>
+ * config/playercontrolpp/recordings/
+ *   index.json      metadata only (id, name, duration, dimension)
+ *   record_001.pcr  segments + keyframes, NBT binary, gzipped
+ * </pre>
  *
- * The GUI reads only index.json. Full recording data is loaded only when the
- * user clicks Play. Deleting a recording removes its .pcr file and
- * updates the index without touching other recordings.
+ * <p>All disk work happens on a single background thread and every write is atomic, so a crash
+ * mid-save cannot leave the index truncated. Both the recording and the playback tick run from
+ * here as one {@link ClientFeature}.
  */
-public class RecordingManager {
+public class RecordingManager implements ClientFeature {
     private static final RecordingManager INSTANCE = new RecordingManager();
     private static final String RECORDINGS_DIR = "playercontrolpp/recordings";
     private static final String INDEX_FILE = "index.json";
@@ -39,6 +48,17 @@ public class RecordingManager {
     private final InputRecorder recorder = new InputRecorder();
     private final InputPlayer player = new InputPlayer();
     private boolean loaded;
+
+    /**
+     * One daemon thread for every read and write. Daemon so it cannot hold the game open on exit;
+     * single so saves cannot interleave; reused so recording repeatedly does not spawn a thread
+     * each time.
+     */
+    private final ExecutorService io = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "PCpp-RecordingIO");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private RecordingManager() {}
 
@@ -64,34 +84,58 @@ public class RecordingManager {
 
     // --- Index loading (GUI only — no segment data) ---
 
+    /**
+     * Read the index. Safe to call repeatedly; only a successful read is remembered, so a
+     * transient failure does not lock the list empty for the rest of the session.
+     */
     public void loadRecordings() {
         if (loaded) return;
-        loaded = true;
 
-        Path dir = getRecordingsDir();
         Path indexFile = getIndexFile();
-        if (!Files.exists(indexFile) || Files.isDirectory(indexFile)) return;
+        if (!Files.exists(indexFile) || Files.isDirectory(indexFile)) {
+            loaded = true; // nothing to read is a valid, final answer
+            return;
+        }
 
-        try (Reader reader = new InputStreamReader(
-                new FileInputStream(indexFile.toFile()), StandardCharsets.UTF_8)) {
+        List<RecordingFile> parsed = new ArrayList<>();
+        try (Reader reader = Files.newBufferedReader(indexFile, StandardCharsets.UTF_8)) {
             JsonElement element = JsonParser.parseReader(reader);
-            if (element == null || !element.isJsonObject()) return;
+            if (element == null || !element.isJsonObject()) {
+                throw new IOException("index.json does not contain a JSON object");
+            }
             JsonObject root = element.getAsJsonObject();
             if (root.has("recordings")) {
                 JsonArray arr = root.getAsJsonArray("recordings");
                 for (int i = 0; i < arr.size(); i++) {
-                    recordings.add(RecordingFile.fromIndexJson(arr.get(i).getAsJsonObject()));
+                    parsed.add(RecordingFile.fromIndexJson(arr.get(i).getAsJsonObject()));
                 }
             }
         } catch (Exception e) {
-            System.err.println("[PlayerControl++] Failed to load recording index: " + e.getMessage());
+            // Do not mark loaded: the very next saveIndex() would overwrite a file the user may
+            // still be able to repair. Move it aside instead so nothing is lost silently.
+            Path quarantined = AtomicFiles.quarantine(indexFile);
+            Playercontrolpp.LOGGER.warn("Failed to read the recording index; moved it to {}",
+                    quarantined != null ? quarantined.getFileName() : "(move failed)", e);
+            MessageUtil.sendActionBar(Minecraft.getInstance(), "playercontrolpp.message.recording.index_corrupt");
+            return;
         }
+
+        // Drop entries whose .pcr went missing, so the GUI never offers a recording that
+        // cannot play.
+        parsed.removeIf(rf -> {
+            boolean missing = !Files.exists(getRecordingFile(rf.getId()));
+            if (missing) {
+                Playercontrolpp.LOGGER.warn("Recording {} has no data file; dropping it from the index",
+                        rf.getId());
+            }
+            return missing;
+        });
+
+        recordings.addAll(parsed);
+        loaded = true;
     }
 
     private void saveIndex() {
-        Path dir = getRecordingsDir();
-        try { Files.createDirectories(dir); } catch (Exception ignored) { return; }
-
         JsonObject root = new JsonObject();
         JsonArray arr = new JsonArray();
         for (RecordingFile rf : recordings) {
@@ -99,84 +143,120 @@ public class RecordingManager {
         }
         root.add("recordings", arr);
 
-        Path file = getIndexFile();
-        try (Writer writer = new OutputStreamWriter(
-                new FileOutputStream(file.toFile()), StandardCharsets.UTF_8)) {
-            new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, writer);
-        } catch (Exception e) {
-            System.err.println("[PlayerControl++] Failed to save recording index: " + e.getMessage());
+        String json = new GsonBuilder().setPrettyPrinting().create().toJson(root);
+        try {
+            AtomicFiles.writeString(getIndexFile(), json);
+        } catch (IOException e) {
+            Playercontrolpp.LOGGER.warn("Failed to save the recording index", e);
         }
     }
 
     // --- Add / Remove ---
 
     public void addRecording(RecordingFile rec) {
-        // Generate sequential ID
+        rec.setId(nextId());
+        recordings.add(rec);
+
+        // Serialize on the client thread, write on the IO thread, and only add the index entry
+        // once the data file is really there — otherwise a crash in between leaves an index
+        // entry pointing at nothing, which shows up as "Play does nothing".
+        CompoundTag data = rec.toNbt();
+        Path file = getRecordingFile(rec.getId());
+        io.execute(() -> {
+            try {
+                RecordingFile.write(data, file);
+                Minecraft.getInstance().execute(this::saveIndex);
+            } catch (IOException e) {
+                Playercontrolpp.LOGGER.warn("Failed to save recording {}", rec.getId(), e);
+                Minecraft.getInstance().execute(() -> {
+                    recordings.remove(rec);
+                    MessageUtil.sendActionBar(Minecraft.getInstance(),
+                            "playercontrolpp.message.recording.save_failed");
+                });
+            }
+        });
+    }
+
+    /** @return the next free {@code record_NNN} id. */
+    private String nextId() {
         int maxId = 0;
         for (RecordingFile r : recordings) {
             String rid = r.getId();
             if (rid != null && rid.startsWith("record_")) {
-                try { maxId = Math.max(maxId, Integer.parseInt(rid.substring(7))); }
-                catch (NumberFormatException ignored) {}
+                try {
+                    maxId = Math.max(maxId, Integer.parseInt(rid.substring("record_".length())));
+                } catch (NumberFormatException ignored) {
+                    // Hand-edited or foreign id; it just does not take part in numbering.
+                }
             }
         }
-        rec.setId(String.format("record_%03d", maxId + 1));
-
-        recordings.add(rec);
-        saveRecordingFileAsync(rec);
-        saveIndex();
+        return String.format("record_%03d", maxId + 1);
     }
 
     public void removeRecording(RecordingFile rec) {
         recordings.remove(rec);
-        try {
-            Files.deleteIfExists(getRecordingFile(rec.getId()));
-        } catch (Exception ignored) {}
+        Path file = getRecordingFile(rec.getId());
+        io.execute(() -> {
+            try {
+                Files.deleteIfExists(file);
+            } catch (IOException e) {
+                // The index entry is already gone, so this leaves an orphan .pcr on disk.
+                // loadRecordings() cannot clean it up (it only prunes the other direction), so
+                // log it loudly enough that a user reporting "disk filling up" has an answer.
+                Playercontrolpp.LOGGER.warn("Could not delete recording data file {}", file, e);
+            }
+        });
         saveIndex();
     }
 
     // --- Individual file I/O (NBT binary) ---
 
-    /** Save recording file on a background thread to avoid blocking the render thread. */
-    private void saveRecordingFileAsync(RecordingFile rec) {
-        Path dir = getRecordingsDir();
-        try { Files.createDirectories(dir); } catch (Exception ignored) { return; }
-
-        Path file = getRecordingFile(rec.getId());
-        new Thread(() -> {
-            try {
-                rec.writeToFile(file);
-            } catch (IOException e) {
-                System.err.println("[PlayerControl++] Failed to save recording: " + e.getMessage());
-            }
-        }, "PCpp-RecSave").start();
+    /**
+     * Load full recording data off-thread and hand it to {@code onLoaded} back on the client
+     * thread.
+     *
+     * <p>{@code NbtIo.readCompressed} means gzip inflate plus a full NBT parse — for a ten-minute
+     * recording that is thousands of segments. Doing it inline in the Play button handler stalled
+     * the render thread for a visible hitch.
+     *
+     * @param onLoaded called on the client thread, with {@code null} if loading failed
+     */
+    public void loadRecordingFileAsync(String id, Consumer<RecordingFile> onLoaded) {
+        Path file = getRecordingFile(id);
+        io.execute(() -> {
+            RecordingFile result = readOrNull(file);
+            Minecraft.getInstance().execute(() -> onLoaded.accept(result));
+        });
     }
 
-    /**
-     * Load full recording data (segments + keyframes) from NBT binary for playback.
-     * Called on demand when the user clicks Play.
-     */
-    public RecordingFile loadRecordingFile(String id) {
-        Path file = getRecordingFile(id);
-        if (!Files.exists(file) || Files.isDirectory(file)) return null;
+    private RecordingFile readOrNull(Path file) {
+        if (!Files.exists(file) || Files.isDirectory(file)) {
+            Playercontrolpp.LOGGER.warn("Recording data file {} is missing", file);
+            return null;
+        }
         try {
             return RecordingFile.readFromFile(file);
         } catch (Exception e) {
-            System.err.println("[PlayerControl++] Corrupt recording file: " + e.getMessage());
-            MessageUtil.sendActionBar(Minecraft.getInstance(), "playercontrolpp.message.recording.corrupt");
+            Playercontrolpp.LOGGER.warn("Corrupt recording data file {}", file, e);
             return null;
         }
     }
 
-    // Backward-compatible save for RecordingListGui close
+    /** Persist the index after the GUI edited names or the recording list. */
     public void saveRecordings() {
         saveIndex();
     }
 
     // --- Tick ---
 
+    @Override
     public void onClientTick(Minecraft client) {
         recorder.tick(client);
         player.tick(client);
+    }
+
+    @Override
+    public boolean isActive() {
+        return recorder.isRecording() || player.isPlaying();
     }
 }

@@ -1,48 +1,50 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
-import com.alonediamond.playercontrolpp.compat.ContainerContentsCompat;
-
-import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
-
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-
+import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.feature.ItemTransferStrategy;
+import com.alonediamond.playercontrolpp.util.ItemUtil;
+import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.item.component.ItemContainerContents;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.resources.Identifier;
-import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
-import java.util.Map;
+import java.util.List;
 
 /**
- * Handles item transfer from containers: loose items first, then shulker boxes.
+ * Moves items out of an open container: loose stacks and whole shulker boxes, both capped by the
+ * plan {@link ItemTransferStrategy} produced for the current item.
  */
 public class ItemTransferExecutor {
 
     /**
-     * Check whether enough of the current target item has been gathered,
-     * counting items in the player's inventory AND inside shulker boxes.
-     * Used after shulker box auto-store to decide whether to continue.
+     * Minimum shortfall before taking a whole shulker box is worth it rather than loose stacks.
+     * Two stacks: below that a box is almost certainly more than needed.
+     */
+    private static final int SHULKER_WORTH_IT_THRESHOLD = 128;
+    /** Ticks between container clicks, to stay within the server's rate expectations. */
+    private static final int CLICK_COOLDOWN = 4;
+    /** Ticks to settle after closing a container before verifying what we got. */
+    private static final int CLOSE_COOLDOWN = 8;
+
+    /**
+     * @return whether enough of the current item has been gathered, counting the inventory and
+     *         the contents of any shulker boxes in it. Used after auto-store to decide whether to
+     *         keep going.
      */
     public boolean isCurrentItemSatisfied(GatherContext ctx) {
         if (ctx.currentTargetItem == null) return false;
-        int total = countItemInInventory(ctx.currentTargetItem, ctx.client);
-        total += countItemInShulkerBoxes(ctx.currentTargetItem, ctx.client);
-        ctx.currentlyGathered = total;
-        return total >= ctx.targetNeededTotal;
+        ctx.currentlyGathered = countEverywhere(ctx.currentTargetItem, ctx.client);
+        return ctx.currentlyGathered >= ctx.targetNeededTotal;
     }
 
-    /**
-     * Set up the next item to gather.
-     */
+    /** Move on to the next missing item, or finish. */
     public void nextItem(GatherContext ctx, TaskStateMachine tsm) {
         ctx.justTookShulkerBox = false;
         ctx.totalBoxesTakenForItem = 0;
@@ -56,8 +58,7 @@ public class ItemTransferExecutor {
         MaterialItemEntry entry = ctx.missingItems.get(ctx.currentItemIndex);
         ctx.currentTargetItem = entry.item;
         ctx.targetNeededTotal = entry.neededCount;
-        ctx.currentlyGathered = countItemInInventory(entry.item, ctx.client)
-                + countItemInShulkerBoxes(entry.item, ctx.client);
+        ctx.currentlyGathered = countEverywhere(entry.item, ctx.client);
         ctx.currentPosIndex = 0;
         ctx.chestRetryCount = 0;
         ctx.foundPositions.clear();
@@ -76,9 +77,7 @@ public class ItemTransferExecutor {
         tsm.setState(State.SEARCHING);
     }
 
-    /**
-     * Handle item transfer from an open container.
-     */
+    /** Take what we can from the container that is currently open. */
     public void transfer(GatherContext ctx, TaskStateMachine tsm) {
         Minecraft mc = ctx.client;
 
@@ -96,64 +95,54 @@ public class ItemTransferExecutor {
         }
 
         AbstractContainerMenu handler = mc.player.containerMenu;
-        if (handler == null) {
-            mc.player.closeContainer();
-            tsm.setState(State.VERIFYING);
-            return;
-        }
+        List<Slot> slots = handler.slots;
 
-        java.util.List<Slot> slots = handler.slots;
-
-        // When the strategy says we need whole shulker boxes, try Phase 1b first
-        // to avoid filling inventory with individual stacks.
+        // When the plan calls for whole boxes, take those first so loose stacks do not fill the
+        // inventory before there is room for a box.
         boolean boxesFirst = ctx.currentTransferPlan.shulkerBoxes > 0
                 && ctx.totalBoxesTakenForItem < ctx.currentTransferPlan.shulkerBoxes;
 
         if (boxesFirst) {
-            if (tryTransferShulkerBoxesFirst(mc, handler, slots, ctx)) return;
+            if (tryTransferShulkerBoxes(mc, handler, slots, ctx)) return;
             if (tryTransferLooseItems(mc, handler, slots, ctx)) return;
         } else {
             if (tryTransferLooseItems(mc, handler, slots, ctx)) return;
-            if (tryTransferShulkerBoxesFirst(mc, handler, slots, ctx)) return;
+            if (tryTransferShulkerBoxes(mc, handler, slots, ctx)) return;
         }
 
         mc.player.closeContainer();
-        ctx.transferCooldown = 8;
+        ctx.transferCooldown = CLOSE_COOLDOWN;
         tsm.setState(State.VERIFYING);
     }
 
-    /**
-     * Verify if enough items have been gathered for the current target.
-     */
+    /** Recount after closing a container, then either advance or try the next location. */
     public void verify(GatherContext ctx, TaskStateMachine tsm,
                         ContainerOpener opener, BaritonePathingController pathing) {
-        ctx.currentlyGathered = countItemInInventory(ctx.currentTargetItem, ctx.client);
-        ctx.currentlyGathered += countItemInShulkerBoxes(ctx.currentTargetItem, ctx.client);
+        ctx.currentlyGathered = countEverywhere(ctx.currentTargetItem, ctx.client);
 
         if (ctx.currentlyGathered >= ctx.targetNeededTotal) {
             ctx.currentItemIndex++;
             tsm.setState(State.NEXT_ITEM);
-        } else {
-            ctx.stacksTakenThisContainer.clear();
-            ctx.shulkerBoxesTakenThisContainer.clear();
+            return;
+        }
 
-            ctx.currentPosIndex++;
-            ctx.adjacentContainerTargets = null;
-            ctx.adjacentTryIndex = 0;
-            if (ctx.currentPosIndex >= ctx.foundPositions.size()) {
-                ctx.stacksTakenThisContainer.clear();
-                ctx.shulkerBoxesTakenThisContainer.clear();
-                tsm.setState(State.SEARCHING);
-            } else {
-                navigateToContainer(ctx.foundPositions.get(ctx.currentPosIndex), ctx, tsm, opener, pathing);
-            }
+        ctx.stacksTakenThisContainer.clear();
+        ctx.shulkerBoxesTakenThisContainer.clear();
+        ctx.currentPosIndex++;
+        ctx.adjacentContainerTargets = null;
+        ctx.adjacentTryIndex = 0;
+
+        if (ctx.currentPosIndex >= ctx.foundPositions.size()) {
+            tsm.setState(State.SEARCHING);
+        } else {
+            navigateToContainer(ctx.foundPositions.get(ctx.currentPosIndex), ctx, tsm, opener, pathing);
         }
     }
 
     private void navigateToContainer(BlockPos pos, GatherContext ctx, TaskStateMachine tsm,
                                      ContainerOpener opener, BaritonePathingController pathing) {
         if (ctx.client.player == null) return;
-        if (ctx.client.player.blockPosition().distSqr(pos) <= 25.0) {
+        if (ctx.client.player.blockPosition().distSqr(pos) <= PlayerUtil.blockReachSq(ctx.client.player)) {
             tsm.setState(State.OPENING_CONTAINER);
             opener.openContainerAt(pos, ctx);
         } else {
@@ -162,48 +151,41 @@ public class ItemTransferExecutor {
         }
     }
 
-    // --- Helper methods ---
+    // --- Transfer phases ---
 
-    /**
-     * Phase 1b (maybe first): Transfer whole shulker boxes containing needed items.
-     * Respects the global box limit from currentTransferPlan.
-     */
-    private boolean tryTransferShulkerBoxesFirst(Minecraft mc, AbstractContainerMenu handler,
-                                                 java.util.List<Slot> slots, GatherContext ctx) {
-        for (int i = 0; i < slots.size(); i++) {
-            Slot slot = slots.get(i);
+    /** Take a whole shulker box holding something we need, within the plan's box budget. */
+    private boolean tryTransferShulkerBoxes(Minecraft mc, AbstractContainerMenu handler,
+                                            List<Slot> slots, GatherContext ctx) {
+        for (Slot slot : slots) {
             if (slot.container == mc.player.getInventory()) continue;
             ItemStack stack = slot.getItem();
-            if (stack.isEmpty() || !isShulkerBox(stack)) continue;
-            if (!shulkerBoxContainsAnyMissingItem(stack, ctx)) continue;
+            if (stack.isEmpty() || !ItemUtil.isShulkerBox(stack)) continue;
+
             MaterialItemEntry bestEntry = findBestMissingItemForShulker(stack, ctx);
             if (bestEntry == null) continue;
+
             if (tryTransferShulker(mc, handler, slot, bestEntry, ctx)) {
                 ctx.justTookShulkerBox = true;
-                ctx.transferCooldown = 4;
+                ctx.transferCooldown = CLICK_COOLDOWN;
                 return true;
             }
         }
         return false;
     }
 
-    /**
-     * Phase 1a (maybe second): Transfer loose stacks of needed items.
-     * Respects the global stack limit from currentTransferPlan.
-     */
+    /** Take one loose stack of a needed item, within the plan's stack budget. */
     private boolean tryTransferLooseItems(Minecraft mc, AbstractContainerMenu handler,
-                                          java.util.List<Slot> slots, GatherContext ctx) {
-        for (int i = 0; i < slots.size(); i++) {
-            Slot slot = slots.get(i);
+                                          List<Slot> slots, GatherContext ctx) {
+        for (Slot slot : slots) {
             if (slot.container == mc.player.getInventory()) continue;
             ItemStack stack = slot.getItem();
-            if (stack.isEmpty() || isShulkerBox(stack)) continue;
+            if (stack.isEmpty() || ItemUtil.isShulkerBox(stack)) continue;
 
             MaterialItemEntry matchedEntry = findMatchingMissingItem(stack, ctx);
             if (matchedEntry == null) continue;
 
             if (tryTransferLoose(mc, handler, slot, matchedEntry, ctx)) {
-                ctx.transferCooldown = 4;
+                ctx.transferCooldown = CLICK_COOLDOWN;
                 return true;
             }
         }
@@ -212,38 +194,40 @@ public class ItemTransferExecutor {
 
     private MaterialItemEntry findMatchingMissingItem(ItemStack stack, GatherContext ctx) {
         for (MaterialItemEntry entry : ctx.missingItems) {
-            if (itemsMatch(stack, entry.item)) {
+            if (ItemUtil.is(stack, entry.item)) {
                 return entry;
             }
         }
         return null;
     }
 
+    /**
+     * @return the missing item inside {@code shulkerBox} that we are shortest of, but only if the
+     *         shortfall is big enough that taking a whole box is sensible.
+     */
     private MaterialItemEntry findBestMissingItemForShulker(ItemStack shulkerBox, GatherContext ctx) {
         MaterialItemEntry best = null;
         int bestNeeded = 0;
         for (MaterialItemEntry entry : ctx.missingItems) {
-            int have = countItemInInventory(entry.item, ctx.client) + countItemInShulkerBoxes(entry.item, ctx.client);
-            int needed = entry.neededCount - have;
-            if (needed > 128 && shulkerBoxContainsItem(shulkerBox, entry.item)) {
-                if (needed > bestNeeded) {
-                    bestNeeded = needed;
-                    best = entry;
-                }
+            int needed = entry.neededCount - countEverywhere(entry.item, ctx.client);
+            if (needed > SHULKER_WORTH_IT_THRESHOLD
+                    && needed > bestNeeded
+                    && ItemUtil.containsInside(shulkerBox, entry.item)) {
+                bestNeeded = needed;
+                best = entry;
             }
         }
         return best;
     }
 
-    private boolean tryTransferLoose(Minecraft mc, AbstractContainerMenu handler, Slot slot, MaterialItemEntry entry, GatherContext ctx) {
-        int have = countItemInInventory(entry.item, ctx.client);
-        int needed = entry.neededCount - have;
+    private boolean tryTransferLoose(Minecraft mc, AbstractContainerMenu handler, Slot slot,
+                                     MaterialItemEntry entry, GatherContext ctx) {
+        int needed = entry.neededCount - countInInventory(entry.item, ctx.client);
         if (needed <= 0) return false;
 
         int taken = ctx.stacksTakenThisContainer.getOrDefault(entry.item, 0);
         int stackSize = entry.maxStackSize > 0 ? entry.maxStackSize : 64;
-        int maxStacks = (needed + stackSize - 1) / stackSize;
-
+        int maxStacks = ItemTransferStrategy.ceilDiv(needed, stackSize);
         if (taken >= maxStacks) return false;
 
         try {
@@ -256,26 +240,22 @@ public class ItemTransferExecutor {
         }
     }
 
-    private boolean tryTransferShulker(Minecraft mc, AbstractContainerMenu handler, Slot slot, MaterialItemEntry entry, GatherContext ctx) {
-        int have = countItemInInventory(entry.item, ctx.client) + countItemInShulkerBoxes(entry.item, ctx.client);
-        int needed = entry.neededCount - have;
+    private boolean tryTransferShulker(Minecraft mc, AbstractContainerMenu handler, Slot slot,
+                                       MaterialItemEntry entry, GatherContext ctx) {
+        int needed = entry.neededCount - countEverywhere(entry.item, ctx.client);
         if (needed <= 0) return false;
 
-        // Respect global box limit from transfer plan
         int planBoxes = ctx.currentTransferPlan.shulkerBoxes;
         if (planBoxes > 0 && ctx.totalBoxesTakenForItem >= planBoxes) return false;
 
         int taken = ctx.shulkerBoxesTakenThisContainer.getOrDefault(entry.item, 0);
         int stackSize = entry.maxStackSize > 0 ? entry.maxStackSize : 64;
-        int shulkerCap = 27 * stackSize;
-        int maxBoxes = (needed + shulkerCap - 1) / shulkerCap;
+        int shulkerCap = ItemTransferStrategy.SHULKER_SLOT_COUNT * stackSize;
+        int maxBoxes = ItemTransferStrategy.ceilDiv(needed, shulkerCap);
 
-        // Cap at remaining plan boxes
         if (planBoxes > 0) {
-            int remainingPlan = planBoxes - ctx.totalBoxesTakenForItem;
-            if (remainingPlan < maxBoxes) maxBoxes = remainingPlan;
+            maxBoxes = Math.min(maxBoxes, planBoxes - ctx.totalBoxesTakenForItem);
         }
-
         if (taken >= maxBoxes) return false;
 
         try {
@@ -288,77 +268,41 @@ public class ItemTransferExecutor {
         }
     }
 
-    private int countItemInInventory(Item item, Minecraft mc) {
-        if (mc.player == null) return 0;
+    // --- Counting ---
+
+    /** @return how many of {@code item} the player holds, loose plus inside shulker boxes. */
+    private int countEverywhere(Item item, Minecraft mc) {
+        if (mc.player == null || item == null) return 0;
         int count = 0;
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (itemsMatch(stack, item)) {
+        Inventory inventory = mc.player.getInventory();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (ItemUtil.is(stack, item)) {
+                count += stack.getCount();
+            } else if (ItemUtil.isShulkerBox(stack)) {
+                count += ItemUtil.countInside(stack, item);
+            }
+        }
+        return count;
+    }
+
+    /** @return how many of {@code item} sit loose in the inventory, not counting boxes. */
+    private int countInInventory(Item item, Minecraft mc) {
+        if (mc.player == null || item == null) return 0;
+        int count = 0;
+        Inventory inventory = mc.player.getInventory();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (ItemUtil.is(stack, item)) {
                 count += stack.getCount();
             }
         }
         return count;
     }
 
-    private int countItemInShulkerBoxes(Item targetItem, Minecraft mc) {
-        if (mc.player == null) return 0;
-        int count = 0;
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (isShulkerBox(stack)) {
-                count += countItemInShulkerBox(stack, targetItem);
-            }
-        }
-        return count;
-    }
-
-    private int countItemInShulkerBox(ItemStack shulkerBox, Item targetItem) {
-        ItemContainerContents container = shulkerBox.getComponents().get(DataComponents.CONTAINER);
-        if (container == null) return 0;
-        int count = 0;
-        for (ItemStack inner : ContainerContentsCompat.nonEmptyItems(container)) {
-            if (itemsMatch(inner, targetItem)) {
-                count += inner.getCount();
-            }
-        }
-        return count;
-    }
-
-    private boolean isShulkerBox(ItemStack stack) {
-        Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        return id.getPath().contains("shulker_box");
-    }
-
-    private boolean itemsMatch(ItemStack stack, Item targetItem) {
-        if (stack.getItem() == targetItem) return true;
-        Identifier stackId = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        Identifier targetId = BuiltInRegistries.ITEM.getKey(targetItem);
-        return stackId.equals(targetId);
-    }
-
-    private boolean shulkerBoxContainsItem(ItemStack shulkerBox, Item targetItem) {
-        ItemContainerContents container = shulkerBox.getComponents().get(DataComponents.CONTAINER);
-        if (container == null) return false;
-        for (ItemStack inner : ContainerContentsCompat.nonEmptyItems(container)) {
-            if (itemsMatch(inner, targetItem)) return true;
-        }
-        return false;
-    }
-
-    private boolean shulkerBoxContainsAnyMissingItem(ItemStack shulkerBox, GatherContext ctx) {
-        ItemContainerContents container = shulkerBox.getComponents().get(DataComponents.CONTAINER);
-        if (container == null) return false;
-        for (ItemStack inner : ContainerContentsCompat.nonEmptyItems(container)) {
-            for (MaterialItemEntry entry : ctx.missingItems) {
-                if (itemsMatch(inner, entry.item)) return true;
-            }
-        }
-        return false;
-    }
-
     private boolean isInventoryFull(Minecraft mc) {
         if (mc.player == null) return true;
-        for (int i = 0; i < 36; i++) {
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             if (mc.player.getInventory().getItem(i).isEmpty()) {
                 return false;
             }

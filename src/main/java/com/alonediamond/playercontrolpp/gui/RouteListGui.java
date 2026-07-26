@@ -148,7 +148,7 @@ public class RouteListGui extends Screen {
         }
         waypointFields.clear();
         if (selectedRoute == null) return;
-        for (int i = 0; i < selectedRoute.getNodes().size(); i++) addWaypointRow(i);
+        for (int i = 0; i < selectedRoute.getNodeCount(); i++) addWaypointRow(i);
     }
 
     private void addWaypointRow(int index) {
@@ -163,7 +163,7 @@ public class RouteListGui extends Screen {
         }
         waypointFields.clear();
         if (selectedRoute != null) {
-            for (int i = 0; i < selectedRoute.getNodes().size(); i++) addWaypointRow(i);
+            for (int i = 0; i < selectedRoute.getNodeCount(); i++) addWaypointRow(i);
         }
     }
 
@@ -188,7 +188,7 @@ public class RouteListGui extends Screen {
         }
 
         for (WaypointFields wf : waypointFields) {
-            RouteNode node = selectedRoute.getNodes().get(wf.nodeIndex);
+            RouteNode node = selectedRoute.getNode(wf.nodeIndex);
             wf.fields.get(0).setValue(String.format("%.1f", node.x));
             wf.fields.get(1).setValue(String.format("%.1f", node.z));
         }
@@ -196,7 +196,7 @@ public class RouteListGui extends Screen {
 
     private int getRightContentHeight() {
         if (selectedRoute == null) return 0;
-        int n = selectedRoute.getNodes().size();
+        int n = selectedRoute.getNodeCount();
         return 26 + 18 + n * WPT_ROW_H + 22 + 46 + 24 + 14;
     }
 
@@ -394,7 +394,7 @@ public class RouteListGui extends Screen {
         String sprintLabel = "[" + StringUtils.translate("playercontrolpp.gui.route.sprint") + ": "
                 + (selectedRoute.isSprintEnabled()
                     ? StringUtils.translate("playercontrolpp.gui.route.on")
-                    : StringUtils.translate("playercontrolpp.gui.route.nullToEmptyf")) + "]";
+                    : StringUtils.translate("playercontrolpp.gui.route.off")) + "]";
         int sprintW = font.width(sprintLabel);
         int sprintColor = selectedRoute.isSprintEnabled() ? 0xFF55FF55 : 0xFF888888;
         context.text(font, Component.nullToEmpty(sprintLabel), RIGHT_X, toggleY, sprintColor,true);
@@ -402,7 +402,7 @@ public class RouteListGui extends Screen {
         String lcLabel = "[" + StringUtils.translate("playercontrolpp.gui.route.layerctrl") + ": "
                 + (selectedRoute.isLayerControlEnabled()
                     ? StringUtils.translate("playercontrolpp.gui.route.on")
-                    : StringUtils.translate("playercontrolpp.gui.route.nullToEmptyf")) + "]";
+                    : StringUtils.translate("playercontrolpp.gui.route.off")) + "]";
         int lcW = font.width(lcLabel);
         int lcX = RIGHT_X + sprintW + 20;
         int lcColor = selectedRoute.isLayerControlEnabled() ? 0xFF55FF55 : 0xFF888888;
@@ -484,7 +484,7 @@ public class RouteListGui extends Screen {
                         var client = Minecraft.getInstance();
                         var player = client.player;
                         if (player != null) {
-                            RouteNode node = selectedRoute.getNodes().get(area.nodeIndex);
+                            RouteNode node = selectedRoute.getNode(area.nodeIndex);
                             node.x = player.getX();
                             node.y = player.getY();
                             node.z = player.getZ();
@@ -506,6 +506,7 @@ public class RouteListGui extends Screen {
         return false;
     }
 
+    /** Insert a waypoint just before the end, positioned midway along the last leg. */
     private void addWaypointAtEnd() {
         if (selectedRoute == null) return;
         List<RouteNode> nodes = selectedRoute.getNodes();
@@ -518,18 +519,17 @@ public class RouteListGui extends Screen {
             newNode.y = (cur.y + next.y) / 2.0;
             newNode.z = (cur.z + next.z) / 2.0;
         }
-        nodes.add(insertIdx, newNode);
+        if (!selectedRoute.insertNode(insertIdx, newNode)) return;
         dirty = true;
         rebuildAllWaypointRows();
         refreshFieldValues();
     }
 
+    /** Remove an intermediate waypoint. The start and end are not removable. */
     private void removeWaypoint(int index) {
         if (selectedRoute == null) return;
-        List<RouteNode> nodes = selectedRoute.getNodes();
-        if (nodes.size() <= 2) return;
-        if (index <= 0 || index >= nodes.size() - 1) return;
-        nodes.remove(index);
+        if (index <= 0 || index >= selectedRoute.getNodeCount() - 1) return;
+        if (!selectedRoute.removeNode(index)) return;
         dirty = true;
         rebuildAllWaypointRows();
         refreshFieldValues();
@@ -638,8 +638,8 @@ public class RouteListGui extends Screen {
             EditBox xf = new EditBox(font, xFieldX, 0, FIELD_W, 18, Component.empty());
             final int idx = nodeIndex;
             xf.setResponder(s -> {
-                if (selectedRoute != null && idx < selectedRoute.getNodes().size()) {
-                    try { selectedRoute.getNodes().get(idx).x = Double.parseDouble(s); dirty = true; }
+                if (selectedRoute != null && idx < selectedRoute.getNodeCount()) {
+                    try { selectedRoute.getNode(idx).x = Double.parseDouble(s); dirty = true; }
                     catch (NumberFormatException ignored) {}
                 }
             });
@@ -648,8 +648,8 @@ public class RouteListGui extends Screen {
             // Z field
             EditBox zf = new EditBox(font, zFieldX, 0, FIELD_W, 18, Component.empty());
             zf.setResponder(s -> {
-                if (selectedRoute != null && idx < selectedRoute.getNodes().size()) {
-                    try { selectedRoute.getNodes().get(idx).z = Double.parseDouble(s); dirty = true; }
+                if (selectedRoute != null && idx < selectedRoute.getNodeCount()) {
+                    try { selectedRoute.getNode(idx).z = Double.parseDouble(s); dirty = true; }
                     catch (NumberFormatException ignored) {}
                 }
             });

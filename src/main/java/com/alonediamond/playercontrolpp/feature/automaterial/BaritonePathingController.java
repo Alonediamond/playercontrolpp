@@ -2,13 +2,25 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Encapsulates Baritone pathing logic for navigating to container positions.
+ * Navigates to container positions with Baritone, and decides when it has arrived, stalled, or
+ * never got going at all.
  */
 public class BaritonePathingController {
+
+    /** Grace period before progress is judged at all, in ticks. */
+    private static final int SETTLE_TICKS = 5;
+    /** Ticks of no movement while pathing before giving up. */
+    private static final int STUCK_LIMIT_TICKS = 100;
+    /** Ticks to wait for Baritone to start pathing at all before giving up. */
+    private static final int START_TIMEOUT_TICKS = 40;
+    /** Squared distance under which the player counts as not having moved (0.2 blocks). */
+    private static final double MOVED_EPSILON_SQ = 0.04;
 
     private final BaritoneIntegration baritone;
 
@@ -21,7 +33,7 @@ public class BaritonePathingController {
         ctx.pathingTicks = 0;
         ctx.stuckTicks = 0;
         ctx.pathingWasActive = false;
-        ctx.lastPlayerPos = ctx.client.player != null ? new Vec3(ctx.client.player.getX(), ctx.client.player.getY(), ctx.client.player.getZ()) : Vec3.ZERO;
+        ctx.lastPlayerPos = ctx.client.player != null ? ctx.client.player.position() : Vec3.ZERO;
 
         baritone.pathTo(target);
     }
@@ -30,10 +42,7 @@ public class BaritonePathingController {
         baritone.cancelPathing();
     }
 
-    /**
-     * Check pathing progress — called each tick during PATHING state.
-     * When pathing completes, transitions to OPENING_CONTAINER.
-     */
+    /** Called every tick in the PATHING state; transitions to OPENING_CONTAINER on arrival. */
     public void checkProgress(GatherContext ctx, TaskStateMachine tsm, ContainerOpener opener) {
         if (ctx.client.player == null) return;
 
@@ -44,22 +53,18 @@ public class BaritonePathingController {
             return;
         }
 
-        if (!ctx.pathingWasActive) {
-            if (baritone.isPathing()) {
-                ctx.pathingWasActive = true;
-                ctx.stuckTicks = 0;
-                ctx.lastPlayerPos = new Vec3(ctx.client.player.getX(), ctx.client.player.getY(), ctx.client.player.getZ());
-            }
+        if (!ctx.pathingWasActive && baritone.isPathing()) {
+            ctx.pathingWasActive = true;
+            ctx.stuckTicks = 0;
+            ctx.lastPlayerPos = ctx.client.player.position();
         }
 
-        // Stuck detection: player not moved for 5 seconds
-        if (ctx.pathingWasActive && ctx.pathingTicks > 5) {
-            Vec3 currentPos = new Vec3(ctx.client.player.getX(), ctx.client.player.getY(), ctx.client.player.getZ());
-            double moved = currentPos.distanceToSqr(ctx.lastPlayerPos);
-            if (moved < 0.04) {
+        if (ctx.pathingWasActive && ctx.pathingTicks > SETTLE_TICKS) {
+            Vec3 currentPos = ctx.client.player.position();
+            if (currentPos.distanceToSqr(ctx.lastPlayerPos) < MOVED_EPSILON_SQ) {
                 ctx.stuckTicks++;
-                if (ctx.stuckTicks >= 100) {
-                    tsm.setState(State.FAILED);
+                if (ctx.stuckTicks >= STUCK_LIMIT_TICKS) {
+                    tsm.setState(State.FAILED, "playercontrolpp.message.baritone.pathing_stuck");
                     return;
                 }
             } else {
@@ -68,8 +73,8 @@ public class BaritonePathingController {
             ctx.lastPlayerPos = currentPos;
         }
 
-        // Check if Baritone has reached destination
-        if (ctx.pathingWasActive && ctx.pathingTicks > 5 && !baritone.isPathing()) {
+        // Baritone stopped pathing after actually having started: we have arrived.
+        if (ctx.pathingWasActive && ctx.pathingTicks > SETTLE_TICKS && !baritone.isPathing()) {
             ctx.stuckTicks = 0;
             ctx.lastPlayerPos = Vec3.ZERO;
             ctx.pathingTicks = 0;
@@ -81,17 +86,17 @@ public class BaritonePathingController {
             } else {
                 tsm.skipCurrentItem();
             }
+            return;
         }
 
-        // Timeout: if pathing never started after 40 ticks
-        if (!ctx.pathingWasActive && ctx.pathingTicks > 40) {
-            tsm.setState(State.FAILED);
+        if (!ctx.pathingWasActive && ctx.pathingTicks > START_TIMEOUT_TICKS) {
+            tsm.setState(State.FAILED, "playercontrolpp.message.baritone.pathing_not_started");
         }
     }
 
-    private boolean isInventoryFull(net.minecraft.client.Minecraft mc) {
+    private boolean isInventoryFull(Minecraft mc) {
         if (mc.player == null) return true;
-        for (int i = 0; i < 36; i++) {
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             if (mc.player.getInventory().getItem(i).isEmpty()) {
                 return false;
             }
