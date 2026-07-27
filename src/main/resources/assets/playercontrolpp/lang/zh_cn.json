@@ -202,7 +202,7 @@
 
   "playercontrolpp.config.baritone.name.restockShulkerMode": "续料：收集含材料潜影盒",
   "playercontrolpp.config.baritone.pretty_name.restockShulkerMode": "续料：收集含材料潜影盒",
-  "playercontrolpp.config.baritone.comment.restockShulkerMode": "开启后，自动续料不仅收集散装材料，也会从标记容器中取走内含所需材料的潜影盒。建议搭配 QuickShulker 使用以直接打开盒子。",
+  "playercontrolpp.config.baritone.comment.restockShulkerMode": "开启后，自动续料不仅收集散装材料，也会从标记容器中取走内含所需材料的潜影盒。若有 QuickShulker 可直接打开盒子。",
 
   "playercontrolpp.message.restock.started": "[PlayerControl++] 自动续料：开 — 正在监控建造缺料情况。",
   "playercontrolpp.message.restock.stopped": "[PlayerControl++] 自动续料：关。",

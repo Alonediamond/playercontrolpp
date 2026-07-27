@@ -202,7 +202,7 @@
 
   "playercontrolpp.config.baritone.name.restockShulkerMode": "Restock: Collect Shulker Boxes",
   "playercontrolpp.config.baritone.pretty_name.restockShulkerMode": "Restock: Collect Shulker Boxes",
-  "playercontrolpp.config.baritone.comment.restockShulkerMode": "When enabled, auto-restock will also take shulker boxes that contain needed materials from marked containers. Install QuickShulker to open them from inventory.",
+  "playercontrolpp.config.baritone.comment.restockShulkerMode": "When enabled, auto-restock will also take shulker boxes that contain needed materials from marked containers. Install QuickShulker to open them from inventory automatically.",
 
   "playercontrolpp.message.restock.started": "[PlayerControl++] Auto Restock: ON — monitoring build for material shortages.",
   "playercontrolpp.message.restock.stopped": "[PlayerControl++] Auto Restock: OFF.",

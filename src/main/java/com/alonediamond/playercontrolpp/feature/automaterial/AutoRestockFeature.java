@@ -7,6 +7,7 @@ import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
@@ -20,6 +21,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -72,13 +74,14 @@ public class AutoRestockFeature implements ClientFeature {
     // ---- Singleton & feature interface ----
 
     private static final AutoRestockFeature INSTANCE = new AutoRestockFeature();
+    private static final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
     private AutoRestockFeature() {}
 
     public static AutoRestockFeature getInstance() { return INSTANCE; }
 
     enum State {
-        IDLE, MONITORING, ANALYZING, PATHING, OPENING, TRANSFERRING,SHULKERING, RESTARTING
+        IDLE, MONITORING, ANALYZING, PATHING, OPENING, TRANSFERRING, SHULKERING, RESTARTING
     }
 
     private State state = State.IDLE;
@@ -112,6 +115,7 @@ public class AutoRestockFeature implements ClientFeature {
     private Vec3 lastPlayerPos = Vec3.ZERO;
 
     private int haveShulkerBoxesContainsItems = 0;
+    private boolean foundItemInShulkerBox = false;
 
     private static final int OPEN_WAIT_TICKS = 12;
     private static final int MAX_OPEN_RETRIES = 3;
@@ -159,7 +163,51 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     private void tickGetItemFromShulker(Minecraft mc) {
-
+        if (mc.player == null || mc.player.isDeadOrDying()) {return;}
+        Inventory inv = mc.player.getInventory();
+        if (!foundItemInShulkerBox) {
+            for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+                ItemStack stack = inv.getItem(i);
+                for (MaterialItemEntry neededItem : neededItems) {
+                    if (ItemUtil.isShulkerBox(stack) && ItemUtil.containsInside(stack,neededItem.item)) {
+                        foundItemInShulkerBox = true;
+                        quickShulker.openShulkerBox(i);
+                        return;
+                    }
+                }
+            }
+            //没找到任何潜影盒内有材料
+            /*state = State.RESTARTING;
+            restartBuilder(mc);*/
+        }
+        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
+            if (--haveShulkerBoxesContainsItems <= 0) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
+            }
+            return;
+        }
+        AbstractContainerMenu handler = mc.player.containerMenu;
+        boolean took = false;
+        for (Slot slot : handler.slots) {
+            // Skip the player-inventory half of the screen; we only want the box's own slots.
+            if (slot.container == mc.player.getInventory()) continue;
+            for (MaterialItemEntry neededItem : neededItems) {
+                if (neededItem.item.equals(slot.getItem().getItem())) {
+                    SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
+                    took = true;
+                }
+            }
+        }
+        mc.player.closeContainer();
+        if (took) {
+            state = State.RESTARTING;
+            haveShulkerBoxesContainsItems = 0;
+            foundItemInShulkerBox = false;
+            restartBuilder(mc);
+        } else {
+            active = false;
+            stop("playercontrolpp.message.restock.no_progress");
+        }
     }
 
     @Override
@@ -312,6 +360,12 @@ public class AutoRestockFeature implements ClientFeature {
         // paused builder and take over pathing.
         baritone.cancelPathing();
 
+        if (Configs.Restocks.RESTOCK_SHULKER_MODE.getBooleanValue() && haveItemsInPlayerShulkerBox(mc) && quickShulker.isLoaded()){
+            haveShulkerBoxesContainsItems = 15;
+            state = State.SHULKERING;
+            return;
+        }
+
         BlockPos playerPos = mc.player.blockPosition();
         allMarked.sort(Comparator.comparingDouble(p -> p.distSqr(playerPos)));
         containerQueue.addAll(allMarked);
@@ -321,6 +375,25 @@ public class AutoRestockFeature implements ClientFeature {
                 neededItems.size(), containerQueue.size());
 
         navigateToCurrentContainer(mc);
+    }
+
+    private boolean haveItemsInPlayerShulkerBox(Minecraft mc) {
+        if (mc.player == null || mc.player.isDeadOrDying()) {return false;}
+        Inventory inv = mc.player.getInventory();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack item = inv.getItem(i);
+            if (item == null || item.isEmpty()) {continue;}
+            if (ItemUtil.isShulkerBox(item)) {
+                for (MaterialItemEntry neededItem : neededItems) {
+                    if (ItemUtil.isShulkerBox(item) && ItemUtil.containsInside(item,neededItem.item)) {
+                        haveShulkerBoxesContainsItems = 15;
+                        foundItemInShulkerBox = false;
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -493,7 +566,7 @@ public class AutoRestockFeature implements ClientFeature {
                 // Nothing moved for several ticks — this container is drained.
                 mc.player.closeContainer();
                 containerIndex++;
-                navigateToCurrentContainer(mc);
+                if (haveShulkerBoxesContainsItems <= 0) navigateToCurrentContainer(mc);
             }
         }
     }
@@ -527,9 +600,10 @@ public class AutoRestockFeature implements ClientFeature {
                 if (shulkerBoxContainsNeededItem(stack, mc)) {
                     try {
                         SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
-                        /*haveShulkerBoxesContainsItems = 10;
-                        mc.player.closeContainer();*/
-
+                        if (quickShulker.isLoaded()){
+                            haveShulkerBoxesContainsItems = 15;
+                            state = State.SHULKERING;
+                        }
                         return true;
                     } catch (Exception ignored) {}
                 }
