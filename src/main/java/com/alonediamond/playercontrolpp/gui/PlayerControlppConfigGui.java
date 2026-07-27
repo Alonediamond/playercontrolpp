@@ -58,6 +58,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
             case HOTKEYS:
                 List<IConfigBase> hotkeyItems = new ArrayList<>(Configs.Hotkeys.HOTKEY_LIST);
                 hotkeyItems.add(Configs.CacheNearbySettings.CONTAINER_WHITELIST);
+                hotkeyItems.add(Configs.Restocks.MARKED_CONTAINERS);
                 return ConfigOptionWrapper.createFor(hotkeyItems);
             case ROUTE_HOTKEYS:
                 return ConfigOptionWrapper.createFor(
