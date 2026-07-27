@@ -94,10 +94,21 @@ public class Configs implements IConfigHandler {
                 KeybindSettings.PRESS_ALLOWEXTRA)
                 .apply(KEY_HOTKEYS);
 
+        public static final ConfigHotkey MARK_CONTAINER = new ConfigHotkey(
+                "markContainer", "",
+                KeybindSettings.PRESS_ALLOWEXTRA)
+                .apply(KEY_HOTKEYS);
+
+        public static final ConfigHotkey ONE_CLICK_BUILD_RESTOCK = new ConfigHotkey(
+                "oneClickBuildRestock", "",
+                KeybindSettings.PRESS_ALLOWEXTRA)
+                .apply(KEY_HOTKEYS);
+
         /** The single source of truth for the hotkey set. */
         public static final ImmutableList<IHotkey> HOTKEY_LIST = ImmutableList.of(
                 OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE,
-                BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS, WATER_FILL_TOGGLE);
+                BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS, WATER_FILL_TOGGLE,
+                MARK_CONTAINER, ONE_CLICK_BUILD_RESTOCK);
 
         /** Same hotkeys seen as plain configs; derived so the two lists cannot diverge. */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.copyOf(HOTKEY_LIST);
@@ -173,6 +184,21 @@ public class Configs implements IConfigHandler {
                 CONTAINER_WHITELIST);
     }
 
+    public static class Restocks {
+        public static final ConfigBoolean RESTOCK_SHULKER_MODE = new ConfigBoolean(
+                "restockShulkerMode", false,
+                "When enabled, auto-restock will also take shulker boxes that contain needed materials from marked containers. Requires QuickShulker to be useful after collecting.")
+                .apply(KEY_BARITONE);
+
+        public static final ConfigStringList MARKED_CONTAINERS = new ConfigStringList(
+                "markedContainers", ImmutableList.of(),
+                "Marked container positions for auto-restock. Each entry: dimension x y z (e.g. minecraft:overworld 10 64 -20). Use the Mark Container hotkey to add/remove, or edit this list directly.")
+                .apply(KEY_BARITONE);
+
+        public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
+                RESTOCK_SHULKER_MODE, MARKED_CONTAINERS);
+    }
+
     private static ImmutableList<String> withWaterBucket(List<String> ids) {
         return ImmutableList.<String>builder().add("minecraft:water_bucket").addAll(ids).build();
     }
@@ -217,6 +243,7 @@ public class Configs implements IConfigHandler {
 
         ConfigUtils.readConfigBase(root, "Settings", Settings.OPTIONS);
         ConfigUtils.readConfigBase(root, "BaritoneSettings", BaritoneSettings.OPTIONS);
+        ConfigUtils.readConfigBase(root, "RestockSettings", Restocks.OPTIONS);
         ConfigUtils.readConfigBase(root, "CacheNearbySettings", CacheNearbySettings.OPTIONS);
         ConfigUtils.readHotkeys(root, "Hotkeys", Hotkeys.HOTKEY_LIST);
     }
@@ -235,6 +262,7 @@ public class Configs implements IConfigHandler {
         root.addProperty("configVersion", CONFIG_VERSION);
         ConfigUtils.writeConfigBase(root, "Settings", Settings.OPTIONS);
         ConfigUtils.writeConfigBase(root, "BaritoneSettings", BaritoneSettings.OPTIONS);
+        ConfigUtils.writeConfigBase(root, "RestockSettings", Restocks.OPTIONS);
         ConfigUtils.writeConfigBase(root, "CacheNearbySettings", CacheNearbySettings.OPTIONS);
         ConfigUtils.writeHotkeys(root, "Hotkeys", Hotkeys.HOTKEY_LIST);
         MaLiLibCompat.writeJsonToFile(root, dir.resolve(CONFIG_FILE_NAME));

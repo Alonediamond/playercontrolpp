@@ -182,5 +182,45 @@
   "playercontrolpp.message.playback.drift": "[PlayerControl++] Playback has drifted well off the recorded path (terrain or latency). Enable Playback Position Correction in settings if you want it snapped back.",
   "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] The recording index could not be read and has been set aside as index.json.corrupt-N. The recording files themselves are untouched.",
   "playercontrolpp.message.recording.save_failed": "[PlayerControl++] Failed to write the recording to disk; see the log for details.",
-  "playercontrolpp.message.baritone.pathing_not_started": "[PlayerControl++] Baritone never started pathing. Check that it is enabled and that the target is reachable."
+  "playercontrolpp.message.baritone.pathing_not_started": "[PlayerControl++] Baritone never started pathing. Check that it is enabled and that the target is reachable.",
+
+  "playercontrolpp.config.hotkeys.name.markContainer": "Mark Container",
+  "playercontrolpp.config.hotkeys.pretty_name.markContainer": "Mark Container",
+  "playercontrolpp.config.hotkeys.comment.markContainer": "Mark/unmark the container you are looking at as a restock target for auto-build-restock.",
+
+  "playercontrolpp.config.baritone.name.autoRestockToggle": "Auto Build Restock",
+  "playercontrolpp.config.baritone.pretty_name.autoRestockToggle": "Auto Build Restock",
+  "playercontrolpp.config.baritone.comment.autoRestockToggle": "When enabled, automatically monitors #litematica builds and fetches materials from marked containers when the builder pauses on shortage.",
+
+  "playercontrolpp.config.baritone.name.markedContainers": "Marked Container List",
+  "playercontrolpp.config.baritone.pretty_name.markedContainers": "Marked Container List",
+  "playercontrolpp.config.baritone.comment.markedContainers": "Container positions for auto-restock. Each entry: dimension x y z. Use the Mark Container hotkey or edit this list directly.",
+
+  "playercontrolpp.config.hotkeys.name.oneClickBuildRestock": "One-Click Build + Restock",
+  "playercontrolpp.config.hotkeys.pretty_name.oneClickBuildRestock": "One-Click Build + Restock",
+  "playercontrolpp.config.hotkeys.comment.oneClickBuildRestock": "Start Baritone #litematica build AND enable auto-restock in one keypress.",
+
+  "playercontrolpp.config.baritone.name.restockShulkerMode": "Restock: Collect Shulker Boxes",
+  "playercontrolpp.config.baritone.pretty_name.restockShulkerMode": "Restock: Collect Shulker Boxes",
+  "playercontrolpp.config.baritone.comment.restockShulkerMode": "When enabled, auto-restock will also take shulker boxes that contain needed materials from marked containers. Install QuickShulker to open them from inventory.",
+
+  "playercontrolpp.message.restock.started": "[PlayerControl++] Auto Restock: ON — monitoring build for material shortages.",
+  "playercontrolpp.message.restock.stopped": "[PlayerControl++] Auto Restock: OFF.",
+  "playercontrolpp.message.restock.pause_detected": "[PlayerControl++] Builder paused — restocking from marked containers...",
+  "playercontrolpp.message.restock.gathering": "[PlayerControl++] Missing %d item types. Searching %d marked container(s)...",
+  "playercontrolpp.message.restock.container_marked": "[PlayerControl++] Container marked at %d, %d, %d.",
+  "playercontrolpp.message.restock.container_unmarked": "[PlayerControl++] Container unmarked at %d, %d, %d.",
+  "playercontrolpp.message.restock.no_containers": "[PlayerControl++] No marked containers in this dimension. Mark containers before starting the build.",
+  "playercontrolpp.message.restock.nothing_found": "[PlayerControl++] No needed materials found in marked containers. Build will retry with available inventory.",
+  "playercontrolpp.message.restock.stock_complete": "[PlayerControl++] Restock run complete — restarting builder.",
+  "playercontrolpp.message.restock.build_started": "[PlayerControl++] Build started — monitoring for material shortages.",
+  "playercontrolpp.message.restock.build_restarted": "[PlayerControl++] Build restarted — continuing to monitor.",
+  "playercontrolpp.message.restock.build_failed": "[PlayerControl++] Failed to start Baritone build. Is a Litematica schematic loaded?",
+  "playercontrolpp.message.restock.mods_missing": "[PlayerControl++] Baritone and Litematica are required for auto-build-restock.",
+  "playercontrolpp.message.restock.inventory_full": "[PlayerControl++] Inventory full — cannot restock. Build will retry with what you have.",
+  "playercontrolpp.message.restock.player_died": "[PlayerControl++] Auto Restock: OFF (player died).",
+  "playercontrolpp.message.restock.world_change": "[PlayerControl++] Auto Restock: OFF (world changed).",
+  "playercontrolpp.message.restock.no_hud": "[PlayerControl++] Please enable the Material List Info HUD in Litematica first. Auto Restock stopped.",
+  "playercontrolpp.message.restock.container_no_match": "[PlayerControl++] Container has no needed materials — skipping.",
+  "playercontrolpp.message.restock.no_progress": "[PlayerControl++] No materials transferred across several restart cycles — your marked containers may not hold the needed items. Auto Restock stopped."
 }

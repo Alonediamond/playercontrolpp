@@ -7,6 +7,7 @@ import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.AutoWaterFillFeature;
 import com.alonediamond.playercontrolpp.feature.FeatureRegistry;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoRestockFeature;
 import com.alonediamond.playercontrolpp.input.KeybindCallbacks;
 import com.alonediamond.playercontrolpp.input.KeybindProvider;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
@@ -58,6 +59,7 @@ public class InitHandler implements IInitializationHandler {
         FeatureRegistry.register(AutoMaterialGatherer.getInstance());
         FeatureRegistry.register(AutoCacheNearbyContainersFeature.FEATURE);
         FeatureRegistry.register(AutoWaterFillFeature.FEATURE);
+        FeatureRegistry.register(AutoRestockFeature.getInstance());
     }
 
     public static void register() {

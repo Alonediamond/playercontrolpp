@@ -122,7 +122,11 @@ public class TaskStateMachine {
             pendingStorageDone = false;
             storageSyncTicks = 0;
 
-            if (transferExecutor.isCurrentItemSatisfied(ctx)) {
+            if (ctx.currentTargetItem == null) {
+                // Storage ran before any item was selected (triggered from ANALYZING);
+                // searching now would query ChestTracker for a null item. Re-analyze instead.
+                setState(State.ANALYZING);
+            } else if (transferExecutor.isCurrentItemSatisfied(ctx)) {
                 ctx.currentItemIndex++;
                 setState(State.NEXT_ITEM);
             } else {
@@ -211,7 +215,9 @@ public class TaskStateMachine {
             return;
         }
 
-        if (ShulkerBoxStorage.isEnabled()) {
+        // Storage only moves missing-list materials, so with none held it cannot free any space;
+        // it would report DONE anyway and the still-full inventory would retrigger it forever.
+        if (ShulkerBoxStorage.isEnabled() && shulkerStorage.hasStorableMaterials(ctx)) {
             pathingController.cancelPathing();
             containerOpener.closeAnyContainer(ctx.client);
             if (shulkerStorage.startStorage(ctx)) {

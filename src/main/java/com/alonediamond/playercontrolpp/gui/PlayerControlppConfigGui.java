@@ -68,10 +68,16 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 List<IConfigBase> baritoneOptions = new ArrayList<>();
                 baritoneOptions.add(Configs.Hotkeys.BARITONE_AUTO_GATHER);
                 for (IConfigBase opt : Configs.BaritoneSettings.OPTIONS) {
-                    // Only show shulker storage mode when QuickShulker is installed
                     if (opt == Configs.BaritoneSettings.SHULKER_STORAGE_MODE) {
                         if (!QuickShulkerIntegration.getInstance().isLoaded()) continue;
                     }
+                    baritoneOptions.add(opt);
+                }
+                // Restock feature
+                //baritoneOptions.add(Configs.BaritoneSettings.AUTO_RESTOCK_TOGGLE);
+                baritoneOptions.add(Configs.Hotkeys.MARK_CONTAINER);
+                baritoneOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
+                for (IConfigBase opt : Configs.Restocks.OPTIONS) {
                     baritoneOptions.add(opt);
                 }
                 return ConfigOptionWrapper.createFor(baritoneOptions);

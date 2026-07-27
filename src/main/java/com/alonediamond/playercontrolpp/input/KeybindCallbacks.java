@@ -24,6 +24,10 @@ import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.QUICK_TURN
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.RECORDING_TOGGLE;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.WATER_FILL_TOGGLE;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.BARITONE_AUTO_GATHER;
+import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.MARK_CONTAINER;
+import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK;
+
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoRestockFeature;
 
 public class KeybindCallbacks {
 
@@ -35,6 +39,8 @@ public class KeybindCallbacks {
         BARITONE_AUTO_GATHER.getKeybind().setCallback(new BaritoneAutoGatherCallback());
         AUTO_CACHE_NEARBY_CONTAINERS.getKeybind().setCallback(new AutoCacheNearbyContainersCallback());
         WATER_FILL_TOGGLE.getKeybind().setCallback(new WaterFillToggleCallback());
+        MARK_CONTAINER.getKeybind().setCallback(new MarkContainerCallback());
+        ONE_CLICK_BUILD_RESTOCK.getKeybind().setCallback(new OneClickBuildRestockCallback());
 
         // Route hotkey callbacks are attached by RouteManager when a route is created or loaded,
         // which is the only moment they exist. There used to be a second loop here as well, but
@@ -136,6 +142,24 @@ public class KeybindCallbacks {
             Minecraft client = Minecraft.getInstance();
             if (client.player == null) return false;
             AutoWaterFillFeature.toggle(client);
+            return true;
+        }
+    }
+
+    private static class MarkContainerCallback implements IHotkeyCallback {
+        @Override
+        public boolean onKeyAction(KeyAction action, IKeybind key) {
+            if (action != KeyAction.PRESS) return false;
+            AutoRestockFeature.onMarkContainer();
+            return true;
+        }
+    }
+
+    private static class OneClickBuildRestockCallback implements IHotkeyCallback {
+        @Override
+        public boolean onKeyAction(KeyAction action, IKeybind key) {
+            if (action != KeyAction.PRESS) return false;
+            AutoRestockFeature.onOneClickBuild();
             return true;
         }
     }

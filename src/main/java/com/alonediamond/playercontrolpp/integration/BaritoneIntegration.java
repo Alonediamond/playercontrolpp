@@ -100,4 +100,61 @@ public class BaritoneIntegration implements ModIntegration {
             return false;
         }
     }
+
+    // --- Builder process access (for auto-restock) ---
+
+    /**
+     * @return whether the Baritone BuilderProcess is currently active (i.e. a #litematica build
+     *         is running). Returns false when Baritone is absent or the process is idle.
+     */
+    public boolean isBuilderActive() {
+        try {
+            Object baritone = getBaritone();
+            Object builderProcess = baritone.getClass()
+                    .getMethod("getBuilderProcess").invoke(baritone);
+            Boolean active = (Boolean) builderProcess.getClass()
+                    .getMethod("isActive").invoke(builderProcess);
+            return active != null && active;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * @return whether the BuilderProcess is currently paused (material shortage / pathing failure /
+     *         liquid targets / …). Returns false when the process is not active.
+     */
+    public boolean isBuilderPaused() {
+        try {
+            Object baritone = getBaritone();
+            Object builderProcess = baritone.getClass()
+                    .getMethod("getBuilderProcess").invoke(baritone);
+            Boolean paused = (Boolean) builderProcess.getClass()
+                    .getMethod("isPaused").invoke(builderProcess);
+            return paused != null && paused;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Start a new Litematica schematic build through Baritone's BuilderProcess, equivalent to
+     * typing {@code #litematica} in chat (or {@code #litematica <index>} when more than one
+     * schematic is loaded).
+     *
+     * @param schematicIndex zero-based index into Litematica's loaded schematic list.
+     */
+    public boolean startLitematicaBuild(int schematicIndex) {
+        try {
+            Object baritone = getBaritone();
+            Object builderProcess = baritone.getClass()
+                    .getMethod("getBuilderProcess").invoke(baritone);
+            builderProcess.getClass()
+                    .getMethod("buildOpenLitematic", int.class)
+                    .invoke(builderProcess, schematicIndex);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 }

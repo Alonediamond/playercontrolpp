@@ -48,11 +48,6 @@ public class MaterialAnalyzer {
                 return;
             }
 
-            if (isInventoryFull(ctx.client)) {
-                tsm.onInventoryFull();
-                return;
-            }
-
             Set<String> globalIgnoreSet = buildGlobalIgnoreSet();
             Set<Object> litematicaIgnored = litematica.getIgnoredSet(materialList);
 
@@ -87,6 +82,16 @@ public class MaterialAnalyzer {
             if (ctx.missingItems.isEmpty()) {
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.all_materials_ready");
                 tsm.setState(State.COMPLETED);
+                return;
+            }
+
+            // Checked only after the missing list is built: onInventoryFull() decides whether
+            // shulker storage is worth starting by looking for held missing-list materials, and
+            // before this point the list is still empty — storage would open a box, store nothing
+            // and loop. This order also lets a full inventory that already holds everything
+            // report COMPLETED above instead of stopping on inventory-full.
+            if (isInventoryFull(ctx.client)) {
+                tsm.onInventoryFull();
                 return;
             }
 

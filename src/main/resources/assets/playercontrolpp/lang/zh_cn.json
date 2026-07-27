@@ -182,5 +182,45 @@
   "playercontrolpp.message.playback.drift": "[PlayerControl++] 回放已明显偏离录制路径（地形或延迟导致）。若需要自动拉回，请在设置中开启「回放位置修正」。",
   "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] 录制索引读取失败，已另存为 index.json.corrupt-N，录制文件本身未受影响。",
   "playercontrolpp.message.recording.save_failed": "[PlayerControl++] 录制写入磁盘失败，详情见日志。",
-  "playercontrolpp.message.baritone.pathing_not_started": "[PlayerControl++] Baritone 始终未开始寻路，请确认其已启用且目标可达。"
+  "playercontrolpp.message.baritone.pathing_not_started": "[PlayerControl++] Baritone 始终未开始寻路，请确认其已启用且目标可达。",
+
+  "playercontrolpp.config.hotkeys.name.markContainer": "标记容器",
+  "playercontrolpp.config.hotkeys.pretty_name.markContainer": "标记容器",
+  "playercontrolpp.config.hotkeys.comment.markContainer": "标记/取消标记你正在注视的容器为自动续料建造的补给点。",
+
+  "playercontrolpp.config.baritone.name.autoRestockToggle": "自动建造续料开关",
+  "playercontrolpp.config.baritone.pretty_name.autoRestockToggle": "自动建造续料开关",
+  "playercontrolpp.config.baritone.comment.autoRestockToggle": "开启后自动监控 #litematica 建造，缺料暂停时前往标记容器取料并继续建造。",
+
+  "playercontrolpp.config.baritone.name.markedContainers": "标记容器坐标列表",
+  "playercontrolpp.config.baritone.pretty_name.markedContainers": "标记容器坐标列表",
+  "playercontrolpp.config.baritone.comment.markedContainers": "自动续料建造的容器坐标。每条格式：维度 x y z。使用标记容器快捷键或在此处直接编辑。",
+
+  "playercontrolpp.config.hotkeys.name.oneClickBuildRestock": "一键建造+续料",
+  "playercontrolpp.config.hotkeys.pretty_name.oneClickBuildRestock": "一键建造+续料",
+  "playercontrolpp.config.hotkeys.comment.oneClickBuildRestock": "一键启动 Baritone #litematica 建造并同时开启自动续料监控。",
+
+  "playercontrolpp.config.baritone.name.restockShulkerMode": "续料：收集含材料潜影盒",
+  "playercontrolpp.config.baritone.pretty_name.restockShulkerMode": "续料：收集含材料潜影盒",
+  "playercontrolpp.config.baritone.comment.restockShulkerMode": "开启后，自动续料不仅收集散装材料，也会从标记容器中取走内含所需材料的潜影盒。建议搭配 QuickShulker 使用以直接打开盒子。",
+
+  "playercontrolpp.message.restock.started": "[PlayerControl++] 自动续料：开 — 正在监控建造缺料情况。",
+  "playercontrolpp.message.restock.stopped": "[PlayerControl++] 自动续料：关。",
+  "playercontrolpp.message.restock.pause_detected": "[PlayerControl++] 检测到建造暂停 — 正在前往标记容器取料...",
+  "playercontrolpp.message.restock.gathering": "[PlayerControl++] 缺少 %d 种材料。正在搜索 %d 个标记容器...",
+  "playercontrolpp.message.restock.container_marked": "[PlayerControl++] 已标记容器：%d, %d, %d。",
+  "playercontrolpp.message.restock.container_unmarked": "[PlayerControl++] 已取消标记容器：%d, %d, %d。",
+  "playercontrolpp.message.restock.no_containers": "[PlayerControl++] 当前维度没有标记的容器。请在开始建造前先标记容器。",
+  "playercontrolpp.message.restock.nothing_found": "[PlayerControl++] 标记容器中未找到所需材料。将以现有库存重试建造。",
+  "playercontrolpp.message.restock.stock_complete": "[PlayerControl++] 取料完成 — 正在重启建造。",
+  "playercontrolpp.message.restock.build_started": "[PlayerControl++] 建造已启动 — 正在监控缺料情况。",
+  "playercontrolpp.message.restock.build_restarted": "[PlayerControl++] 建造已重启 — 继续监控。",
+  "playercontrolpp.message.restock.build_failed": "[PlayerControl++] 启动 Baritone 建造失败。是否已加载 Litematica 投影蓝图？",
+  "playercontrolpp.message.restock.mods_missing": "[PlayerControl++] 自动建造续料需要 Baritone 和 Litematica 模组。",
+  "playercontrolpp.message.restock.inventory_full": "[PlayerControl++] 背包已满 — 无法取料。将以现有库存重试建造。",
+  "playercontrolpp.message.restock.player_died": "[PlayerControl++] 自动续料：关（玩家死亡）。",
+  "playercontrolpp.message.restock.world_change": "[PlayerControl++] 自动续料：关（世界切换）。",
+  "playercontrolpp.message.restock.no_hud": "[PlayerControl++] 请先开启 Litematica 的材料清单信息 HUD。自动续料已停止。",
+  "playercontrolpp.message.restock.container_no_match": "[PlayerControl++] 容器内无所需材料 — 跳过。",
+  "playercontrolpp.message.restock.no_progress": "[PlayerControl++] 连续多次重启建造均未取到任何材料 — 标记的容器中可能没有所需物品。自动续料已停止。"
 }

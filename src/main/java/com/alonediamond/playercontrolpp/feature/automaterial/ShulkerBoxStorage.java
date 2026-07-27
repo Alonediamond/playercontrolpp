@@ -521,6 +521,26 @@ public class ShulkerBoxStorage {
                 : inventoryIndex;
     }
 
+    /**
+     * @return whether the inventory holds anything a storage cycle could actually move: a
+     *         non-shulker stack that is on the missing-materials list. Checked before starting a
+     *         cycle — with nothing storable, a cycle would open a box, move nothing, close it and
+     *         report DONE, and the still-full inventory would immediately start the next cycle,
+     *         opening and closing the box forever.
+     */
+    public boolean hasStorableMaterials(GatherContext ctx) {
+        Minecraft mc = ctx.client;
+        if (mc.player == null) return false;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
+            if (stack.isEmpty()) continue;
+            // Boxes cannot nest, so a shulker box itself is never storable.
+            if (ItemUtil.isShulkerBox(stack)) continue;
+            if (isOnMissingList(stack, ctx)) return true;
+        }
+        return false;
+    }
+
     /** @return whether another box is worth opening, so we do not cycle through known-full ones. */
     private boolean hasCandidateShulker(Minecraft mc, GatherContext ctx) {
         if (mc.player == null) return false;

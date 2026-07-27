@@ -16,4 +16,10 @@ public class MaterialItemEntry {
         this.neededCount = neededCount;
         this.maxStackSize = maxStackSize > 0 ? maxStackSize : 64;
     }
+
+    public MaterialItemEntry(Item item, int neededCount) {
+        this.item = item;
+        this.neededCount = neededCount;
+        this.maxStackSize = 64;
+    }
 }
