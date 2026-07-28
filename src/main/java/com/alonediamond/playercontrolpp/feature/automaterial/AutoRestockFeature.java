@@ -21,22 +21,21 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.*;
 
 /**
- * Monitors Baritone's {@code #litematica} builder for material-shortage pauses, then navigates to
- * player-marked container positions to restock and resumes the build.
+ * Monitors Baritone's {@code #litematica} builder for material-shortage pauses, then restocks from
+ * shulker boxes in the inventory and from player-marked container positions, and lets the build
+ * carry on.
  *
  * <h3>Activation</h3>
  * <ul>
  *   <li><b>One-click Build + Restock</b> (hotkey) — toggle. Press once to start the build AND
- *       enable monitoring; press again to stop. The feature watches for builder pauses, runs a
- *       restock trip across marked containers, then restarts the builder via
- *       {@code buildOpenLitematic(0)} and loops.</li>
+ *       enable monitoring; press again to stop. The run ends by itself when the schematic is
+ *       finished, so the hotkey is only needed to abort early.</li>
  *   <li><b>Mark Container</b> (hotkey) — marks/unmarks the container the player is looking at.
  *       Entries are stored in {@code Configs.Restocks.MARKED_CONTAINERS} and editable from the
  *       config GUI.</li>
@@ -44,8 +43,25 @@ import java.util.*;
  *
  * <h3>Flow</h3>
  * <pre>
- * IDLE → MONITORING → ANALYZING → PATHING → OPENING → TRANSFERRING → RESTARTING → MONITORING
+ * MONITORING ──builder finished──────────────────────────────────→ stop
+ *      │
+ *      └─builder paused→ ANALYZING
+ *                          ├─nothing actually missing → promote to hotbar → resume
+ *                          ├─shulker box in inventory → SHULKER_OPEN → SHULKER_TAKE ─┐
+ *                          └─marked containers        → PATHING → OPENING →          │
+ *                                                       TRANSFERRING ────────────────┤
+ *                                                                                    ▼
+ *                                                                                FINISHING
+ *                                                                          (resume or relaunch)
  * </pre>
+ *
+ * <h3>Why the two "keep building" paths differ</h3>
+ * Walking to a marked container means driving Baritone's {@code CustomGoalProcess}, and
+ * {@code PathingBehavior.cancelEverything()} sends {@code onLostControl()} to every process —
+ * which makes {@code BuilderProcess} drop its schematic entirely. A container trip therefore has
+ * to relaunch the build afterwards. Taking materials out of a shulker box needs no movement at
+ * all, so that path leaves the paused builder untouched and simply resumes it, keeping the layer
+ * progress Baritone had already made.
  */
 public class AutoRestockFeature implements ClientFeature {
 
@@ -74,34 +90,65 @@ public class AutoRestockFeature implements ClientFeature {
     // ---- Singleton & feature interface ----
 
     private static final AutoRestockFeature INSTANCE = new AutoRestockFeature();
-    private static final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
     private AutoRestockFeature() {}
 
     public static AutoRestockFeature getInstance() { return INSTANCE; }
 
     enum State {
-        IDLE, MONITORING, ANALYZING, PATHING, OPENING, TRANSFERRING, SHULKERING, RESTARTING
+        IDLE, MONITORING, ANALYZING, PATHING, OPENING, TRANSFERRING,
+        SHULKER_OPEN, SHULKER_TAKE, FINISHING
     }
+
+    /**
+     * One material the run is trying to obtain.
+     *
+     * @param item   the item to collect
+     * @param target how many the player should end up holding <em>loose</em> in the 36 main
+     *               inventory slots. Everything is expressed as this target rather than as a
+     *               remaining amount, so the decision "do we still need this?" is a fresh look at
+     *               the inventory every time instead of a counter that can drift.
+     */
+    private record Need(Item item, int target) {}
 
     private State state = State.IDLE;
     private boolean active;
-    /** True while the material HUD check is pending (1 tick delay to let the GUI settle). */
-    private boolean hudCheckPending;
-    /** Guards against calling buildOpenLitematic every tick when the builder is not active. */
-    private boolean attemptedBuildLaunch;
-    /** Count of consecutive restart cycles with zero items transferred. Guards against infinite restart loops. */
-    private int dryRestartCount;
-    /** Max restarts without any items transferred before stopping. */
-    private static final int MAX_DRY_RESTARTS = 3;
+
+    /** Ticks to sit still before the current state runs again — lets packets and screens settle. */
+    private int deferTicks;
+
+    /**
+     * True once this run has taken Baritone's builder down to walk somewhere, which means the
+     * build has to be relaunched rather than resumed.
+     */
+    private boolean builderCancelled;
+
+    /**
+     * True once this cycle has already toured the marked containers. Opening shulker boxes picked
+     * up on that tour leads back through the same "still short?" decision, so without this the two
+     * phases would hand off to each other forever.
+     */
+    private boolean containerTripDone;
+
+    /** Items moved into the inventory during the current restock cycle. */
+    private int cycleGained;
+    /** Consecutive restock cycles that obtained nothing. Guards against looping forever. */
+    private int noGainCycles;
 
     private final BaritoneIntegration baritone = BaritoneIntegration.getInstance();
     private final LitematicaIntegration litematica = LitematicaIntegration.getInstance();
+    private final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
     private final MarkedContainerManager containerManager = MarkedContainerManager.getInstance();
 
     // Restock-run transient state
-    private final List<MaterialItemEntry> neededItems = new ArrayList<>();
+    /** Materials the player is short of. */
+    private final List<Need> needs = new ArrayList<>();
+    /** Every material type the schematic still lists as missing, short or not. */
+    private final List<Item> schematicWanted = new ArrayList<>();
     private final List<BlockPos> containerQueue = new ArrayList<>();
+    /** Inventory slots (0-35) holding a shulker box worth opening. */
+    private final List<Integer> shulkerQueue = new ArrayList<>();
+
     private int containerIndex;
     private BlockPos currentContainerTarget;
     private int pathingTicks;
@@ -109,21 +156,38 @@ public class AutoRestockFeature implements ClientFeature {
     private int openCooldown;
     private int openRetries;
     private int transferCooldown;
-    /** How many ticks since we last transferred anything from the current container screen. */
+    /** Ticks since we last moved an item out of the open screen. */
     private int dryTicks;
-    private boolean anyTransferredThisRun;
+    private boolean tookFromThisContainer;
+    private int shulkerOpenWait;
+    /** Ticks spent in SHULKER_OPEN waiting for the player's own inventory menu to be the open one. */
+    private int shulkerReadyWait;
+    /** Unopened shulker boxes taken from marked containers this cycle. */
+    private int shulkersTaken;
     private Vec3 lastPlayerPos = Vec3.ZERO;
-
-    private int haveShulkerBoxesContainsItems = 0;
-    private boolean foundItemInShulkerBox = false;
 
     private static final int OPEN_WAIT_TICKS = 12;
     private static final int MAX_OPEN_RETRIES = 3;
-    /** Consecutive transfer ticks with no item moved before we treat the container as empty. */
+    /** Consecutive transfer ticks with no item moved before we treat the container as drained. */
     private static final int MAX_DRY_TICKS = 8;
     private static final int PATHING_STUCK_LIMIT = 120;
     private static final int PATHING_SETTLE = 5;
     private static final double STUCK_EPSILON_SQ = 0.04;
+    /** Ticks to let the material list and any closing screen settle before analysing. */
+    private static final int ANALYZE_SETTLE = 2;
+    /** Ticks to let the builder work after a resume/relaunch before believing another pause. */
+    private static final int BUILD_SETTLE = 10;
+    /** Ticks to wait for QuickShulker to open a box before giving up on it. */
+    private static final int SHULKER_OPEN_WAIT = 20;
+    /** Ticks to wait for every screen to close before sending a QuickShulker open packet. */
+    private static final int SHULKER_READY_WAIT = 40;
+    /**
+     * Boxes to carry off per cycle. Each one is opened at the end of the trip, and a box counts as
+     * "still needed" until then, so without a cap a chest full of shulkers would be emptied into
+     * the inventory in a single visit.
+     */
+    private static final int MAX_SHULKERS_PER_CYCLE = 3;
+    private static final int MAX_NO_GAIN_CYCLES = 3;
 
     // ---- Public API ----
 
@@ -134,79 +198,23 @@ public class AutoRestockFeature implements ClientFeature {
     public void onClientTick(Minecraft mc) {
         if (!active) return;
         if (mc.player == null || mc.player.isDeadOrDying()) {
-            if (active) {
-                stop("playercontrolpp.message.restock.player_died");
-            }
+            stop("playercontrolpp.message.restock.player_died");
             return;
         }
 
-        // HUD check is deferred by one tick so the closeContainer / buildOpenLitematic call has
-        // time to resolve before we read the material list.
-        if (hudCheckPending) {
-            hudCheckPending = false;
-            doAnalyze(mc);
-            return;
-        }
-
+        if (deferTicks > 0) { deferTicks--; return; }
         if (transferCooldown > 0) { transferCooldown--; }
 
         switch (state) {
             case IDLE -> {} // unreachable while active
             case MONITORING -> tickMonitoring(mc);
-            case ANALYZING -> tickAnalyzing(mc);
+            case ANALYZING -> doAnalyze(mc);
             case PATHING -> tickPathing(mc);
             case OPENING -> tickOpening(mc);
             case TRANSFERRING -> tickTransferring(mc);
-            case SHULKERING -> tickGetItemFromShulker(mc);
-            case RESTARTING -> tickRestarting(mc);
-        }
-    }
-
-    private void tickGetItemFromShulker(Minecraft mc) {
-        if (mc.player == null || mc.player.isDeadOrDying()) {return;}
-        Inventory inv = mc.player.getInventory();
-        if (!foundItemInShulkerBox) {
-            for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-                ItemStack stack = inv.getItem(i);
-                for (MaterialItemEntry neededItem : neededItems) {
-                    if (ItemUtil.isShulkerBox(stack) && ItemUtil.containsInside(stack,neededItem.item)) {
-                        foundItemInShulkerBox = true;
-                        quickShulker.openShulkerBox(i);
-                        return;
-                    }
-                }
-            }
-            //没找到任何潜影盒内有材料
-            /*state = State.RESTARTING;
-            restartBuilder(mc);*/
-        }
-        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
-            if (--haveShulkerBoxesContainsItems <= 0) {
-                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
-            }
-            return;
-        }
-        AbstractContainerMenu handler = mc.player.containerMenu;
-        boolean took = false;
-        for (Slot slot : handler.slots) {
-            // Skip the player-inventory half of the screen; we only want the box's own slots.
-            if (slot.container == mc.player.getInventory()) continue;
-            for (MaterialItemEntry neededItem : neededItems) {
-                if (neededItem.item.equals(slot.getItem().getItem())) {
-                    SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
-                    took = true;
-                }
-            }
-        }
-        mc.player.closeContainer();
-        if (took) {
-            state = State.RESTARTING;
-            haveShulkerBoxesContainsItems = 0;
-            foundItemInShulkerBox = false;
-            restartBuilder(mc);
-        } else {
-            active = false;
-            stop("playercontrolpp.message.restock.no_progress");
+            case SHULKER_OPEN -> tickShulkerOpen(mc);
+            case SHULKER_TAKE -> tickShulkerTake(mc);
+            case FINISHING -> tickFinishing(mc);
         }
     }
 
@@ -233,138 +241,211 @@ public class AutoRestockFeature implements ClientFeature {
             return;
         }
 
+        resetRunState();
+
+        // Leave an already running build alone — the player may have started it with #litematica
+        // and only now decided they want restocking on top.
+        if (!baritone.isBuilderActive() && !baritone.startLitematicaBuild(0)) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_failed");
+            return;
+        }
+
         active = true;
         state = State.MONITORING;
-        attemptedBuildLaunch = false;
-        dryRestartCount = 0;
+        deferTicks = BUILD_SETTLE;
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.started");
     }
 
     private void stop(String messageKey) {
         baritone.cancelPathing();
-        if (Minecraft.getInstance().player != null) {
-            Minecraft.getInstance().player.closeContainer();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.closeContainer();
         }
         active = false;
         state = State.IDLE;
-        hudCheckPending = false;
-        neededItems.clear();
-        containerQueue.clear();
+        resetRunState();
         if (messageKey != null) {
-            MessageUtil.sendActionBar(Minecraft.getInstance(), messageKey);
+            MessageUtil.sendActionBar(mc, messageKey);
         }
     }
 
-    // ---- Tick handlers ----
+    /** Clears everything a run accumulates, so a restart never inherits stale counters. */
+    private void resetRunState() {
+        deferTicks = 0;
+        builderCancelled = false;
+        containerTripDone = false;
+        cycleGained = 0;
+        noGainCycles = 0;
+        needs.clear();
+        schematicWanted.clear();
+        containerQueue.clear();
+        shulkerQueue.clear();
+        containerIndex = 0;
+        currentContainerTarget = null;
+        pathingTicks = 0;
+        stuckTicks = 0;
+        openCooldown = 0;
+        openRetries = 0;
+        transferCooldown = 0;
+        dryTicks = 0;
+        tookFromThisContainer = false;
+        shulkerOpenWait = 0;
+        shulkerReadyWait = 0;
+        shulkersTaken = 0;
+        lastPlayerPos = Vec3.ZERO;
+    }
+
+    // ---- Monitoring ----
 
     private void tickMonitoring(Minecraft mc) {
-        // Builder not active: either it hasn't been launched yet, or it completed.
-        // Only launch once — without this guard the completed builder is re-launched
-        // every tick, producing an infinite build-restart loop.
+        // The builder drops its schematic in onLostControl(), which it calls itself right after
+        // logging "Done building". So a process that was running and now is not means the
+        // schematic is finished (or something else cancelled it) — either way there is nothing
+        // left for this feature to do, and sitting here idle is what used to force the player to
+        // press the hotkey a second time.
         if (!baritone.isBuilderActive()) {
-            if (!attemptedBuildLaunch) {
-                attemptedBuildLaunch = true;
-                if (baritone.startLitematicaBuild(0)) {
-                    MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_started");
-                } else {
-                    MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_failed");
-                    stop(null);
-                }
-            }
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_finished");
+            stop(null);
             return;
         }
-
-        // Builder IS active — confirmed; reset the guard so a future restock cycle
-        // can re-launch it.
-        attemptedBuildLaunch = true;
 
         if (baritone.isBuilderPaused()) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.pause_detected");
             state = State.ANALYZING;
+            deferTicks = ANALYZE_SETTLE;
         }
     }
 
-    private void tickAnalyzing(Minecraft mc) {
-        // Defer the actual analysis by one tick so that any closeContainer / buildOpenLitematic
-        // call has had a tick to resolve, and the material-list HUD has had a frame to refresh.
-        hudCheckPending = true;
+    /** Reads Litematica's material list and decides how to satisfy the shortage. */
+    private void doAnalyze(Minecraft mc) {
+        needs.clear();
+        schematicWanted.clear();
+        containerQueue.clear();
+        shulkerQueue.clear();
+        containerIndex = 0;
+        cycleGained = 0;
+        shulkersTaken = 0;
+        containerTripDone = false;
+
+        if (!readMaterialList(mc)) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.no_material_list");
+            stop(null);
+            return;
+        }
+
+        if (needs.isEmpty()) {
+            handlePauseWithoutShortage(mc);
+            return;
+        }
+
+        // Shulker boxes already carried cost no travel and leave the paused builder alive.
+        if (shulkerModeEnabled() && quickShulker.isLoaded()) {
+            collectShulkerCandidates(mc);
+        }
+        if (!shulkerQueue.isEmpty()) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.shulker_found",
+                    shulkerQueue.size());
+            state = State.SHULKER_OPEN;
+            return;
+        }
+
+        startContainerTrip(mc);
     }
 
-    /** Reads Litematica's material list, checks HUD state, and decides next action. */
-    private void doAnalyze(Minecraft mc) {
-        neededItems.clear();
-        containerQueue.clear();
-        anyTransferredThisRun = false;
+    /**
+     * The builder paused although the player holds everything Litematica still lists as missing.
+     *
+     * <p>The usual reason is Baritone's {@code allowInventory} setting, which is off by default and
+     * limits the builder to the nine hotbar slots — materials sitting in the main inventory are
+     * invisible to it. Promoting one onto a free hotbar slot is enough to unblock the build, and is
+     * the difference between "carry on" and the feature stopping while the player can plainly see
+     * the materials in their inventory.
+     */
+    private void handlePauseWithoutShortage(Minecraft mc) {
+        int promoted = promoteToHotbar(mc, schematicWanted);
+        if (promoted > 0) {
+            noGainCycles = 0;
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.hotbar_promoted", promoted);
+        } else {
+            noGainCycles++;
+            if (noGainCycles >= MAX_NO_GAIN_CYCLES) {
+                MessageUtil.sendActionBar(mc, baritone.allowsInventory()
+                        ? "playercontrolpp.message.restock.paused_unreachable"
+                        : "playercontrolpp.message.restock.paused_hotbar_full");
+                stop(null);
+                return;
+            }
+        }
+        resumeOrRelaunch(mc);
+    }
 
-        // Read Litematica material list.
+    /**
+     * Fills {@link #needs} and {@link #schematicWanted} from Litematica's material list.
+     *
+     * <p>{@code MaterialListEntry.getCountMissing()} counts blocks still missing <em>in the
+     * world</em> and is fixed when the list is created — {@code updateAvailableCounts()} only ever
+     * refreshes {@code countAvailable}. It is therefore a target, not a remaining amount, and
+     * comparing it against an inventory count as if the two were the same unit is what made the
+     * feature skip every container while the player was holding plenty of the material.
+     *
+     * <p>Litematica's own {@code countAvailable} is no help either: it counts items inside shulker
+     * boxes and bundles, which Baritone cannot place. The "have" side is counted here instead, over
+     * the 36 loose slots the builder actually draws from.
+     */
+    private boolean readMaterialList(Minecraft mc) {
         try {
             Object materialList = litematica.getMaterialList();
-            if (materialList == null) {
-                cannotReadMaterials(mc);
-                return;
-            }
+            if (materialList == null) return false;
 
-            // Litematica only keeps the list up to date while its HUD is on.
-            Object hudRenderer = materialList.getClass()
-                    .getMethod("getHudRenderer").invoke(materialList);
-            boolean hudShowing = (Boolean) hudRenderer.getClass()
-                    .getMethod("getShouldRenderCustom").invoke(hudRenderer);
-            if (!hudShowing) {
-                cannotReadMaterials(mc);
-                return;
-            }
-
-            // Ensure counts are up to date.
             Object allMaterials = materialList.getClass()
                     .getMethod("getMaterialsAll").invoke(materialList);
-            Class.forName("fi.dy.masa.litematica.materials.MaterialListUtils")
-                    .getMethod("updateAvailableCounts", List.class,
-                            net.minecraft.world.entity.player.Player.class)
-                    .invoke(null, allMaterials, mc.player);
+            if (!(allMaterials instanceof List<?> allList) || allList.isEmpty()) return false;
 
-            @SuppressWarnings("unchecked")
-            List<?> allList = (List<?>) allMaterials;
-            if (allList.isEmpty()) {
-                cannotReadMaterials(mc);
-                return;
-            }
+            Set<Object> ignored = litematica.getIgnoredSet(materialList);
+            int stacks = Math.max(1, Configs.Restocks.RESTOCK_STACKS_PER_ITEM.getIntegerValue());
 
             for (Object entry : allList) {
+                if (ignored.contains(entry)) continue;
+
                 ItemStack stack = (ItemStack) entry.getClass().getMethod("getStack").invoke(entry);
-                int countMissing = (Integer) entry.getClass().getMethod("getCountMissing").invoke(entry);
-                if (countMissing > 0) {
-                    neededItems.add(new MaterialItemEntry(stack.getItem(), countMissing));
+                int countMissing = (Integer) entry.getClass()
+                        .getMethod("getCountMissing").invoke(entry);
+                if (stack.isEmpty() || countMissing <= 0) continue;
+
+                Item item = stack.getItem();
+                schematicWanted.add(item);
+
+                // A whole schematic usually needs far more than an inventory holds, so top up to
+                // a few stacks instead of chasing the full figure — otherwise one material fills
+                // every slot and the rest never get collected.
+                int target = Math.min(countMissing, Math.max(1, stack.getMaxStackSize()) * stacks);
+                if (looseCount(mc, item) < target) {
+                    needs.add(new Need(item, target));
                 }
             }
+            return true;
 
         } catch (Exception e) {
             Playercontrolpp.LOGGER.warn("Auto-restock: failed to read Litematica material list", e);
-            cannotReadMaterials(mc);
-            return;
+            return false;
         }
+    }
 
-        if (neededItems.isEmpty()) {
-            // Builder paused for a non-material reason (pathing failure, liquid, …).
-            restartBuilder(mc);
-            return;
-        }
+    // ---- Marked containers ----
 
-        // Build the queue of marked containers in the current dimension.
+    private void startContainerTrip(Minecraft mc) {
         List<BlockPos> allMarked = containerManager.positionsInCurrentDimension(mc.level);
         if (allMarked.isEmpty()) {
             stop("playercontrolpp.message.restock.no_containers");
             return;
         }
 
-        // Only now that we have both missing items and marked containers do we cancel the
-        // paused builder and take over pathing.
+        // Only now do we take the paused builder down: driving CustomGoalProcess sends
+        // onLostControl() to it, which discards the schematic.
         baritone.cancelPathing();
-
-        if (Configs.Restocks.RESTOCK_SHULKER_MODE.getBooleanValue() && haveItemsInPlayerShulkerBox(mc) && quickShulker.isLoaded()){
-            haveShulkerBoxesContainsItems = 15;
-            state = State.SHULKERING;
-            return;
-        }
+        builderCancelled = true;
+        containerTripDone = true;
 
         BlockPos playerPos = mc.player.blockPosition();
         allMarked.sort(Comparator.comparingDouble(p -> p.distSqr(playerPos)));
@@ -372,42 +453,14 @@ public class AutoRestockFeature implements ClientFeature {
         containerIndex = 0;
 
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.gathering",
-                neededItems.size(), containerQueue.size());
+                needs.size(), containerQueue.size());
 
         navigateToCurrentContainer(mc);
     }
 
-    private boolean haveItemsInPlayerShulkerBox(Minecraft mc) {
-        if (mc.player == null || mc.player.isDeadOrDying()) {return false;}
-        Inventory inv = mc.player.getInventory();
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack item = inv.getItem(i);
-            if (item == null || item.isEmpty()) {continue;}
-            if (ItemUtil.isShulkerBox(item)) {
-                for (MaterialItemEntry neededItem : neededItems) {
-                    if (ItemUtil.isShulkerBox(item) && ItemUtil.containsInside(item,neededItem.item)) {
-                        haveShulkerBoxesContainsItems = 15;
-                        foundItemInShulkerBox = false;
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * The Litematica material list is unavailable — most likely the Info HUD is off.
-     * Tell the player and stop so the feature does not sit idle while pretending to be active.
-     */
-    private void cannotReadMaterials(Minecraft mc) {
-        MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.no_hud");
-        stop(null);
-    }
-
     private void navigateToCurrentContainer(Minecraft mc) {
         if (containerIndex >= containerQueue.size()) {
-            finishRestockRun(mc);
+            afterContainers(mc);
             return;
         }
         currentContainerTarget = containerQueue.get(containerIndex);
@@ -415,13 +468,38 @@ public class AutoRestockFeature implements ClientFeature {
         stuckTicks = 0;
         openRetries = 0;
         dryTicks = 0;
+        tookFromThisContainer = false;
         lastPlayerPos = mc.player.position();
         baritone.pathTo(currentContainerTarget);
         state = State.PATHING;
     }
 
+    private void nextContainer(Minecraft mc) {
+        if (mc.player != null) {
+            mc.player.closeContainer();
+        }
+        containerIndex++;
+        navigateToCurrentContainer(mc);
+    }
+
+    /** Every marked container visited. Shulker boxes picked up along the way get opened now. */
+    private void afterContainers(Minecraft mc) {
+        if (mc.player != null) {
+            mc.player.closeContainer();
+        }
+        if (shulkerModeEnabled() && quickShulker.isLoaded() && anythingStillNeeded(mc)) {
+            collectShulkerCandidates(mc);
+            if (!shulkerQueue.isEmpty()) {
+                baritone.cancelPathing();
+                state = State.SHULKER_OPEN;
+                deferTicks = ANALYZE_SETTLE;
+                return;
+            }
+        }
+        endCycle(mc);
+    }
+
     private void tickPathing(Minecraft mc) {
-        if (mc.player == null) return;
         pathingTicks++;
 
         if (currentContainerTarget != null
@@ -437,8 +515,7 @@ public class AutoRestockFeature implements ClientFeature {
                 stuckTicks++;
                 if (stuckTicks > PATHING_STUCK_LIMIT) {
                     baritone.cancelPathing();
-                    containerIndex++;
-                    navigateToCurrentContainer(mc);
+                    nextContainer(mc);
                     return;
                 }
             } else {
@@ -449,14 +526,13 @@ public class AutoRestockFeature implements ClientFeature {
 
         if (pathingTicks > PATHING_SETTLE && !baritone.isPathing()) {
             stuckTicks = 0;
-            // Only attempt to open if we're close enough — isPathing() false could also
-            // mean Baritone failed to find a path, in which case the player is far away.
+            // isPathing() going false can also mean Baritone found no path at all, in which case
+            // the player is still far away and there is nothing to open.
             if (currentContainerTarget != null
                     && mc.player.blockPosition().distSqr(currentContainerTarget) < 36.0) {
                 openContainer(mc);
             } else {
-                containerIndex++;
-                navigateToCurrentContainer(mc);
+                nextContainer(mc);
             }
         }
     }
@@ -494,8 +570,7 @@ public class AutoRestockFeature implements ClientFeature {
         } catch (Exception e) {
             openRetries++;
             if (openRetries >= MAX_OPEN_RETRIES) {
-                containerIndex++;
-                navigateToCurrentContainer(mc);
+                nextContainer(mc);
             }
         }
     }
@@ -510,178 +585,350 @@ public class AutoRestockFeature implements ClientFeature {
         } else {
             openRetries++;
             if (openRetries < MAX_OPEN_RETRIES) {
-                // Retry the open — don't call openContainer (which would count openRetries again).
+                // Retry the open — don't call openContainer (which would reset openRetries).
                 openCooldown = 0;
                 tryOpenContainerClick(mc);
             } else {
-                containerIndex++;
-                navigateToCurrentContainer(mc);
+                nextContainer(mc);
             }
         }
     }
 
     private void tickTransferring(Minecraft mc) {
+        // Screen gone (server closed it, or we did) — clicking into it would go nowhere.
+        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
+            nextContainer(mc);
+            return;
+        }
+
+        if (isInventoryFull(mc)) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.inventory_full");
+            endCycle(mc);
+            return;
+        }
+
         if (transferCooldown > 0) return;
 
-        // If the screen has disappeared (server closed it or we did) — move on.
-        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
-            mc.player.closeContainer();
-            containerIndex++;
-            navigateToCurrentContainer(mc);
-            return;
-        }
+        AbstractContainerMenu menu = mc.player.containerMenu;
 
-        // Inventory full → stop transferring from this container.
-        if (isInventoryFull(mc)) {
-            mc.player.closeContainer();
-            if (!anyTransferredThisRun) {
-                MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.inventory_full");
-                restartBuilder(mc);
-            } else {
-                finishRestockRun(mc);
-            }
-            return;
-        }
-
-        AbstractContainerMenu handler = mc.player.containerMenu;
-
-        // --- Quick bail-out: nothing useful in this container at all ---
-        if (dryTicks == 0 && !containerHasAnyNeededItem(handler, mc)) {
-            mc.player.closeContainer();
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.container_no_match");
-            containerIndex++;
-            navigateToCurrentContainer(mc);
-            return;
-        }
-
-        boolean transferred = tryTransferOne(mc, handler);
-
-        if (transferred) {
-            anyTransferredThisRun = true;
+        if (takeOneNeeded(mc, menu) || (shulkerModeEnabled() && takeShulkerBox(mc, menu))) {
+            tookFromThisContainer = true;
             dryTicks = 0;
             transferCooldown = 2;
-        } else {
-            dryTicks++;
-            if (dryTicks >= MAX_DRY_TICKS) {
-                // Nothing moved for several ticks — this container is drained.
-                mc.player.closeContainer();
-                containerIndex++;
-                if (haveShulkerBoxesContainsItems <= 0) navigateToCurrentContainer(mc);
+            return;
+        }
+
+        if (++dryTicks >= MAX_DRY_TICKS) {
+            if (!tookFromThisContainer) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.container_no_match");
+            }
+            nextContainer(mc);
+        }
+    }
+
+    // ---- Shulker boxes in the inventory (QuickShulker) ----
+
+    /** Inventory slots holding a single shulker box that contains something we are short of. */
+    private void collectShulkerCandidates(Minecraft mc) {
+        shulkerQueue.clear();
+        Inventory inv = mc.player.getInventory();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inv.getItem(i);
+            if (!QuickShulkerIntegration.isOpenableShulkerBox(stack)) continue;
+            if (shulkerHoldsSomethingNeeded(mc, stack)) {
+                shulkerQueue.add(i);
             }
         }
     }
 
-    /** @return true if anything was moved. */
-    private boolean tryTransferOne(Minecraft mc, AbstractContainerMenu handler) {
-        // Phase 1: loose stacks that match our needed items.
-        for (Slot slot : handler.slots) {
-            if (slot.container == mc.player.getInventory()) continue;
-            ItemStack stack = slot.getItem();
-            if (stack.isEmpty() || ItemUtil.isShulkerBox(stack)) continue;
+    private void tickShulkerOpen(Minecraft mc) {
+        // QuickShulker's packet carries a slot index that the server resolves against
+        // player.containerMenu, so anything other than the player's own inventory menu being open
+        // would point it at a completely different slot.
+        if (!quickShulker.canOpenFromInventory(mc)) {
+            if (++shulkerReadyWait > SHULKER_READY_WAIT) {
+                afterShulkers(mc);
+                return;
+            }
+            mc.player.closeContainer();
+            deferTicks = ANALYZE_SETTLE;
+            return;
+        }
+        shulkerReadyWait = 0;
 
-            for (MaterialItemEntry entry : neededItems) {
-                if (ItemUtil.is(stack, entry.item)
-                        && countInInventory(entry.item, mc) < entry.neededCount) {
-                    try {
-                        SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
-                        return true;
-                    } catch (Exception ignored) {}
-                }
+        Inventory inv = mc.player.getInventory();
+        while (!shulkerQueue.isEmpty()) {
+            int slot = shulkerQueue.remove(0);
+            ItemStack stack = inv.getItem(slot);
+            if (!QuickShulkerIntegration.isOpenableShulkerBox(stack)
+                    || !shulkerHoldsSomethingNeeded(mc, stack)) {
+                continue;
+            }
+            if (quickShulker.openShulkerBox(QuickShulkerIntegration.menuSlotForInventorySlot(slot))) {
+                shulkerOpenWait = SHULKER_OPEN_WAIT;
+                transferCooldown = 0;
+                dryTicks = 0;
+                state = State.SHULKER_TAKE;
+                return;
             }
         }
 
-        // Phase 2: shulker boxes containing needed items (only if config enabled).
-        if (Configs.Restocks.RESTOCK_SHULKER_MODE.getBooleanValue()) {
-            for (Slot slot : handler.slots) {
-                if (slot.container == mc.player.getInventory()) continue;
-                ItemStack stack = slot.getItem();
-                if (stack.isEmpty() || !ItemUtil.isShulkerBox(stack)) continue;
-
-                if (shulkerBoxContainsNeededItem(stack, mc)) {
-                    try {
-                        SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
-                        if (quickShulker.isLoaded()){
-                            haveShulkerBoxesContainsItems = 15;
-                            state = State.SHULKERING;
-                        }
-                        return true;
-                    } catch (Exception ignored) {}
-                }
-            }
-        }
-
-        return false;
+        afterShulkers(mc);
     }
 
-    /** All containers visited (or none marked). Restart the builder. */
-    private void finishRestockRun(Minecraft mc) {
-        if (anyTransferredThisRun) {
+    private void tickShulkerTake(Minecraft mc) {
+        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
+            if (--shulkerOpenWait <= 0) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.shulker_open_failed");
+                state = State.SHULKER_OPEN;
+            }
+            return;
+        }
+
+        if (transferCooldown > 0) return;
+
+        if (isInventoryFull(mc)) {
+            mc.player.closeContainer();
+            shulkerQueue.clear();
+            state = State.SHULKER_OPEN;
+            deferTicks = ANALYZE_SETTLE;
+            return;
+        }
+
+        if (takeOneNeeded(mc, mc.player.containerMenu)) {
+            dryTicks = 0;
+            transferCooldown = 2;
+            return;
+        }
+
+        if (++dryTicks >= MAX_DRY_TICKS) {
+            mc.player.closeContainer();
+            state = State.SHULKER_OPEN;
+            deferTicks = ANALYZE_SETTLE;
+        }
+    }
+
+    private void afterShulkers(Minecraft mc) {
+        if (mc.player != null) {
+            mc.player.closeContainer();
+        }
+        // Still short and there are containers we have not toured yet? Do the trip; otherwise wrap
+        // up — going round again would just bounce between the two phases.
+        if (!containerTripDone && anythingStillNeeded(mc)
+                && !containerManager.positionsInCurrentDimension(mc.level).isEmpty()) {
+            startContainerTrip(mc);
+            return;
+        }
+        endCycle(mc);
+    }
+
+    // ---- Cycle end ----
+
+    /** One restock cycle is over: report, guard against looping, then get the build going again. */
+    private void endCycle(Minecraft mc) {
+        if (mc.player != null) {
+            mc.player.closeContainer();
+        }
+
+        if (cycleGained > 0) {
+            noGainCycles = 0;
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.stock_complete");
-            dryRestartCount = 0;
         } else {
+            noGainCycles++;
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.nothing_found");
-            dryRestartCount++;
-            // Consecutive restarts with zero items transferred means materials are permanently
-            // unavailable — stop instead of looping forever.
-            if (dryRestartCount >= MAX_DRY_RESTARTS) {
+            if (noGainCycles >= MAX_NO_GAIN_CYCLES) {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.no_progress");
                 stop(null);
                 return;
             }
         }
-        restartBuilder(mc);
+
+        state = State.FINISHING;
+        deferTicks = ANALYZE_SETTLE + 1;
     }
 
-    private void restartBuilder(Minecraft mc) {
-        baritone.cancelPathing();
-        mc.player.closeContainer();
-        neededItems.clear();
-        containerQueue.clear();
-        currentContainerTarget = null;
-
-        if (baritone.startLitematicaBuild(0)) {
-            attemptedBuildLaunch = true;
-            state = State.RESTARTING;
-        } else {
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_failed");
-            active = false;
-            state = State.IDLE;
-        }
+    /**
+     * Runs a tick or two after the last container closed, so the inventory the promotion looks at
+     * is the one the server agrees with.
+     */
+    private void tickFinishing(Minecraft mc) {
+        promoteToHotbar(mc, schematicWanted);
+        resumeOrRelaunch(mc);
     }
 
-    /** Wait for the restarted builder to become active before resuming monitoring. */
-    private void tickRestarting(Minecraft mc) {
-        if (baritone.isBuilderActive()) {
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_restarted");
+    /** Resume the paused builder when it survived the restock, otherwise start it over. */
+    private void resumeOrRelaunch(Minecraft mc) {
+        if (!builderCancelled && baritone.isBuilderActive() && baritone.resumeBuilder()) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_resumed");
             state = State.MONITORING;
+            deferTicks = BUILD_SETTLE;
+            return;
         }
+        relaunchBuilder(mc);
+    }
+
+    private void relaunchBuilder(Minecraft mc) {
+        baritone.cancelPathing();
+        if (mc.player != null) {
+            mc.player.closeContainer();
+        }
+        currentContainerTarget = null;
+        containerQueue.clear();
+        shulkerQueue.clear();
+
+        if (!baritone.startLitematicaBuild(0)) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_failed");
+            stop(null);
+            return;
+        }
+
+        builderCancelled = false;
+        MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_restarted");
+        // Straight back to monitoring: startLitematicaBuild only reports success once the process
+        // is actually running, and if the schematic turns out to be complete the builder goes
+        // inactive again on its own and monitoring reports that as finished.
+        state = State.MONITORING;
+        deferTicks = BUILD_SETTLE;
+    }
+
+    // ---- Transfers ----
+
+    /**
+     * Moves one stack of the material the player is furthest short of out of the open screen.
+     *
+     * <p>Picking the least-satisfied material each time round-robins across the shortage instead of
+     * letting the first type in the list fill every free slot.
+     *
+     * @return true when the inventory really gained something.
+     */
+    private boolean takeOneNeeded(Minecraft mc, AbstractContainerMenu menu) {
+        Slot best = null;
+        Item bestItem = null;
+        double bestRatio = Double.MAX_VALUE;
+
+        for (Slot slot : menu.slots) {
+            if (slot.container == mc.player.getInventory()) continue;
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty()) continue;
+            // A shulker box with something in it is storage, handled by takeShulkerBox(). An empty
+            // one is just another building material.
+            if (ItemUtil.isShulkerBox(stack) && !ItemUtil.contentsOf(stack).isEmpty()) continue;
+
+            for (Need need : needs) {
+                if (!ItemUtil.is(stack, need.item())) continue;
+                int have = looseCount(mc, need.item());
+                if (have < need.target()) {
+                    double ratio = (double) have / need.target();
+                    if (ratio < bestRatio) {
+                        bestRatio = ratio;
+                        best = slot;
+                        bestItem = need.item();
+                    }
+                }
+                break;
+            }
+        }
+
+        if (best == null) return false;
+
+        try {
+            int before = looseCount(mc, bestItem);
+            SlotActionCompat.quickMove(mc, menu.containerId, best.index);
+            // handleContainerInput applies the move to the client menu synchronously, so this is a
+            // real confirmation rather than an assumption that the click landed.
+            if (looseCount(mc, bestItem) > before) {
+                cycleGained++;
+                return true;
+            }
+        } catch (Exception ignored) {
+            // Slot vanished between the scan and the click; the dry-tick counter handles it.
+        }
+        return false;
+    }
+
+    /**
+     * Takes a whole shulker box that holds a needed material out of the open container. The box is
+     * opened later, once the player is standing still again and no other screen is in the way.
+     */
+    private boolean takeShulkerBox(Minecraft mc, AbstractContainerMenu menu) {
+        if (shulkersTaken >= MAX_SHULKERS_PER_CYCLE) return false;
+
+        for (Slot slot : menu.slots) {
+            if (slot.container == mc.player.getInventory()) continue;
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty() || !ItemUtil.isShulkerBox(stack)) continue;
+            if (!shulkerHoldsSomethingNeeded(mc, stack)) continue;
+
+            try {
+                SlotActionCompat.quickMove(mc, menu.containerId, slot.index);
+                shulkersTaken++;
+                cycleGained++;
+                return true;
+            } catch (Exception ignored) {
+                // Same as above — treated as a dry tick.
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Moves needed materials from the main inventory onto free hotbar slots.
+     *
+     * <p>Only empty hotbar slots are used: evicting whatever the player keeps on the hotbar could
+     * take away the pickaxe Baritone needs to clear blocks, which would trade one stall for
+     * another.
+     *
+     * @return how many stacks were promoted.
+     */
+    private int promoteToHotbar(Minecraft mc, List<Item> wanted) {
+        if (wanted.isEmpty() || mc.player == null) return 0;
+        // Slot indices are only meaningful against the menu the server has open.
+        if (mc.player.containerMenu != mc.player.inventoryMenu) return 0;
+
+        Inventory inv = mc.player.getInventory();
+        int moved = 0;
+
+        for (Item item : wanted) {
+            if (hotbarCount(inv, item) > 0) continue;
+
+            int source = -1;
+            for (int i = PlayerUtil.HOTBAR_SIZE; i < Inventory.INVENTORY_SIZE; i++) {
+                if (ItemUtil.is(inv.getItem(i), item)) { source = i; break; }
+            }
+            if (source < 0) continue;
+
+            int target = -1;
+            for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
+                if (inv.getItem(i).isEmpty()) { target = i; break; }
+            }
+            if (target < 0) break; // hotbar full — nothing more we can do without evicting
+
+            // In InventoryMenu space the main inventory keeps its indices, so source doubles as
+            // the screen slot; the swap button is the hotbar index itself.
+            SlotActionCompat.swapWithHotbar(mc, mc.player.inventoryMenu.containerId, source, target);
+            moved++;
+        }
+
+        return moved;
     }
 
     // ---- Helpers ----
 
-    private boolean isInventoryFull(Minecraft mc) {
-        if (mc.player == null) return true;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (mc.player.getInventory().getItem(i).isEmpty()) return false;
-        }
-        return true;
+    private static boolean shulkerModeEnabled() {
+        return Configs.Restocks.RESTOCK_SHULKER_MODE.getBooleanValue();
     }
 
-    private int countInInventory(Item item, Minecraft mc) {
-        if (mc.player == null) return 0;
-        int count = 0;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (ItemUtil.is(stack, item)) count += stack.getCount();
+    private boolean anythingStillNeeded(Minecraft mc) {
+        for (Need need : needs) {
+            if (looseCount(mc, need.item()) < need.target()) return true;
         }
-        return count;
+        return false;
     }
 
-    private boolean shulkerBoxContainsNeededItem(ItemStack shulkerBox, Minecraft mc) {
+    private boolean shulkerHoldsSomethingNeeded(Minecraft mc, ItemStack shulkerBox) {
         for (ItemStack inner : ItemUtil.contentsOf(shulkerBox)) {
-            for (MaterialItemEntry entry : neededItems) {
-                if (ItemUtil.is(inner, entry.item)
-                        && countInInventory(entry.item, mc) < entry.neededCount) {
+            for (Need need : needs) {
+                if (ItemUtil.is(inner, need.item()) && looseCount(mc, need.item()) < need.target()) {
                     return true;
                 }
             }
@@ -689,25 +936,38 @@ public class AutoRestockFeature implements ClientFeature {
         return false;
     }
 
-    /** One-shot check at the start of TRANSFERRING: does the open container hold anything useful? */
-    private boolean containerHasAnyNeededItem(AbstractContainerMenu handler, Minecraft mc) {
-        for (Slot slot : handler.slots) {
-            if (slot.container == mc.player.getInventory()) continue;
-            ItemStack stack = slot.getItem();
-            if (stack.isEmpty()) continue;
-
-            if (!ItemUtil.isShulkerBox(stack)) {
-                for (MaterialItemEntry entry : neededItems) {
-                    if (ItemUtil.is(stack, entry.item)
-                            && countInInventory(entry.item, mc) < entry.neededCount) {
-                        return true;
-                    }
-                }
-            } else if (Configs.Restocks.RESTOCK_SHULKER_MODE.getBooleanValue()
-                    && shulkerBoxContainsNeededItem(stack, mc)) {
-                return true;
-            }
+    /**
+     * How many of {@code item} sit loose in the 36 slots Baritone builds from.
+     *
+     * <p>Deliberately not Litematica's {@code countAvailable}, which folds in shulker box and
+     * bundle contents — a box full of stone would read as plenty of stone while the builder still
+     * has nothing it can place.
+     */
+    private int looseCount(Minecraft mc, Item item) {
+        if (mc.player == null) return 0;
+        Inventory inv = mc.player.getInventory();
+        int count = 0;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inv.getItem(i);
+            if (ItemUtil.is(stack, item)) count += stack.getCount();
         }
-        return false;
+        return count;
+    }
+
+    private static int hotbarCount(Inventory inv, Item item) {
+        int count = 0;
+        for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
+            ItemStack stack = inv.getItem(i);
+            if (ItemUtil.is(stack, item)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private boolean isInventoryFull(Minecraft mc) {
+        if (mc.player == null) return true;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (mc.player.getInventory().getItem(i).isEmpty()) return false;
+        }
+        return true;
     }
 }

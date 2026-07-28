@@ -190,13 +190,18 @@ public class Configs implements IConfigHandler {
                 "When enabled, auto-restock will also take shulker boxes that contain needed materials from marked containers. Requires QuickShulker to be useful after collecting.")
                 .apply(KEY_BARITONE);
 
+        public static final ConfigInteger RESTOCK_STACKS_PER_ITEM = new ConfigInteger(
+                "restockStacksPerItem", 8, 1, 36,
+                "How many stacks of each missing material to top up to per restock trip. Litematica reports what the whole schematic still needs, which is usually far more than an inventory holds, so the target is capped at this many stacks per item type to leave room for the other materials.")
+                .apply(KEY_BARITONE);
+
         public static final ConfigStringList MARKED_CONTAINERS = new ConfigStringList(
                 "markedContainers", ImmutableList.of(),
                 "Marked container positions for auto-restock. Each entry: dimension x y z (e.g. minecraft:overworld 10 64 -20). Use the Mark Container hotkey to add/remove, or edit this list directly.")
                 .apply(KEY_BARITONE);
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                RESTOCK_SHULKER_MODE, MARKED_CONTAINERS);
+                RESTOCK_SHULKER_MODE, RESTOCK_STACKS_PER_ITEM, MARKED_CONTAINERS);
     }
 
     private static ImmutableList<String> withWaterBucket(List<String> ids) {

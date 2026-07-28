@@ -142,7 +142,14 @@ public class BaritoneIntegration implements ModIntegration {
      * typing {@code #litematica} in chat (or {@code #litematica <index>} when more than one
      * schematic is loaded).
      *
+     * <p>{@code buildOpenLitematic} returns {@code void} and swallows its own failures — when no
+     * placement exists at {@code schematicIndex} it merely logs "List of placements has no entry"
+     * and leaves the process idle. So a successful reflective call says nothing about whether a
+     * build actually started; the answer is whether the process is active afterwards, which
+     * {@code build()} sets synchronously on the calling (client) thread.
+     *
      * @param schematicIndex zero-based index into Litematica's loaded schematic list.
+     * @return whether the BuilderProcess is running a schematic after the call.
      */
     public boolean startLitematicaBuild(int schematicIndex) {
         try {
@@ -152,7 +159,48 @@ public class BaritoneIntegration implements ModIntegration {
             builderProcess.getClass()
                     .getMethod("buildOpenLitematic", int.class)
                     .invoke(builderProcess, schematicIndex);
+            Boolean active = (Boolean) builderProcess.getClass()
+                    .getMethod("isActive").invoke(builderProcess);
+            return active != null && active;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Clear the BuilderProcess pause flag, exactly as Baritone's {@code resume} command does.
+     *
+     * <p>Preferred over relaunching the build whenever the process is still alive: a relaunch
+     * re-parses the schematic and resets the layer counter back to {@code startAtLayer}, while
+     * resuming picks up where the pause happened and keeps {@code observedCompleted}.
+     *
+     * @return whether the call went through.
+     */
+    public boolean resumeBuilder() {
+        try {
+            Object baritone = getBaritone();
+            Object builderProcess = baritone.getClass()
+                    .getMethod("getBuilderProcess").invoke(baritone);
+            builderProcess.getClass().getMethod("resume").invoke(builderProcess);
             return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * @return the value of Baritone's {@code allowInventory} setting, which defaults to
+     *         {@code false}. While it is off the builder only places blocks it can find in the
+     *         nine hotbar slots — materials sitting in the main inventory are invisible to it,
+     *         so a restock that lands there does not unblock the build.
+     */
+    public boolean allowsInventory() {
+        try {
+            Object settings = Class.forName("baritone.api.BaritoneAPI")
+                    .getMethod("getSettings").invoke(null);
+            Object setting = settings.getClass().getField("allowInventory").get(settings);
+            Object value = setting.getClass().getField("value").get(setting);
+            return Boolean.TRUE.equals(value);
         } catch (Exception e) {
             return false;
         }

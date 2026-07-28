@@ -219,20 +219,29 @@ public class LitematicaIntegration implements ModIntegration {
     }
 
     /**
-     * @return Litematica's internal ignored-entries set.
+     * @return Litematica's internal ignored-entries set, or an empty set when it cannot be read.
      *
      * <p>Needs {@code getDeclaredField} + {@code setAccessible} because the field is
-     * {@code protected} in MaterialListBase from 1.21.11 onwards.
+     * {@code protected} in MaterialListBase from 1.21.11 onwards. It also has to walk up the
+     * hierarchy: {@code getMaterialList()} hands back a {@code MaterialListPlacement} or
+     * {@code MaterialListSchematic}, and {@code getDeclaredField} does not look at superclasses,
+     * so asking the concrete class alone always missed and quietly returned nothing.
      */
     @SuppressWarnings("unchecked")
     public Set<Object> getIgnoredSet(Object materialList) {
-        try {
-            Field field = materialList.getClass().getDeclaredField("ignored");
-            field.setAccessible(true);
-            return (Set<Object>) field.get(materialList);
-        } catch (Exception e) {
-            return Collections.emptySet();
+        for (Class<?> c = materialList.getClass(); c != null; c = c.getSuperclass()) {
+            try {
+                Field field = c.getDeclaredField("ignored");
+                field.setAccessible(true);
+                Object value = field.get(materialList);
+                return value instanceof Set<?> set ? (Set<Object>) set : Collections.emptySet();
+            } catch (NoSuchFieldException ignored) {
+                // Declared further up; keep walking.
+            } catch (Exception e) {
+                return Collections.emptySet();
+            }
         }
+        return Collections.emptySet();
     }
 
     /** Move the render layer, exactly as Litematica's own PageUp/PageDown hotkeys do. */

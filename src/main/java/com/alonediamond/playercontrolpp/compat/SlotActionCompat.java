@@ -53,4 +53,23 @@ public final class SlotActionCompat {
         //$$ mc.gameMode.handleInventoryMouseClick(containerId, slotIndex, 0, ClickType.QUICK_MOVE, mc.player);
         //#endif
     }
+
+    /**
+     * The number-key swap: exchanges the contents of {@code slotIndex} with hotbar slot
+     * {@code hotbarIndex}, exactly as pressing 1-9 while hovering a slot does.
+     *
+     * <p>One packet instead of the two-click pickup/place pair, so the swap cannot be left
+     * half-applied if the run is aborted between ticks.
+     *
+     * @param containerId the {@code containerId} of the currently open menu
+     * @param slotIndex   the slot index <em>in screen space</em> (not inventory space)
+     * @param hotbarIndex hotbar slot 0-8, in <em>inventory</em> space
+     */
+    public static void swapWithHotbar(Minecraft mc, int containerId, int slotIndex, int hotbarIndex) {
+        //#if MC >= 260000
+        mc.gameMode.handleContainerInput(containerId, slotIndex, hotbarIndex, ContainerInput.SWAP, mc.player);
+        //#else
+        //$$ mc.gameMode.handleInventoryMouseClick(containerId, slotIndex, hotbarIndex, ClickType.SWAP, mc.player);
+        //#endif
+    }
 }

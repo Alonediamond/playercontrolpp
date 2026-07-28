@@ -9,7 +9,7 @@
 | **版本** | 1.5 |
 | **作者** | Alonediamond |
 | **许可证** | MIT |
-| **代码规模** | ~7300 行 Java（61 个源文件），**一份源码构建 5 个 MC 版本** |
+| **代码规模** | ~9800 行 Java（63 个源文件），**一份源码构建 5 个 MC 版本** |
 | **GitHub** | https://github.com/Alonediamond/playercontrolpp |
 
 ## 支持的 Minecraft 版本
@@ -376,6 +376,117 @@ SCANNING → FINDING_BUCKET → [SHULKERING] → ROTATING → PLACING_WATER → 
 - 死亡 / 世界切换立即停止
 - 无水桶或无投影时提示并自动关闭
 
+### 八、自动续料建造 (Auto Restock Build)
+
+#### 8.1 功能概述
+
+Baritone 的 `#litematica` 命令可以自动寻路建造 Litematica 投影蓝图，
+但材料用完后会自动停止。本功能让建造过程不再因缺料中断：
+
+- 玩家提前标记一些容器的坐标（箱子里放着建筑材料）
+- 建造过程中 Baritone 缺料暂停时，自动前往标记容器补货，然后继续建造
+- 若安装了 **QuickShulker**（快捷潜影盒），可以直接在物品栏中打开含所需材料的潜影盒取料，无需移动
+- 蓝图建造完成后自动停止，无需再按热键
+
+#### 8.2 热键
+
+| 热键 | 类型 | 说明 |
+|------|------|------|
+| **一键建造+续料** | Toggle（开/关） | 启动 Baritone #litematica 建造并开启续料监控。建造完成后自动停止 |
+| **标记容器** | Trigger（触发式） | 标记/取消标记玩家准星指向的容器坐标 |
+
+#### 8.3 配置
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| 续料：收集含材料潜影盒 | `ConfigBoolean` | 关闭 | 开启后可直接打开物品栏里装有所需材料的潜影盒取料，也会从标记容器中取走内含所需材料的潜影盒 |
+| 续料：每种材料补给组数 | `ConfigInteger` | 8（1-36） | 每趟取料时每种缺失材料补到多少组。Litematica 报的是整个蓝图还缺多少（通常远超背包容量），上限给其他材料留空位 |
+| 标记容器坐标列表 | `ConfigStringList` | 空 | 格式 `dimension x y z`，可通过标记容器快捷键或在此直接编辑 |
+
+#### 8.4 执行流程
+
+```
+MONITORING ──builder finished──────────────────────────────────→ 停止
+     │
+     └─builder paused→ ANALYZING（读材料清单，算还缺多少）
+                           │
+         ┌─────────────────┼──────────────────────────┐
+         │                 │                          │
+    needs 为空       背包里有含料潜影盒            需要跑标记容器
+   （其实不缺料）     SHULKER_OPEN            startContainerTrip
+         │             SHULKER_TAKE           （此处才 cancelPathing）
+         │                 │                          │
+         └─────► resume() ◄─┘                PATHING → OPENING
+                   ▲                         → TRANSFERRING
+                   │                                │
+                   └────── FINISHING ◄──────────────┘
+                         （挪材料上快捷栏 → resume 或 relaunch）
+```
+
+两条续建路径的设计考量：
+
+- **从背包开潜影盒取料**：不需要移动，BuilderProcess 不受影响 → 只调 Baritone 的
+  `resume()` 继续建造，**不重新解析蓝图、不把层数重置回 `startAtLayer`**——建造进度保留
+- **走去标记容器**：寻路会驱动 Baritone 的 `CustomGoalProcess`，而 `cancelEverything()`
+  会对所有进程发 `onLostControl()`，BuilderProcess 收到后会**丢弃整个 schematic** →
+  必须重新调用 `buildOpenLitematic()` 启动建造
+
+#### 8.5 缺料检测逻辑
+
+Litematica 的 `MaterialListEntry` 有两个关键字段：
+
+| 字段 | 含义 | 特性 |
+|------|------|------|
+| `countMissing` | 世界里还差多少方块 | 创建清单时算一次，之后不变 |
+| `countAvailable` | 玩家物品栏（含潜影盒、收纳袋）里的数量 | HUD 每 2 秒刷新 |
+
+**既不直接用 `countMissing` 也不直接用 `countAvailable`**：
+`countMissing` 是固定总量，直接和背包数量比会导致"背包有 3000 石头、还差 100 个"判定为"不缺"；
+`countAvailable` 会把潜影盒内容也算进去，而 Baritone 只能放散装物品——
+一盒石头在它眼里不是"石头充足"。
+
+因此改为自己计数——只统计背包 36 格里的**散装**数量，与 min(countMissing, N组) 比较。
+
+#### 8.6 材料挪上快捷栏
+
+Baritone 的 `allowInventory` 设置**默认为关闭**，建造时只认快捷栏 9 格里的材料。
+材料躺在主背包里 → Baritone 看不见 → 即使不缺料也会暂停。
+
+本功能检测到"不缺料但仍暂停"时，会主动用**数字键交换（SWAP）**把主背包里的建筑材料挪到
+**空的**快捷栏格——只用空位，不会挤掉玩家的工具（把镐子挤走会让 Baritone 连挖方块都做不到）。
+快捷栏满了无法挪动时，会明确提示：腾一个空位，或在 Baritone 设置中把 `allowInventory` 打开。
+
+#### 8.7 QuickShulker 联动细节
+
+开盒前需要两个前置检查：
+
+- **必须在玩家自己的 InventoryMenu 界面下发包**：QuickShulker 的包参数是 InventoryMenu
+  屏幕槽位（快捷栏 0–8 → 36–44，主背包 9–35 → 9–35），如果开着箱子菜单发包，
+  索引会落到箱子菜单上，取到完全错误的物品
+- **单个盒子才能开**：潜影盒注册时没有设置 `ignoreSingleStackCheck`，数量 ≥ 2 时
+  服务端会在第一次槽位变动后立刻关掉界面。所以只有 `count == 1` 的盒子才尝试打开
+
+开盒取料时按"满足度最低优先"的原则每次取一个材料——哪种材料距离目标差距最远就先取那种，
+让各种材料轮流进背包，而不是一种材料塞满所有空位。
+
+#### 8.8 防无限循环
+
+三层护盾：
+
+| 防护 | 机制 |
+|------|------|
+| 潜影盒到容器互甩 | `containerTripDone` 标志，每轮最多跑一趟标记容器。开了盒子还缺料也不会再跑第二趟 |
+| 每趟容器取盒上限 | 最多搬走 3 个含料潜影盒。盒子在开盒前一直算"还需要"，不设上限会把整箱盒子搬空 |
+| 多轮零收获停止 | 连续 3 轮未取到任何材料 → 说明标记容器和物品栏潜影盒里都没有所需物品 → 自动停止并提示 |
+
+#### 8.9 安全机制
+
+- 玩家死亡、世界切换立即停止并释放所有控制权
+- 寻路卡住（120 tick 未移动）自动切到下一个容器
+- 容器打不开（重试 3 次）跳过该容器继续下一个
+- 关闭当前容器界面后才尝试开下一个潜影盒
+- 取料后的操作被确认为有真实转移才计数，不假设服务器一定接受了点击
+
 ## 架构
 
 ### 输入仲裁器 `SimulatedInput`
@@ -404,7 +515,8 @@ SCANNING → FINDING_BUCKET → [SHULKERING] → ROTATING → PLACING_WATER → 
 
 ```
 AutoForwardFeature → RouteFlowRuntime → RecordingManager
-→ AutoMaterialGatherer → AutoCacheNearbyContainersFeature → AutoWaterFillFeature
+→ AutoMaterialGatherer → AutoRestockFeature
+→ AutoCacheNearbyContainersFeature → AutoWaterFillFeature
 ```
 
 路径与录制排在前面，因为它们产生的移动输入要由 `ClientEventHandler`
@@ -423,7 +535,7 @@ AutoForwardFeature → RouteFlowRuntime → RecordingManager
 |----|-----------|---------|
 | `ScreenCompat` | `mc.screen` / `mc.setScreen()` → `mc.gui.screen()` / `mc.gui.setScreen()` | 26.2 |
 | `DrawCtx` | `GuiGraphics` → `GuiGraphicsExtractor`；`drawString`/`drawCenteredString`/`render` 的对应关系 | 26.1 |
-| `SlotActionCompat` | `handleInventoryMouseClick(…ClickType…)` → `handleContainerInput(…ContainerInput…)` | 26.1 |
+| `SlotActionCompat` | `handleInventoryMouseClick(…ClickType…)` → `handleContainerInput(…ContainerInput…)`；含 PICKUP / QUICK_MOVE / SWAP 三种点击 | 26.1 |
 | `ContainerContentsCompat` | `ItemContainerContents.nonEmptyItems()` 元素类型 `ItemStack` → `ItemStackTemplate` | 26.1 |
 | `PlayerCompat` | `displayClientMessage(text, true)` → `sendOverlayMessage(text)` | 26.1 |
 | `NbtCompat` | `CompoundTag` 全部 getter 改为返回 `Optional` | 1.21.5 |
@@ -537,7 +649,9 @@ playercontrolpp/
     │   │   ├── AutoWaterFillFeature.java
     │   │   ├── ItemTransferStrategy.java     # 取物数量策略（零 MC 依赖）
     │   │   ├── AutoMaterialGatherer.java     # 自动备货公共门面
-    │   │   └── automaterial/                 # 备货子模块（9 个类）
+│   │   ├── AutoRestockFeature.java        # 自动续料建造
+│   │   ├── MarkedContainerManager.java    # 标记容器坐标管理
+    │   │   └── automaterial/                 # 备货子模块（8 个类）
     │   │
     │   ├── action/RotateAction.java
     │   ├── route/                            # Route / RouteNode / RouteManager
@@ -545,7 +659,7 @@ playercontrolpp/
     │   ├── record/                           # RecordedSegment / PositionKeyframe
     │   │                                     # RecordingFile / InputRecorder
     │   │                                     # InputPlayer / RecordingManager
-    │   ├── integration/                      # 4 个联动 + ModIntegration 接口
+    │   ├── integration/                      # 5 个联动 + ModIntegration 接口
     │   ├── input/
     │   │   ├── SimulatedInput.java           # ★ 模拟按键唯一写入点
     │   │   ├── KeybindProvider.java
@@ -559,7 +673,7 @@ playercontrolpp/
         ├── playercontrolpp.mixins.json
         └── assets/playercontrolpp/
             ├── icon.png                      # 128×128
-            └── lang/{en_us,zh_cn}.json       # 各 154 键
+            └── lang/{en_us,zh_cn}.json       # 各 197 键
 ```
 
 ## 配置界面结构
@@ -573,7 +687,7 @@ playercontrolpp/
 | **Settings** | 转向角度、缓存容器延迟、填水范围扫描半径、填水操作延迟、回放位置修正 |
 | **Routes** | 路径流系统编辑界面（路径列表 / 导航点管理 / 选项开关） |
 | **Recording** | 录制与回放界面（录制管理 / 播放控制 / 损坏文件检测） |
-| **Baritone联动功能** | 备货热键 + 自动存盒 + 存储模式（QuickShulker 安装时）+ 全局忽略开关 + 忽略列表编辑器（仅三模组均安装时显示） |
+| **Baritone联动功能** | 备货热键 + 自动存盒 + 存储模式 + 标记容器热键/列表 + 一键建造+续料热键 + 收集潜影盒开关 + 补给组数 + 全局忽略开关 + 忽略列表编辑器（仅三模组均安装时显示） |
 
 Baritone 标签页顶部有红色警示："本模式为作弊功能，若在多人服务器使用请确保经得服主或管理员同意"。
 
