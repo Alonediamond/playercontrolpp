@@ -89,6 +89,11 @@ public class Configs implements IConfigHandler {
                 KeybindSettings.PRESS_ALLOWEXTRA)
                 .apply(KEY_HOTKEYS);
 
+        public static final ConfigHotkey CACHE_SCHEMATIC_SELECTION_CONTAINERS = new ConfigHotkey(
+                "cacheSchematicSelectionContainers", "",
+                KeybindSettings.PRESS_ALLOWEXTRA)
+                .apply(KEY_HOTKEYS);
+
         public static final ConfigHotkey WATER_FILL_TOGGLE = new ConfigHotkey(
                 "waterFillToggle", "",
                 KeybindSettings.PRESS_ALLOWEXTRA)
@@ -107,8 +112,9 @@ public class Configs implements IConfigHandler {
         /** The single source of truth for the hotkey set. */
         public static final ImmutableList<IHotkey> HOTKEY_LIST = ImmutableList.of(
                 OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE,
-                BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS, WATER_FILL_TOGGLE,
-                MARK_CONTAINER, ONE_CLICK_BUILD_RESTOCK);
+                BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS,
+                CACHE_SCHEMATIC_SELECTION_CONTAINERS, WATER_FILL_TOGGLE, MARK_CONTAINER,
+                ONE_CLICK_BUILD_RESTOCK);
 
         /** Same hotkeys seen as plain configs; derived so the two lists cannot diverge. */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.copyOf(HOTKEY_LIST);
@@ -120,7 +126,7 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_SETTINGS);
 
         public static final ConfigInteger CACHE_DELAY = new ConfigInteger(
-                "cacheDelay", 1, 1, 200, false)
+                "cacheDelay", 1, 0, 200, false)
                 .apply(KEY_SETTINGS);
 
         public static final ConfigInteger WATER_FILL_SCAN_RADIUS = new ConfigInteger(

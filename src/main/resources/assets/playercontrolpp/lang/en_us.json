@@ -140,6 +140,10 @@
   "playercontrolpp.config.hotkeys.pretty_name.autoCacheNearbyContainers": "Auto Cache Nearby Containers",
   "playercontrolpp.config.hotkeys.comment.autoCacheNearbyContainers": "Toggle auto-caching of nearby container contents for ChestTracker.",
 
+  "playercontrolpp.config.hotkeys.name.cacheSchematicSelectionContainers": "Cache Schematic Selection Containers",
+  "playercontrolpp.config.hotkeys.pretty_name.cacheSchematicSelectionContainers": "Cache Schematic Selection Containers",
+  "playercontrolpp.config.hotkeys.comment.cacheSchematicSelectionContainers": "Scan containers in Litematica's current area selection, open them within player reach, and cache to Chest Tracker. Press again to cancel.",
+
   "playercontrolpp.config.cache_nearby.name.containerWhitelist": "Cachable Container Whitelist",
   "playercontrolpp.config.cache_nearby.pretty_name.containerWhitelist": "Cachable Container Whitelist",
   "playercontrolpp.config.cache_nearby.comment.containerWhitelist": "List of container Block IDs that can be auto-cached. Click to open the list editor. Default: all vanilla storage containers.",
@@ -149,6 +153,20 @@
   "playercontrolpp.message.cache_nearby.all_cached": "[PlayerControl++] All nearby containers cached. Stopping in 3 seconds...",
   "playercontrolpp.message.cache_nearby.auto_stop": "[PlayerControl++] Auto Cache Nearby Containers: Stopped (all nearby containers cached)",
   "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] Auto Cache Nearby Containers: OFF (world changed)",
+
+  "playercontrolpp.message.schematic_cache.mods_missing": "[PlayerControl++] Cache Schematic Selection Containers requires both Litematica and Chest Tracker.",
+  "playercontrolpp.message.schematic_cache.no_memory_bank": "[PlayerControl++] Chest Tracker has no normally loaded memory bank.",
+  "playercontrolpp.message.schematic_cache.waiting_approach": "[PlayerControl++] Container is out of reach, waiting for player to approach (3s)...",
+  "playercontrolpp.message.schematic_cache.skip_out_of_range": "[PlayerControl++] Container is out of range, skipped.",
+  "playercontrolpp.message.schematic_cache.too_far": "[PlayerControl++] Multiple containers are out of reach, stopped. Please get closer to the schematic selection and restart.",
+  "playercontrolpp.message.schematic_cache.busy": "[PlayerControl++] Close the current screen or other container-cache task first.",
+  "playercontrolpp.message.schematic_cache.no_selection": "[PlayerControl++] Litematica has no usable current area selection.",
+  "playercontrolpp.message.schematic_cache.scanning": "[PlayerControl++] Scanning the schematic selection for containers...",
+  "playercontrolpp.message.schematic_cache.none_found": "[PlayerControl++] No cacheable containers were found in the schematic selection.",
+  "playercontrolpp.message.schematic_cache.found": "[PlayerControl++] Found %s containers; caching now.",
+  "playercontrolpp.message.schematic_cache.progress": "[PlayerControl++] %s containers remain; cached %s, failed %s. Press the hotkey again to cancel.",
+  "playercontrolpp.message.schematic_cache.completed": "[PlayerControl++] Schematic container caching complete: cached %s, failed %s.",
+  "playercontrolpp.message.schematic_cache.cancelled": "[PlayerControl++] Schematic selection container caching cancelled.",
 
   "playercontrolpp.config.hotkeys.name.waterFillToggle": "Auto Water Fill",
   "playercontrolpp.config.hotkeys.pretty_name.waterFillToggle": "Auto Water Fill",
@@ -164,7 +182,7 @@
 
   "playercontrolpp.config.settings.name.cacheDelay": "Cache Container Delay",
   "playercontrolpp.config.settings.pretty_name.cacheDelay": "Cache Container Delay",
-  "playercontrolpp.config.settings.comment.cacheDelay": "Delay in ticks between closing one container and opening the next during auto-caching. Range: 1-200, default: 1.",
+  "playercontrolpp.config.settings.comment.cacheDelay": "Delay in ticks between closing one container and opening the next during auto-caching. Range: 0-200, default: 1. Set to 0 for almost no delay.",
 
   "playercontrolpp.message.water_fill.on": "[PlayerControl++] Auto Water Fill: ON",
   "playercontrolpp.message.water_fill.off": "[PlayerControl++] Auto Water Fill: OFF",

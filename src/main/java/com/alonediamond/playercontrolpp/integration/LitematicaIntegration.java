@@ -12,8 +12,10 @@ import net.minecraft.core.Vec3i;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -57,6 +59,14 @@ public class LitematicaIntegration implements ModIntegration {
     private Method getSchematicMethod;
     private Class<?> schematicClass;
     private Method getTotalSizeMethod;
+    private Method getSelectionManagerMethod;
+    private Class<?> selectionManagerClass;
+    private Method getCurrentSelectionMethod;
+    private Class<?> areaSelectionClass;
+    private Method getAllSelectionBoxesMethod;
+    private Class<?> selectionBoxClass;
+    private Method getBoxPos1Method;
+    private Method getBoxPos2Method;
 
     private LitematicaIntegration() {}
 
@@ -76,6 +86,109 @@ public class LitematicaIntegration implements ModIntegration {
             return pos.getX() >= origin.getX() && pos.getX() < origin.getX() + sizeX
                     && pos.getY() >= origin.getY() && pos.getY() < origin.getY() + sizeY
                     && pos.getZ() >= origin.getZ() && pos.getZ() < origin.getZ() + sizeZ;
+        }
+    }
+
+    /** Inclusive world-space bounds of one box in Litematica's current area selection. */
+    public record SelectionBounds(BlockPos min, BlockPos max) {
+        public long volume() {
+            long sizeX = (long) max.getX() - min.getX() + 1L;
+            long sizeY = (long) max.getY() - min.getY() + 1L;
+            long sizeZ = (long) max.getZ() - min.getZ() + 1L;
+            try {
+                return Math.multiplyExact(Math.multiplyExact(sizeX, sizeY), sizeZ);
+            } catch (ArithmeticException ignored) {
+                return Long.MAX_VALUE;
+            }
+        }
+    }
+
+    /**
+     * Read every box from Litematica's current area selection.
+     *
+     * <p>This intentionally does not use schematic placement bounds. The printer inventory
+     * feature operates on the player's current area selection and reads real-world blocks inside
+     * it, matching Litematica Printer's {@code Printer.siftBlock()} behavior.
+     */
+    public List<SelectionBounds> getCurrentSelectionBounds() {
+        if (!loaded) return Collections.emptyList();
+
+        try {
+            Object manager = selectionManager();
+            if (manager == null) return Collections.emptyList();
+
+            if (selectionManagerClass != manager.getClass()) {
+                selectionManagerClass = manager.getClass();
+                getCurrentSelectionMethod = selectionManagerClass.getMethod("getCurrentSelection");
+                areaSelectionClass = null;
+                getAllSelectionBoxesMethod = null;
+            }
+
+            Object selection = getCurrentSelectionMethod.invoke(manager);
+            if (selection == null) return Collections.emptyList();
+
+            if (areaSelectionClass != selection.getClass()) {
+                areaSelectionClass = selection.getClass();
+                getAllSelectionBoxesMethod = findNoArgMethod(
+                        areaSelectionClass, Set.of("getAllSubRegionBoxes", "getAllSubRegions"));
+                selectionBoxClass = null;
+                getBoxPos1Method = null;
+                getBoxPos2Method = null;
+            }
+            if (getAllSelectionBoxesMethod == null) return Collections.emptyList();
+
+            Object rawBoxes = getAllSelectionBoxesMethod.invoke(selection);
+            Collection<?> boxes;
+            if (rawBoxes instanceof Map<?, ?> map) {
+                boxes = map.values();
+            } else if (rawBoxes instanceof Collection<?> collection) {
+                boxes = collection;
+            } else {
+                return Collections.emptyList();
+            }
+
+            List<SelectionBounds> result = new ArrayList<>(boxes.size());
+            for (Object box : boxes) {
+                SelectionBounds bounds = selectionBoundsOf(box);
+                if (bounds != null) result.add(bounds);
+            }
+            return result;
+        } catch (Exception e) {
+            Playercontrolpp.LOGGER.debug("Unable to read Litematica's current area selection", e);
+            return Collections.emptyList();
+        }
+    }
+
+    private Object selectionManager() throws Exception {
+        if (getSelectionManagerMethod == null) {
+            getSelectionManagerMethod = dataManagerClass().getMethod("getSelectionManager");
+        }
+        return getSelectionManagerMethod.invoke(null);
+    }
+
+    private SelectionBounds selectionBoundsOf(Object box) {
+        if (box == null) return null;
+        try {
+            if (selectionBoxClass != box.getClass()) {
+                selectionBoxClass = box.getClass();
+                getBoxPos1Method = selectionBoxClass.getMethod("getPos1");
+                getBoxPos2Method = selectionBoxClass.getMethod("getPos2");
+            }
+            BlockPos pos1 = (BlockPos) getBoxPos1Method.invoke(box);
+            BlockPos pos2 = (BlockPos) getBoxPos2Method.invoke(box);
+            if (pos1 == null || pos2 == null) return null;
+
+            return new SelectionBounds(
+                    new BlockPos(
+                            Math.min(pos1.getX(), pos2.getX()),
+                            Math.min(pos1.getY(), pos2.getY()),
+                            Math.min(pos1.getZ(), pos2.getZ())),
+                    new BlockPos(
+                            Math.max(pos1.getX(), pos2.getX()),
+                            Math.max(pos1.getY(), pos2.getY()),
+                            Math.max(pos1.getZ(), pos2.getZ())));
+        } catch (Exception e) {
+            return null;
         }
     }
 

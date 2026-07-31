@@ -86,6 +86,10 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     public static void toggle(Minecraft client) {
+        if (!enabled && SchematicSelectionContainerCacheFeature.isActive()) {
+            MessageUtil.sendActionBar(client, "playercontrolpp.message.schematic_cache.busy");
+            return;
+        }
         enabled = !enabled;
         if (enabled) {
             resetState();
@@ -282,6 +286,10 @@ public class AutoCacheNearbyContainersFeature {
         }
         whitelistBlocks = resolved;
         return whitelistBlocks;
+    }
+
+    static boolean isWhitelistedContainer(Block block) {
+        return whitelistBlocks().contains(block);
     }
 
     private static void openContainer(Minecraft mc, BlockPos target) {

@@ -2,18 +2,35 @@ package com.alonediamond.playercontrolpp.integration;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.ChestType;
 
+import java.lang.reflect.Method;
 import java.util.*;
 
 public class ChestTrackerIntegration implements ModIntegration {
 
     private static final ChestTrackerIntegration INSTANCE = new ChestTrackerIntegration();
     private boolean loaded;
+    private Class<?> memoryBuilderClass;
+    private Class<?> memoryClass;
+    private Method createMemoryBuilderMethod;
+    private Method builderInContainerMethod;
+    private Method builderOtherPositionsMethod;
+    private Method builderBuildMethod;
+    private Object interactionTracker;
+    private Method clearInteractionTrackerMethod;
 
     private ChestTrackerIntegration() {}
 
@@ -140,6 +157,93 @@ public class ChestTrackerIntegration implements ModIntegration {
             return getMemoryBank() != null;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * Save one remotely synchronized menu directly into Chest Tracker's currently loaded bank.
+     * No secondary memory bank is created.
+     */
+    public boolean cacheContainer(
+            Level level,
+            BlockPos position,
+            BlockState state,
+            AbstractContainerMenu menu) {
+        if (!loaded || level == null || position == null || state == null || menu == null) {
+            return false;
+        }
+
+        try {
+            Object memoryBank = getMemoryBank();
+            Identifier memoryKey = getCurrentDimensionKey();
+            if (memoryBank == null || memoryKey == null) return false;
+
+            List<ItemStack> items = new ArrayList<>();
+            for (Slot slot : menu.slots) {
+                if (!(slot.container instanceof Inventory)) {
+                    items.add(slot.getItem().copy());
+                }
+            }
+            if (items.isEmpty()) return false;
+
+            resolveMemoryBuilderApi();
+            Object builder = createMemoryBuilderMethod.invoke(null, items);
+            builder = builderInContainerMethod.invoke(builder, state.getBlock());
+            builder = builderOtherPositionsMethod.invoke(
+                    builder, connectedPositions(level, position, state));
+            Object memory = builderBuildMethod.invoke(builder);
+
+            Method addMemory = memoryBank.getClass().getMethod(
+                    "addMemory", Identifier.class, BlockPos.class, memoryClass);
+            addMemory.invoke(memoryBank, memoryKey, position.immutable(), memory);
+            clearInteractionTracker();
+            return true;
+        } catch (Exception e) {
+            Playercontrolpp.LOGGER.warn(
+                    "Failed to write container {} to Chest Tracker's current memory bank",
+                    position, e);
+            return false;
+        }
+    }
+
+    private void resolveMemoryBuilderApi() throws Exception {
+        if (memoryBuilderClass != null) return;
+
+        memoryBuilderClass = Class.forName("red.jackf.chesttracker.api.providers.MemoryBuilder");
+        memoryClass = Class.forName("red.jackf.chesttracker.api.memory.Memory");
+        createMemoryBuilderMethod = memoryBuilderClass.getMethod("create", List.class);
+        builderInContainerMethod = memoryBuilderClass.getMethod("inContainer", Block.class);
+        builderOtherPositionsMethod = memoryBuilderClass.getMethod("otherPositions", List.class);
+        builderBuildMethod = memoryBuilderClass.getMethod("build");
+    }
+
+    private static List<BlockPos> connectedPositions(
+            Level level, BlockPos position, BlockState state) {
+        if (state.getBlock() instanceof ChestBlock
+                && state.hasProperty(ChestBlock.TYPE)
+                && state.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
+            BlockPos other = position.relative(ChestBlock.getConnectedDirection(state));
+            BlockState otherState = level.getBlockState(other);
+            if (otherState.getBlock() == state.getBlock()) {
+                return List.of(other.immutable());
+            }
+        }
+        return Collections.emptyList();
+    }
+
+    /** Prevent Chest Tracker's normal screen-close provider from using a stale interaction. */
+    public void clearInteractionTracker() {
+        if (!loaded) return;
+        try {
+            if (clearInteractionTrackerMethod == null) {
+                Class<?> trackerClass = Class.forName(
+                        "red.jackf.chesttracker.api.providers.InteractionTracker");
+                interactionTracker = trackerClass.getField("INSTANCE").get(null);
+                clearInteractionTrackerMethod = trackerClass.getMethod("clear");
+            }
+            clearInteractionTrackerMethod.invoke(interactionTracker);
+        } catch (Exception e) {
+            Playercontrolpp.LOGGER.debug("Unable to clear Chest Tracker interaction state", e);
         }
     }
 }

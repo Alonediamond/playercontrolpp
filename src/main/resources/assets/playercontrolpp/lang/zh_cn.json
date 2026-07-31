@@ -140,6 +140,10 @@
   "playercontrolpp.config.hotkeys.pretty_name.autoCacheNearbyContainers": "自动缓存附近容器",
   "playercontrolpp.config.hotkeys.comment.autoCacheNearbyContainers": "切换自动缓存附近容器内容以帮助 ChestTracker 建立缓存。",
 
+  "playercontrolpp.config.hotkeys.name.cacheSchematicSelectionContainers": "缓存投影选区容器",
+  "playercontrolpp.config.hotkeys.pretty_name.cacheSchematicSelectionContainers": "缓存投影选区容器",
+  "playercontrolpp.config.hotkeys.comment.cacheSchematicSelectionContainers": "扫描投影当前区域选区中的容器，在玩家手长范围内自动打开并缓存到箱子追踪。再次按下可取消。",
+
   "playercontrolpp.config.cache_nearby.name.containerWhitelist": "可缓存容器白名单",
   "playercontrolpp.config.cache_nearby.pretty_name.containerWhitelist": "可缓存容器白名单",
   "playercontrolpp.config.cache_nearby.comment.containerWhitelist": "允许自动缓存的容器方块 ID 列表。点击打开列表编辑器。默认：所有原版存储容器。",
@@ -149,6 +153,20 @@
   "playercontrolpp.message.cache_nearby.all_cached": "[PlayerControl++] 附近容器已缓存，3秒后自动关闭缓存功能",
   "playercontrolpp.message.cache_nearby.auto_stop": "[PlayerControl++] 自动缓存附近容器：已停止（附近容器已全部缓存）",
   "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] 自动缓存附近容器：关（世界切换）",
+
+  "playercontrolpp.message.schematic_cache.mods_missing": "[PlayerControl++] 缓存投影选区容器需要同时安装投影与箱子追踪模组。",
+  "playercontrolpp.message.schematic_cache.no_memory_bank": "[PlayerControl++] 箱子追踪当前没有正常加载的缓存库。",
+  "playercontrolpp.message.schematic_cache.waiting_approach": "[PlayerControl++] 容器超出手长范围，等待玩家靠近（3秒）...",
+  "playercontrolpp.message.schematic_cache.skip_out_of_range": "[PlayerControl++] 容器超出范围，已跳过。",
+  "playercontrolpp.message.schematic_cache.too_far": "[PlayerControl++] 多个容器超出手长范围，已停止。请靠近投影选区后重新启动。",
+  "playercontrolpp.message.schematic_cache.busy": "[PlayerControl++] 请先关闭当前界面或其它容器缓存任务。",
+  "playercontrolpp.message.schematic_cache.no_selection": "[PlayerControl++] 投影当前没有可用的区域选区。",
+  "playercontrolpp.message.schematic_cache.scanning": "[PlayerControl++] 正在扫描投影选区内的容器...",
+  "playercontrolpp.message.schematic_cache.none_found": "[PlayerControl++] 投影选区内没有找到可缓存容器。",
+  "playercontrolpp.message.schematic_cache.found": "[PlayerControl++] 找到 %s 个容器，开始缓存。",
+  "playercontrolpp.message.schematic_cache.progress": "[PlayerControl++] 剩余 %s 个容器；已缓存 %s，失败 %s。再次按下快捷键可取消。",
+  "playercontrolpp.message.schematic_cache.completed": "[PlayerControl++] 投影选区容器缓存完成：已缓存 %s，失败 %s。",
+  "playercontrolpp.message.schematic_cache.cancelled": "[PlayerControl++] 已取消缓存投影选区容器。",
 
   "playercontrolpp.config.hotkeys.name.waterFillToggle": "自动填水",
   "playercontrolpp.config.hotkeys.pretty_name.waterFillToggle": "自动填水",
@@ -164,7 +182,7 @@
 
   "playercontrolpp.config.settings.name.cacheDelay": "缓存容器延迟",
   "playercontrolpp.config.settings.pretty_name.cacheDelay": "缓存容器延迟",
-  "playercontrolpp.config.settings.comment.cacheDelay": "自动缓存时关闭当前容器后至打开下一个容器的间隔Ticks。范围：1-200，默认：1。",
+  "playercontrolpp.config.settings.comment.cacheDelay": "自动缓存时关闭当前容器后至打开下一个容器的间隔Ticks。范围：0-200，默认：1。设为0则几乎无延迟。",
 
   "playercontrolpp.message.water_fill.on": "[PlayerControl++] 自动填水：开",
   "playercontrolpp.message.water_fill.off": "[PlayerControl++] 自动填水：关",

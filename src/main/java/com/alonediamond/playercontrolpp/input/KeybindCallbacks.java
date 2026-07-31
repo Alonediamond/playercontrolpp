@@ -7,6 +7,7 @@ import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.AutoWaterFillFeature;
 import com.alonediamond.playercontrolpp.feature.QuickTurnFeature;
+import com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature;
 import com.alonediamond.playercontrolpp.gui.PlayerControlppConfigGui;
 import com.alonediamond.playercontrolpp.record.InputRecorder;
 import com.alonediamond.playercontrolpp.record.RecordingFile;
@@ -19,6 +20,7 @@ import net.minecraft.client.Minecraft;
 
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.AUTO_CACHE_NEARBY_CONTAINERS;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.AUTO_FORWARD;
+import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.CACHE_SCHEMATIC_SELECTION_CONTAINERS;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.OPEN_CONFIG_GUI;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.QUICK_TURN;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.RECORDING_TOGGLE;
@@ -38,6 +40,8 @@ public class KeybindCallbacks {
         RECORDING_TOGGLE.getKeybind().setCallback(new RecordingToggleCallback());
         BARITONE_AUTO_GATHER.getKeybind().setCallback(new BaritoneAutoGatherCallback());
         AUTO_CACHE_NEARBY_CONTAINERS.getKeybind().setCallback(new AutoCacheNearbyContainersCallback());
+        CACHE_SCHEMATIC_SELECTION_CONTAINERS.getKeybind().setCallback(
+                new CacheSchematicSelectionContainersCallback());
         WATER_FILL_TOGGLE.getKeybind().setCallback(new WaterFillToggleCallback());
         MARK_CONTAINER.getKeybind().setCallback(new MarkContainerCallback());
         ONE_CLICK_BUILD_RESTOCK.getKeybind().setCallback(new OneClickBuildRestockCallback());
@@ -131,6 +135,17 @@ public class KeybindCallbacks {
             Minecraft client = Minecraft.getInstance();
             if (client.player == null) return false;
             AutoCacheNearbyContainersFeature.toggle(client);
+            return true;
+        }
+    }
+
+    private static class CacheSchematicSelectionContainersCallback implements IHotkeyCallback {
+        @Override
+        public boolean onKeyAction(KeyAction action, IKeybind key) {
+            if (action != KeyAction.PRESS) return false;
+            Minecraft client = Minecraft.getInstance();
+            if (client.player == null) return false;
+            SchematicSelectionContainerCacheFeature.startOrCancel(client);
             return true;
         }
     }

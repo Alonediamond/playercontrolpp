@@ -6,6 +6,10 @@ apply plugin: unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-l
 apply plugin: 'com.replaymod.preprocess'
 
 repositories {
+	/*maven {
+		url = 'https://maven.fabricmc.net/'
+		content { includeGroupAndSubgroups('net.fabricmc') }
+	}*/
 	maven {
 		url = 'https://maven.parchmentmc.org'
 		content { includeGroup('org.parchmentmc.data') }
@@ -49,19 +53,12 @@ dependencies {
 		}
 	}
 	autoImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-
-	// PlayerControl++ hard dependency: malilib (config / GUI / hotkey framework).
 	// The jars live in the root libs/ directory; the exact file name per MC version
 	// comes from versions/<mc>/gradle.properties.
 	autoImplementation files(rootProject.file("libs/${project.malilib_jar}"))
 
 	// Optional: ModMenu, only used by gui/ModMenuIntegration (an optional entrypoint).
 	autoImplementation files(rootProject.file("libs/${project.modmenu_jar}"))
-
-	// NOTE: PlayerControl++ does not use any Fabric API class at compile time
-	// (only net.fabricmc.api.* and net.fabricmc.loader.api.* from the loader itself),
-	// so fabric-api is a runtime-only dependency, declared in fabric.mod.json.
-	// It is pulled in transitively by malilib when running the game.
 }
 
 String MIXIN_CONFIG_PATH = 'playercontrolpp.mixins.json'
@@ -88,10 +85,6 @@ loom {
 		runDir '../../run'
 		vmArgs commonVmArgs
 	}
-	// PlayerControl++ is a client-side only mod, the server run config is useless here
-	runConfigs.named('server') {
-		ideConfigGenerated = false
-	}
 }
 
 // hack fix for a gradle 9.5 implicit_dependency issue
@@ -111,7 +104,8 @@ String artifactVersion = project.mod_version
 String artifactVersionSuffix = ''
 // detect github action environment variables
 // https://docs.github.com/en/actions/learn-github-actions/environment-variables#default-environment-variables
-if (System.getenv("BUILD_RELEASE") != "true") {
+// Default to release builds (BUILD_RELEASE=true) unless explicitly set to false
+if (System.getenv("BUILD_RELEASE") == "false") {
 	String buildNumber = System.getenv("BUILD_ID")
 	modVersionSuffix += buildNumber != null ? ('+build.' + buildNumber) : '-SNAPSHOT'
 	artifactVersionSuffix = '-SNAPSHOT'  // A non-release artifact is always a SNAPSHOT artifact

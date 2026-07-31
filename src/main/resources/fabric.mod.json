@@ -15,7 +15,7 @@
 
   "icon": "assets/playercontrolpp/icon.png",
 
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
     "main": [
       "com.alonediamond.playercontrolpp.Playercontrolpp"
@@ -28,19 +28,16 @@
     ]
   },
   "mixins": [
-    {
-      "config": "playercontrolpp.mixins.json",
-      "environment": "client"
-    }
+    "playercontrolpp.mixins.json"
   ],
 
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "${minecraft_dependency}",
-    "fabric-api": "*",
-    "malilib": "${malilib_dependency}"
+    "fabric-api": "*"
   },
   "suggests": {
+    "malilib": "${malilib_dependency}",
     "modmenu": "${modmenu_dependency}",
     "baritone": "*",
     "litematica": "*",

@@ -6,9 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Common entrypoint. PlayerControl++ is client-only, so everything it actually does is wired up
- * from {@code PlayercontrolppClient} and {@code InitHandler}; this class exists to hold the mod id
- * and the logger, which are the single source of truth for both.
+ * Common entrypoint. Client controls are wired from {@code PlayercontrolppClient}.
  */
 public class Playercontrolpp implements ModInitializer {
 
@@ -23,7 +21,7 @@ public class Playercontrolpp implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        // Nothing to do on the common side.
+        // Common initialization (currently empty)
     }
 
     public static Identifier id(String path) {
