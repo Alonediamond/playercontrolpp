@@ -18,9 +18,8 @@ public class BaritoneIntegration implements ModIntegration {
     public boolean isLoaded() { return loaded; }
 
     @Override
-    public void initialize() {//三种Baritone匹配
-        FabricLoader instance = FabricLoader.getInstance();
-        loaded = instance.isModLoaded("baritone") || instance.isModLoaded("zbaritone") || instance.isModLoaded("baritone-meteor");
+    public void initialize() {
+        loaded = FabricLoader.getInstance().isModLoaded("baritone");
     }
 
     private Object getBaritone() throws Exception {
