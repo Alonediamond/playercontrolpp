@@ -1,34 +1,32 @@
 package com.alonediamond.playercontrolpp.feature;
 
 /**
- * Decides how much of an item to take from a container.
+ * 决定从容器里取多少个某物品。
  *
- * <p>Deliberately free of Minecraft types so the arithmetic can be reasoned about — and tested —
- * on its own.
+ * <p>刻意不引用任何 Minecraft 类型，算术部分可以独立推敲和单测。
  */
 public final class ItemTransferStrategy {
 
-    /** Storage slots in a shulker box. */
+    /** 潜影盒的储物格数。 */
     public static final int SHULKER_SLOT_COUNT = 27;
 
     private ItemTransferStrategy() {}
 
     /**
-     * Plan a pickup, rounding up to whole stacks so the player is not left one item short.
+     * 规划一次取物，向上取整到整组，免得差一个还得再跑一趟。
      *
      * <ul>
-     *   <li>Up to one shulker box worth: {@code ceil(need / stackSize)} stacks, minimum 1.</li>
-     *   <li>More than that: as many <em>whole</em> boxes as fit inside the need, then stacks for
-     *       whatever is left over.</li>
+     *   <li>不超过一整盒：取 {@code ceil(需求 / 每组数量)} 组，至少 1 组；</li>
+     *   <li>超过一整盒：先取塞得进需求的<em>整</em>盒数，余量再按组取。</li>
      * </ul>
      *
-     * <p>The box count uses floor, not ceil. With ceil, needing 1729 items asked for
-     * {@code ceil(1729/1728) = 2} boxes — 3456 items, twice the requirement — and left
-     * {@code remaining} negative, so the leftover-stacks branch was unreachable dead code.
+     * <p>盒数用向下取整而不是向上：用向上取整时，需求 1729 会算出
+     * {@code ceil(1729/1728) = 2} 盒 = 3456 个，是需求的两倍，还会让 {@code remaining} 变负数，
+     * 使"余量按组取"那条分支成为不可达的死代码。
      *
-     * @param neededTotal  how many of this item are still missing
-     * @param stackMaxSize max stack size for this item (64 for most, 1 for buckets)
-     * @return how many whole boxes and loose stacks to take
+     * @param neededTotal  这个物品还缺多少
+     * @param stackMaxSize 该物品的最大堆叠数（多数是 64，桶是 1）
+     * @return 要取几个整盒、几组散装
      */
     public static TransferPlan calculate(int neededTotal, int stackMaxSize) {
         if (neededTotal <= 0) return TransferPlan.NONE;
@@ -38,7 +36,7 @@ public final class ItemTransferStrategy {
         int remaining = neededTotal - shulkerBoxesToTake * shulkerCapacity;
         int fullStacksNeeded = ceilDiv(remaining, stackMaxSize);
 
-        // Never plan a no-op: one item missing still means one stack.
+        // 不允许规划出"什么都不取"：还差一个也意味着要取一组。
         if (shulkerBoxesToTake == 0 && fullStacksNeeded == 0) {
             fullStacksNeeded = 1;
         }
@@ -46,22 +44,22 @@ public final class ItemTransferStrategy {
         return new TransferPlan(shulkerBoxesToTake, fullStacksNeeded, shulkerCapacity, stackMaxSize);
     }
 
-    /** Integer division rounding away from zero. {@code b} must be positive. */
+    /** 向上取整的整数除法，{@code b} 必须为正。 */
     public static int ceilDiv(int a, int b) {
         return (a + b - 1) / b;
     }
 
-    /** How many items to move, expressed as whole boxes plus loose stacks. */
+    /** 取物计划：整盒数 + 散装组数。 */
     public static class TransferPlan {
         public static final TransferPlan NONE = new TransferPlan(0, 0, 0, 0);
 
-        /** Whole shulker boxes to take, each holding {@link #shulkerCapacity} items. */
+        /** 要取的整盒数，每盒装 {@link #shulkerCapacity} 个。 */
         public final int shulkerBoxes;
-        /** Loose stacks to take on top of the boxes, each holding {@link #stackSize} items. */
+        /** 整盒之外还要取的散装组数，每组 {@link #stackSize} 个。 */
         public final int stacks;
-        /** Capacity of one shulker box for this item. */
+        /** 该物品下一个潜影盒的容量。 */
         public final int shulkerCapacity;
-        /** Max stack size for this item. */
+        /** 该物品的最大堆叠数。 */
         public final int stackSize;
 
         TransferPlan(int shulkerBoxes, int stacks, int shulkerCapacity, int stackSize) {

@@ -9,55 +9,52 @@ import net.minecraft.util.Mth;
 import java.util.List;
 
 /**
- * Replays recorded input by walking the RLE segment list: each segment carries an input state and
- * a duration, and is held for that many ticks before the next one loads.
+ * 按 RLE 段列表回放录制的输入：每段带一个输入状态和持续 tick 数，保持那么多 tick 再加载下一段。
  *
  * <pre>
- * IDLE -&gt; LOADING -&gt; MOVING_TO_START -&gt; PLAYING -&gt; COMPLETED (or loop back)
+ * IDLE -&gt; LOADING -&gt; MOVING_TO_START -&gt; PLAYING -&gt; COMPLETED（或循环回去）
  * </pre>
  *
- * <p>This class presses no keys. It publishes the desired input through its getters and
- * {@code ClientEventHandler} turns that into held keys via {@code SimulatedInput} — which is what
- * keeps playback consistent with the mod's rule that movement is only ever simulated input.
+ * <p>本类不按任何键。它通过 getter 公布「想要的输入」，由 {@code ClientEventHandler} 经
+ * {@code SimulatedInput} 落成按住的键——这正是让回放符合「移动只能是模拟输入」这条约定的做法。
  */
 public class InputPlayer {
 
     public enum State { IDLE, LOADING, MOVING_TO_START, PLAYING, COMPLETED }
 
-    /** Arrival threshold squared (0.5 blocks) for walking to the start position. */
+    /** 走向起点时的到达阈值平方（0.5 格）。 */
     private static final double ARRIVAL_SQ = 0.25;
     /**
-     * Drift past which the optional hard position correction fires, squared (2 blocks).
+     * 可选的硬修正触发阈值的平方（2 格）。
      *
-     * <p>The old value was 0.04 — 0.2 blocks — which normal server movement resolution exceeds
-     * almost every time, so the correction ran on essentially every keyframe: a teleport per
-     * second. Two blocks means it only steps in on real divergence.
+     * <p>旧值是 0.04，也就是 0.2 格——普通的服务端移动精度几乎每次都会超过它，
+     * 于是修正差不多每个关键帧都触发：一秒一次传送。改成 2 格后只有真的跑偏了才介入。
      */
     private static final double DRIFT_CORRECT_SQ = 4.0;
-    /** Drift past which the user is told playback has diverged, squared (4 blocks). */
+    /** 超过这个偏差就提示玩家回放已偏离，平方值（4 格）。 */
     private static final double DRIFT_WARN_SQ = 16.0;
-    /** Ticks the sprint key stays released after sprint turns off, so the server registers it. */
+    /** 疾跑关闭后疾跑键额外保持松开的 tick 数，让服务端能识别到。 */
     private static final int SPRINT_RELEASE_TICKS = 3;
 
     private RecordingFile recording;
     private State state = State.IDLE;
-    private int playCount;       // 0 = infinite loop, N = play N times
-    private int currentPlay;     // how many times we have played so far
+    private int playCount;       // 0 = 无限循环，N = 重复 N 次
+    private int currentPlay;     // 已经放了几遍
 
-    // Segment-based playback (RLE decompression at runtime)
+    // 基于段的回放（运行时做 RLE 解压）
     private List<RecordedSegment> segments;
-    private int segmentIndex;    // which segment is playing
-    private int segmentTick;     // ticks spent in this segment
-    private int totalTick;       // absolute tick counter, for keyframe alignment
+    private int segmentIndex;    // 当前在放第几段
+    private int segmentTick;     // 在这一段里已过多少 tick
+    private int totalTick;       // 绝对 tick 计数，用于对齐关键帧
 
     private RecordedSegment currentSegment;
 
-    // Position keyframes, used to detect drift
+    // 位置关键帧，用来检测偏差
     private List<PositionKeyframe> keyframes;
-    private int keyframeIndex;   // next keyframe to check
-    private boolean driftWarned; // warn once per playback, not once per keyframe
+    private int keyframeIndex;   // 下一个要检查的关键帧
+    private boolean driftWarned; // 每次回放只提示一次，不是每个关键帧一次
 
-    // Output values read each tick by ClientEventHandler
+    // 每 tick 由 ClientEventHandler 读取的输出值
     private float playForward;
     private float playSideways;
     private boolean playJump;
@@ -72,10 +69,10 @@ public class InputPlayer {
 
     public State getState() { return state; }
 
-    /** @return whether playback is actively driving the player. */
+    /** @return 回放是否正在实际驱动玩家。 */
     public boolean isPlaying() { return state == State.PLAYING || state == State.MOVING_TO_START; }
 
-    /** @return whether playback is running or about to, including the async load. */
+    /** @return 回放是否正在跑或即将跑，含异步加载阶段。 */
     public boolean isBusy() { return state == State.LOADING || isPlaying(); }
 
     public float getForward() { return playForward; }
@@ -90,10 +87,9 @@ public class InputPlayer {
     public RecordingFile getRecording() { return recording; }
 
     /**
-     * Begin playback of the recording described by {@code indexRec}.
+     * 开始回放 {@code indexRec} 描述的那条录制。
      *
-     * <p>The bulk data is read on a background thread; playback starts from the callback once it
-     * arrives, so pressing Play never stalls the frame.
+     * <p>主体数据在后台线程读取，读完在回调里才真正开始回放，所以点播放不会卡帧。
      */
     public void start(RecordingFile indexRec, int playCount) {
         if (indexRec == null || isBusy()) return;
@@ -109,7 +105,7 @@ public class InputPlayer {
     }
 
     private void onLoaded(RecordingFile full) {
-        // The user may have pressed Stop, or left the world, while we were reading.
+        // 读取期间玩家可能已经按了停止，或者离开了世界。
         if (state != State.LOADING) return;
 
         Minecraft client = Minecraft.getInstance();
@@ -178,8 +174,7 @@ public class InputPlayer {
     }
 
     /**
-     * Drop the loaded recording. A long recording is several megabytes of segments; without this
-     * it stayed reachable until the next {@code start()} replaced it.
+     * 丢掉已加载的录制。长录制是好几兆的段数据；不丢的话它会一直可达到下一次 {@code start()} 才被替换。
      */
     private void releaseRecording() {
         recording = null;
@@ -215,7 +210,7 @@ public class InputPlayer {
 
         checkDrift(client, player);
 
-        // Sprint release delay tracking; the key itself is handled by ClientEventHandler.
+        // 疾跑释放延迟的记账；键本身由 ClientEventHandler 处理。
         if (playSprint) {
             sprintOffTicks = 0;
         } else if (sprintOffTicks < SPRINT_RELEASE_TICKS) {
@@ -262,13 +257,11 @@ public class InputPlayer {
     }
 
     /**
-     * Compare the player's position against the next due keyframe.
+     * 把玩家位置和下一个到期的关键帧比对。
      *
-     * <p>Simulated input cannot reproduce a path exactly — collisions, latency and server-side
-     * movement resolution all nudge it — so some drift is expected and is reported rather than
-     * papered over. Hard correction rewrites the client's position, which desyncs from the
-     * server's authoritative one and reads as flying to anti-cheat, so it is opt-in and off by
-     * default; see {@code Configs.Settings.PLAYBACK_POSITION_CORRECTION}.
+     * <p>模拟输入没法精确复现路径——碰撞、延迟、服务端移动判定都会把它推偏——所以偏差是预期之内的，
+     * 只报告而不掩盖。硬修正会改写客户端坐标，与服务端权威位置不一致，在反作弊眼里像飞行，
+     * 因此它是可选项且默认关闭，见 {@code Configs.Settings.PLAYBACK_POSITION_CORRECTION}。
      */
     private void checkDrift(Minecraft client, LocalPlayer player) {
         if (keyframes == null || keyframeIndex >= keyframes.size()) return;
@@ -309,7 +302,7 @@ public class InputPlayer {
         playPitch = currentSegment.pitch;
     }
 
-    /** Apply the recorded look direction. Called from the player-tick mixin. */
+    /** 应用录制里的视角方向。由玩家 tick 的 Mixin 调用。 */
     public void applyYaw(Minecraft client) {
         LocalPlayer player = client.player;
         if (player == null) return;

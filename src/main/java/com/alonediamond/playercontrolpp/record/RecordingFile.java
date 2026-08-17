@@ -15,11 +15,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * One recording.
+ * 一条录制。
  *
- * <p>Split storage: the index metadata (id, name, duration, dimension) lives in index.json and is
- * always in memory, while segments and keyframes live in a per-recording {@code .pcr} NBT file
- * that is only read when the user presses Play.
+ * <p>拆分存储：索引元数据（id、名称、时长、维度）在 index.json 里、常驻内存；
+ * 段与关键帧在每条录制各自的 {@code .pcr} NBT 文件里，只有玩家点播放时才读。
  */
 public class RecordingFile {
     private String id;
@@ -68,7 +67,7 @@ public class RecordingFile {
     public List<PositionKeyframe> getKeyframes() { return keyframes; }
     public void setKeyframes(List<PositionKeyframe> keyframes) { this.keyframes = keyframes; }
 
-    // --- Index JSON (lightweight, for index.json) ---
+    // ---- 索引 JSON（轻量，供 index.json 用）----
 
     public JsonObject toIndexJson() {
         JsonObject obj = new JsonObject();
@@ -88,14 +87,13 @@ public class RecordingFile {
         return rf;
     }
 
-    // --- NBT binary I/O (for individual .pcr files) ---
+    // ---- NBT 二进制读写（每条录制各自的 .pcr）----
 
     /**
-     * Serialize everything into a detached NBT tree.
+     * 把全部内容序列化成一棵独立的 NBT 树。
      *
-     * <p>Kept separate from writing so the caller can build the tag on the client thread and hand
-     * the finished tag to a background writer. Passing this object itself to another thread would
-     * be a data race: {@code name} and {@code segments} stay mutable and reachable from the GUI.
+     * <p>与写盘分开，好让调用方在客户端线程构造好标签，再把成品交给后台写入线程。
+     * 把本对象直接传给别的线程会有数据竞争：{@code name} 与 {@code segments} 仍可变，且 GUI 能碰到。
      */
     public CompoundTag toNbt() {
         CompoundTag root = new CompoundTag();
@@ -122,12 +120,12 @@ public class RecordingFile {
         return root;
     }
 
-    /** Write {@code root} to {@code path}, replacing any existing file atomically. */
+    /** 把 {@code root} 写到 {@code path}，原子替换已有文件。 */
     public static void write(CompoundTag root, Path path) throws IOException {
         AtomicFiles.writeVia(path, tmp -> NbtIo.writeCompressed(root, tmp));
     }
 
-    /** Read a full recording back. */
+    /** 读回一条完整录制。 */
     public static RecordingFile readFromFile(Path path) throws IOException {
         CompoundTag root = NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
         RecordingFile rf = new RecordingFile();

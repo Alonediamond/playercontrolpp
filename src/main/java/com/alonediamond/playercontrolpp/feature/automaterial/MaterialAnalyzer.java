@@ -16,8 +16,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Reads Litematica's material list and works out what still has to be gathered, honouring both
- * Litematica's own ignore list and this mod's global ignore list.
+ * 读 Litematica 材料清单，算出还要收集什么，同时尊重 Litematica 自己的忽略列表和本模组的全局忽略列表。
  */
 public class MaterialAnalyzer {
 
@@ -38,7 +37,7 @@ public class MaterialAnalyzer {
                 return;
             }
 
-            // Litematica only keeps the list up to date while its HUD is on.
+            // Litematica 只在自己的 HUD 开着时才维护这个清单。
             Object hudRenderer = materialList.getClass().getMethod("getHudRenderer").invoke(materialList);
             boolean hudShowing = (Boolean) hudRenderer.getClass()
                     .getMethod("getShouldRenderCustom").invoke(hudRenderer);
@@ -51,7 +50,7 @@ public class MaterialAnalyzer {
             Set<String> globalIgnoreSet = buildGlobalIgnoreSet();
             Set<Object> litematicaIgnored = litematica.getIgnoredSet(materialList);
 
-            // Recount against the real inventory; the cached counts can be stale.
+            // 对着真实物品栏重新数一遍；缓存里的计数可能是过期的。
             Object allMaterials = materialList.getClass()
                     .getMethod("getMaterialsAll").invoke(materialList);
             Class.forName(MATERIAL_LIST_UTILS)
@@ -76,7 +75,7 @@ public class MaterialAnalyzer {
                 }
             }
 
-            // Biggest shortfall first: the items most likely to need whole shulker boxes.
+            // 缺口最大的排前面：这些最可能需要整盒搬。
             ctx.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
 
             if (ctx.missingItems.isEmpty()) {
@@ -85,11 +84,10 @@ public class MaterialAnalyzer {
                 return;
             }
 
-            // Checked only after the missing list is built: onInventoryFull() decides whether
-            // shulker storage is worth starting by looking for held missing-list materials, and
-            // before this point the list is still empty — storage would open a box, store nothing
-            // and loop. This order also lets a full inventory that already holds everything
-            // report COMPLETED above instead of stopping on inventory-full.
+            // 必须等缺失清单建好之后才检查：onInventoryFull() 是靠「身上有没有缺失清单里的材料」
+            // 来决定要不要启动存盒的，而在这行之前清单还是空的——那会让存盒开个盒子、什么都不存、
+            // 然后死循环。这个顺序还让「背包满但材料已齐」的情况在上面报 COMPLETED，
+            // 而不是以「背包已满」停下。
             if (isInventoryFull(ctx.client)) {
                 tsm.onInventoryFull();
                 return;

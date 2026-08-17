@@ -58,7 +58,7 @@ public class RecordingListGui extends Screen {
         super.init();
         this.leftScroll = 0;
 
-        // Start/Stop Rec
+        // 开始/停止录制
         this.addRenderableWidget(Button.builder(
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.recording.start_recording")),
                 btn -> {
@@ -73,7 +73,7 @@ public class RecordingListGui extends Screen {
                         if (RecordingManager.getInstance().getPlayer().isBusy()) return;
                         rec.startRecording(
                                 StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
-                        ScreenCompat.setScreen(Minecraft.getInstance(), null); // exit all GUIs
+                        ScreenCompat.setScreen(Minecraft.getInstance(), null); // 退出所有界面
                     }
                 })
                 .bounds(LEFT_X, TOP, 90, 20)
@@ -100,7 +100,7 @@ public class RecordingListGui extends Screen {
                 .bounds(this.width - 55, 10, 45, 20)
                 .build());
 
-        // Play - hidden until selected
+        // 播放 —— 未选中时隐藏
         this.addRenderableWidget(Button.builder(
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.recording.play")),
                 btn -> {
@@ -109,13 +109,13 @@ public class RecordingListGui extends Screen {
                         try { count = Integer.parseInt(playCountField.getValue()); }
                         catch (NumberFormatException ignored) {}
                         RecordingManager.getInstance().getPlayer().start(selectedRecording, count);
-                        ScreenCompat.setScreen(Minecraft.getInstance(), null); // exit all GUIs
+                        ScreenCompat.setScreen(Minecraft.getInstance(), null); // 退出所有界面
                     }
                 })
                 .bounds(0, 0, 45, 20)
                 .build()).visible = false;
 
-        // Stop - hidden until playback starts
+        // 停止 —— 未开始回放时隐藏
         this.addRenderableWidget(Button.builder(
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.recording.stop")),
                 btn -> RecordingManager.getInstance().getPlayer().stop())
@@ -172,7 +172,7 @@ public class RecordingListGui extends Screen {
     //$$ }
     //#endif
 
-    /** Prevent double-blur crash in 1.21.11 — draw simple dark background instead */
+    /** 避开 1.21.11 的二次模糊崩溃——改为画一层简单的深色背景 */
     private void renderDimBackground(DrawCtx context) {
         context.fill(0, 0, this.width, this.height, 0x80000000);
     }
@@ -202,8 +202,8 @@ public class RecordingListGui extends Screen {
             context.text(font, Component.nullToEmpty(text), LEFT_X + 4, y + 5, color,true);
         }
 
-        // --- Right panel ---
-        // Status line
+        // ---- 右侧面板 ----
+        // 状态行
         InputRecorder recorder = RecordingManager.getInstance().getRecorder();
         String status;
         int statusColor = 0xFF55FFFF;
@@ -217,7 +217,7 @@ public class RecordingListGui extends Screen {
         }
         context.text(font, Component.nullToEmpty(status), RIGHT_X + 4, TOP + 4, statusColor,true);
 
-        // Hide Play/Stop when nothing selected
+        // 没选中任何录制时隐藏 播放/停止
         if (selectedRecording == null) {
             String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
             String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
@@ -230,10 +230,10 @@ public class RecordingListGui extends Screen {
             return;
         }
 
-        // Show Play/Stop for selected recording
+        // 选中了录制则显示 播放/停止
         int ry = TOP + 30;
 
-        // Name label + field
+        // 名称标签 + 输入框
         context.text(font,
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.route.name") + ":"),
                 RIGHT_X, ry + 4, 0xFFFFFFFF,true);
@@ -249,7 +249,7 @@ public class RecordingListGui extends Screen {
         context.text(font, Component.nullToEmpty(info), RIGHT_X + 4, ry + 4, 0xFFCCCCCC,true);
         ry += ROW_H;
 
-        // Play count label + field
+        // 播放次数标签 + 输入框
         context.text(font,
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.recording.play_count") + ":"),
                 RIGHT_X, ry + 4, 0xFFFFFFFF,true);
@@ -258,7 +258,7 @@ public class RecordingListGui extends Screen {
         context.renderWidget(playCountField, mouseX, mouseY, delta);
         ry += ROW_H + 4;
 
-        // Play / Stop buttons
+        // 播放 / 停止 按钮
         int btnY = ry;
         String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
         String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
@@ -296,9 +296,9 @@ public class RecordingListGui extends Screen {
     //$$ }
     //#endif
 
-    /** Version-agnostic click handling. @return {@code true} when the click was consumed. */
+    /** 版本无关的点击处理。@return 点击被消费时返回 {@code true}。 */
     private boolean handleClick(double mouseX, double mouseY, int button) {
-        // Left panel clicks
+        // 左侧面板的点击
         List<RecordingFile> recs = RecordingManager.getInstance().getRecordings();
         int listTop = TOP + 30;
         int maxVisible = (this.height - listTop - 10) / ITEM_H;
@@ -329,8 +329,8 @@ public class RecordingListGui extends Screen {
     private static final int KEY_ESCAPE = 256;
 
     /**
-     * @return the text field that currently has focus, checked in the same order the
-     *         per-field {@code isFocused()} chain used to use, or {@code null} if none has.
+     * @return 当前获得焦点的输入框，检查顺序与早先那串逐字段 {@code isFocused()} 一致；
+     *         没有焦点则 {@code null}。
      */
     private EditBox focusedField() {
         if (nameField.isFocused()) return nameField;

@@ -13,11 +13,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Shared mutable state for one auto-gathering run, passed to every module in this package.
+ * 一次自动备货运行的共享可变状态，传给本包内每个模块。
  *
- * <p>The fields are public by design: this was extracted from a single 1100-line class and the
- * modules that read and write them are all in this package. Treat it as that class's field block,
- * not as an API.
+ * <p>字段刻意是 public：它是从一个 1100 行的大类里拆出来的，读写它们的模块全在本包内。
+ * 请把它当成那个类的字段块，而不是一套 API。
  */
 public class GatherContext {
 
@@ -25,19 +24,19 @@ public class GatherContext {
     public boolean active;
     public Minecraft client;
 
-    // Material list data
+    // 材料清单数据
     public final List<MaterialItemEntry> missingItems = new ArrayList<>();
     public int currentItemIndex;
     public Item currentTargetItem;
     public int targetNeededTotal;
     public int currentlyGathered;
 
-    // Chest search data
+    // 箱子搜索数据
     public final List<BlockPos> foundPositions = new ArrayList<>();
     public int currentPosIndex;
     public int chestRetryCount;
 
-    // Baritone pathing tracking
+    // Baritone 寻路追踪
     public Vec3 lastPlayerPos = Vec3.ZERO;
     public int stuckTicks;
     public int pathingTicks;
@@ -56,19 +55,19 @@ public class GatherContext {
     public final Map<Item, Integer> shulkerBoxesTakenThisContainer = new HashMap<>();
 
     /**
-     * Whether the last successful transfer was a whole shulker box. If it was and the inventory
-     * then fills up, auto-store must not run — it would put the box straight back.
+     * 上一次成功转移的是否是一整个潜影盒。如果是，紧接着背包满了也不能触发自动存盒——
+     * 那会把刚拿的盒子原样存回去。
      */
     public boolean justTookShulkerBox;
 
-    // Running totals for the current item, compared against the plan to avoid over-gathering
+    // 当前物品的累计数量，与计划比对以避免超量收集
     public int totalBoxesTakenForItem;
     public int totalStacksTakenForItem;
 
     /**
-     * @return the item currently being gathered, or {@code null} once the list is exhausted.
+     * @return 当前正在收集的物品；清单走完后返回 {@code null}。
      *
-     * <p>Bounds-checks {@code currentItemIndex} in one place instead of at every call site.
+     * <p>把 {@code currentItemIndex} 的边界检查收在一处，而不是每个调用点各写一遍。
      */
     public MaterialItemEntry currentItem() {
         return currentItemIndex >= 0 && currentItemIndex < missingItems.size()
@@ -77,11 +76,10 @@ public class GatherContext {
     }
 
     /**
-     * Clear everything belonging to one run.
+     * 清掉属于一次运行的所有状态。
      *
-     * <p>{@code active} and {@code client} are deliberately left alone: the caller sets
-     * {@code active} around this call, and {@code client} is the Minecraft instance, which does not
-     * belong to a run at all.
+     * <p>{@code active} 和 {@code client} 刻意不动：{@code active} 由调用方在这个调用前后设置，
+     * 而 {@code client} 是 Minecraft 实例，根本不属于某一次运行。
      */
     public void reset() {
         state = AutoMaterialGatherer.State.IDLE;

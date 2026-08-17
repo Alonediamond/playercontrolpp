@@ -4,14 +4,12 @@ import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 
 /**
- * Drives the auto-gathering state machine, dispatching each state to the module that owns it and
- * running the ShulkerBoxStorage sub-machine when the inventory fills up.
+ * 驱动自动备货的状态机：把每个状态派发给拥有它的模块，背包满时运行 ShulkerBoxStorage 子状态机。
  */
 public class TaskStateMachine {
 
     /**
-     * Ticks to wait after shulker storage finishes, so the server's inventory update has arrived
-     * before we count what is actually held.
+     * 存盒结束后再等几 tick，让服务端的物品栏更新先到，再去数手上真正有多少。
      */
     private static final int STORAGE_SYNC_TICKS = 15;
 
@@ -23,10 +21,10 @@ public class TaskStateMachine {
     private final ItemTransferExecutor transferExecutor;
     private final ShulkerBoxStorage shulkerStorage;
 
-    /** True while the post-storage sync-and-verify is pending. */
+    /** 存盒后的「同步并核对」还没做完时为 true。 */
     private boolean pendingStorageDone;
     private int storageSyncTicks;
-    /** Fallback when a FAILED transition does not say why. */
+    /** FAILED 转换没给原因时的兜底文案。 */
     private static final String DEFAULT_FAILURE_KEY = "playercontrolpp.message.baritone.pathing_stuck";
 
     public TaskStateMachine(GatherContext ctx,
@@ -50,10 +48,9 @@ public class TaskStateMachine {
     }
 
     /**
-     * @param reasonKey lang key explaining a FAILED transition. FAILED is where every kind of
-     *                  single-item failure converges — container would not open, contents did not
-     *                  match, search found nothing — but it used to always report "pathing stuck",
-     *                  sending users to debug Baritone over an unrelated problem.
+     * @param reasonKey 解释这次 FAILED 的语言键。FAILED 是所有单项失败的汇合处——容器打不开、
+     *                  内容不匹配、搜索没结果——但早先它一律报「寻路卡住」，
+     *                  把用户引去排查毫不相干的 Baritone。
      */
     public void setState(State newState, String reasonKey) {
         ctx.state = newState;
@@ -97,7 +94,7 @@ public class TaskStateMachine {
         }
     }
 
-    /** Cancel pathing, close any container, and drop every simulated key hold. */
+    /** 取消寻路、关掉所有容器、松开全部模拟按键。 */
     private void stopEverything() {
         pathingController.cancelPathing();
         containerOpener.closeAnyContainer(ctx.client);
@@ -113,7 +110,7 @@ public class TaskStateMachine {
             return;
         }
 
-        // --- Post-storage sync-and-verify (runs independently of isActive()) ---
+        // ---- 存盒后的同步与核对（独立于 isActive() 运行）----
         if (pendingStorageDone) {
             if (storageSyncTicks < STORAGE_SYNC_TICKS) {
                 storageSyncTicks++;
@@ -123,8 +120,8 @@ public class TaskStateMachine {
             storageSyncTicks = 0;
 
             if (ctx.currentTargetItem == null) {
-                // Storage ran before any item was selected (triggered from ANALYZING);
-                // searching now would query ChestTracker for a null item. Re-analyze instead.
+                // 存盒发生在还没选定任何物品之前（从 ANALYZING 触发的）；
+                // 此时去搜索会拿 null 物品去问箱子追踪。改为重新分析。
                 setState(State.ANALYZING);
             } else if (transferExecutor.isCurrentItemSatisfied(ctx)) {
                 ctx.currentItemIndex++;
@@ -135,7 +132,7 @@ public class TaskStateMachine {
             return;
         }
 
-        // --- Shulker box storage sub-system ---
+        // ---- 潜影盒存储子系统 ----
         if (shulkerStorage.isActive()) {
             ShulkerBoxStorage.StorageResult result = shulkerStorage.tick(ctx);
             if (result == ShulkerBoxStorage.StorageResult.DONE) {
@@ -148,7 +145,7 @@ public class TaskStateMachine {
             return;
         }
 
-        // --- Container open cooldown ---
+        // ---- 开容器冷却 ----
         if (ctx.transferCooldown > 0) {
             ctx.transferCooldown--;
             if (ctx.containerJustOpened && ctx.transferCooldown <= 0) {
@@ -189,7 +186,7 @@ public class TaskStateMachine {
                 break;
 
             case OPENING_CONTAINER:
-                // Driven by the transferCooldown mechanism above.
+                // 由上面的 transferCooldown 机制驱动。
                 break;
 
             case FAILED:
@@ -203,11 +200,10 @@ public class TaskStateMachine {
     }
 
     /**
-     * Called when the inventory is detected full. Hands over to shulker storage if the user
-     * enabled it, otherwise stops with an inventory-full message.
+     * 检测到背包已满时调用。用户开了自动存盒就交给存盒流程，否则以「背包已满」提示停止。
      */
     public void onInventoryFull() {
-        // A whole shulker box was just taken, so storing into one would immediately undo it.
+        // 刚刚才取走一整盒，这时再往盒子里存等于立刻撤销自己。
         if (ctx.justTookShulkerBox) {
             ctx.justTookShulkerBox = false;
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.inventory_full");
@@ -215,8 +211,8 @@ public class TaskStateMachine {
             return;
         }
 
-        // Storage only moves missing-list materials, so with none held it cannot free any space;
-        // it would report DONE anyway and the still-full inventory would retrigger it forever.
+        // 存盒只挪缺失清单上的材料，手上一点都没有时它腾不出任何空间；
+        // 它照样会报 DONE，而依然满着的背包会无限重新触发它。
         if (ShulkerBoxStorage.isEnabled() && shulkerStorage.hasStorableMaterials(ctx)) {
             pathingController.cancelPathing();
             containerOpener.closeAnyContainer(ctx.client);

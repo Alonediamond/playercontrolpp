@@ -22,8 +22,8 @@ public class RouteExecutor {
     private static final int STUCK_JUMP_TICKS = 100;
     private static final double YAW_DEAD_ZONE = 2.0;
 
-    // Turn rate in degrees per tick, tiered by how far off course we are: snap hard at a waypoint,
-    // ease in on small corrections so the walk does not weave.
+    // 每 tick 的转向速度（度），按偏离程度分档：到达导航点时直接对准，小幅修正则缓一点，
+    // 免得走出蛇形。
     private static final double YAW_SPEED_SMALL = 15.0;
     private static final double YAW_SPEED_MEDIUM = 18.0;
     private static final double YAW_SPEED_LARGE = 25.0;
@@ -40,7 +40,7 @@ public class RouteExecutor {
     private int stuckTicks;
     private int postJumpTicks;
     private boolean jumpRequested;
-    private boolean layerIncrementPending; // set on boundary arrival for per-traversal layer change
+    private boolean layerIncrementPending; // 到达端点时置位，用于每趟换层
     private Vec3 lastPosition = Vec3.ZERO;
 
     public RouteExecutor(Route route) {
@@ -71,7 +71,7 @@ public class RouteExecutor {
         jumpRequested = false;
         lastPosition = new Vec3(player.getX(), player.getY(), player.getZ());
 
-        // Find closest waypoint to start from (XZ only, ignore Y)
+        // 找离起点最近的导航点（只看 XZ，忽略 Y）
         double bestDist = Double.MAX_VALUE;
         int bestIdx = 0;
         for (int i = 0; i < nodes.size(); i++) {
@@ -85,7 +85,7 @@ public class RouteExecutor {
             }
         }
 
-        // Determine initial direction and target
+        // 定初始方向与目标
         currentWPIndex = bestIdx;
         if (bestIdx < nodes.size() - 1) {
             direction = 1;
@@ -93,10 +93,10 @@ public class RouteExecutor {
             direction = -1;
         }
 
-        // Move to next waypoint in chosen direction
+        // 按选定方向前往下一个导航点
         int nextIdx = currentWPIndex + direction;
         if (nextIdx < 0 || nextIdx >= nodes.size()) {
-            // Player is at the only valid waypoint; force direction
+            // 玩家就在唯一可用的导航点上；强制指定方向
             direction = -direction;
             nextIdx = currentWPIndex + direction;
         }
@@ -105,7 +105,7 @@ public class RouteExecutor {
         totalSegments = route.getTotalSegments();
         completedSegments = 0;
 
-        // Snap yaw to face the first target immediately
+        // 立刻把 yaw 对准第一个目标
         snapYawToTarget(client, currentTarget);
     }
 
@@ -131,7 +131,7 @@ public class RouteExecutor {
 
         Vec3 currentPos = new Vec3(player.getX(), player.getY(), player.getZ());
 
-        // XZ-only distance (ignore Y to avoid vertical mismatch issues)
+        // 只算 XZ 距离（忽略 Y，避免垂直落差造成误判）
         double dx = currentTarget.x - currentPos.x;
         double dz = currentTarget.z - currentPos.z;
         double distSq = dx * dx + dz * dz;
@@ -177,11 +177,11 @@ public class RouteExecutor {
     }
 
     /**
-     * Turn to face {@code target} instantly.
+     * 瞬间转向面对 {@code target}。
      *
-     * <p>{@code yRotO} has to be set too. The camera interpolates between {@code yRotO} and
-     * {@code yRot} across the frames of a tick, so setting only {@code yRot} turns a snap into a
-     * 50 ms smear — visible as a smooth sweep at every waypoint rather than the intended cut.
+     * <p>{@code yRotO} 必须一起设。相机会在一 tick 的若干帧之间对 {@code yRotO} 和 {@code yRot}
+     * 插值，只设 {@code yRot} 会把「瞬转」变成 50 ms 的拖影——表现是每到一个导航点就平滑扫一下，
+     * 而不是想要的硬切。
      */
     private void snapYawToTarget(Minecraft client, RouteNode target) {
         LocalPlayer player = client.player;
@@ -233,12 +233,11 @@ public class RouteExecutor {
 
         List<RouteNode> nodes = route.getNodes();
 
-        // Advance the waypoint index in current direction
+        // 按当前方向推进导航点下标
         currentWPIndex += direction;
 
-        // Reverse direction at endpoints of the waypoint list.
-        // This creates a back-and-forth (ping-pong) traversal pattern:
-        // start -> ... -> end -> ... -> start -> ...
+        // 走到导航点列表的端点就反向，形成往返（ping-pong）遍历：
+        // 起点 -> …… -> 终点 -> …… -> 起点 -> ……
         if (currentWPIndex >= nodes.size() - 1) {
             direction = -1;
             currentWPIndex = nodes.size() - 1;
@@ -247,9 +246,8 @@ public class RouteExecutor {
             currentWPIndex = 0;
         }
 
-        // Fires once per full traversal (arriving at either endpoint).
-        // For loopCount=0 (infinite), this fires every time the player
-        // reaches an endpoint, enabling continuous per-pass layer changes.
+        // 每完成一次完整遍历（到达任一端点）触发一次。
+        // loopCount=0（无限循环）时，每次到达端点都会触发，从而实现每趟自动换层。
         if (currentWPIndex == 0 || currentWPIndex == nodes.size() - 1) {
             layerIncrementPending = true;
         }
@@ -261,7 +259,7 @@ public class RouteExecutor {
         postJumpTicks = 0;
         jumpRequested = false;
 
-        // Snap yaw to face next target
+        // 把 yaw 对准下一个目标
         Minecraft client = Minecraft.getInstance();
         if (client.player != null) {
             snapYawToTarget(client, currentTarget);
@@ -271,8 +269,8 @@ public class RouteExecutor {
     public boolean needsJump() { return jumpRequested; }
     public void clearJump() { jumpRequested = false; }
 
-    /** Atomic get-and-clear: returns true exactly once per pending increment,
-     *  preventing duplicate layer changes across multiple tick iterations. */
+    /** 取值并清零的原子操作：每个待处理的增量只返回 true 一次，
+     *  避免同一次换层在多个 tick 里被重复执行。 */
     public boolean consumeLayerIncrementPending() {
         if (layerIncrementPending) {
             layerIncrementPending = false;

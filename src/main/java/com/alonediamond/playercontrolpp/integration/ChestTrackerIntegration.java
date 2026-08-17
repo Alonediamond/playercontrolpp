@@ -51,10 +51,7 @@ public class ChestTrackerIntegration implements ModIntegration {
         return loaded.orElse(null);
     }
 
-    /**
-     * Get the search range from ChestTracker settings.
-     * Returns -1 if ChestTracker is not loaded.
-     */
+    /** @return 箱子追踪设置里的搜索范围；未加载时返回 -1。 */
     public int getSearchRange() {
         try {
             Object memoryBank = getMemoryBank();
@@ -67,10 +64,7 @@ public class ChestTrackerIntegration implements ModIntegration {
         }
     }
 
-    /**
-     * Get the item list range from ChestTracker settings.
-     * Returns -1 if ChestTracker is not loaded.
-     */
+    /** @return 箱子追踪设置里的物品列表范围；未加载时返回 -1。 */
     public int getListRange() {
         try {
             Object memoryBank = getMemoryBank();
@@ -83,9 +77,7 @@ public class ChestTrackerIntegration implements ModIntegration {
         }
     }
 
-    /**
-     * Get the current dimension key for ChestTracker queries.
-     */
+    /** @return 供箱子追踪查询用的当前维度 key。 */
     public Identifier getCurrentDimensionKey() {
         try {
             Class<?> utilsClass = Class.forName("red.jackf.chesttracker.api.providers.ProviderUtils");
@@ -97,8 +89,7 @@ public class ChestTrackerIntegration implements ModIntegration {
     }
 
     /**
-     * Search ChestTracker memories for container positions containing the target item.
-     * Returns positions sorted by distance from the player.
+     * 在箱子追踪的记忆里搜含有目标物品的容器坐标，按距玩家由近到远返回。
      */
     public List<BlockPos> searchItem(Item targetItem, BlockPos playerPos, int effectiveRange) {
         List<BlockPos> positions = new ArrayList<>();
@@ -141,17 +132,14 @@ public class ChestTrackerIntegration implements ModIntegration {
             positions.sort(Comparator.comparingDouble(p -> p.distSqr(playerPos)));
 
         } catch (Exception e) {
-            // ChestTracker is absent or its internals moved. Returning whatever was collected so
-            // far degrades to "found nothing here", which the caller already handles by moving on
-            // to the next item.
+            // 箱子追踪不在，或它的内部结构变了。返回已经收集到的部分，
+            // 效果退化成「这里没找到」，调用方本来就会据此换下一个物品。
             Playercontrolpp.LOGGER.debug("ChestTracker memory lookup failed for {}", targetItem, e);
         }
         return positions;
     }
 
-    /**
-     * Check if a loaded memory bank exists.
-     */
+    /** @return 是否存在已加载的缓存库。 */
     public boolean hasLoadedMemoryBank() {
         try {
             return getMemoryBank() != null;
@@ -161,8 +149,7 @@ public class ChestTrackerIntegration implements ModIntegration {
     }
 
     /**
-     * Save one remotely synchronized menu directly into Chest Tracker's currently loaded bank.
-     * No secondary memory bank is created.
+     * 把一个已同步的容器菜单直接写进箱子追踪当前加载的缓存库，不另建缓存库。
      */
     public boolean cacheContainer(
             Level level,
@@ -231,7 +218,7 @@ public class ChestTrackerIntegration implements ModIntegration {
         return Collections.emptyList();
     }
 
-    /** Prevent Chest Tracker's normal screen-close provider from using a stale interaction. */
+    /** 清掉箱子追踪的交互记录，避免它在关界面时用一条过期的交互重复落库。 */
     public void clearInteractionTracker() {
         if (!loaded) return;
         try {

@@ -5,8 +5,7 @@ import com.alonediamond.playercontrolpp.compat.NbtCompat;
 import net.minecraft.nbt.CompoundTag;
 
 /**
- * RLE-compressed recording segment. Represents a contiguous range of ticks
- * where all input fields were identical.
+ * RLE 压缩后的录制段：代表一段连续的 tick，其间所有输入字段完全相同。
  */
 public class RecordedSegment {
     public int duration;

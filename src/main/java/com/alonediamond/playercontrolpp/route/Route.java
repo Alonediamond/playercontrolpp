@@ -13,17 +13,15 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * One patrol route: an ordered list of waypoints plus its playback options and hotkey.
+ * 一条巡逻路径：有序的导航点列表 + 回放选项 + 热键。
  *
- * <p>Invariant: there are always at least {@link #MIN_NODES} waypoints, because the executor and
- * the editor both index the list directly. The list itself is handed out read-only and can only be
- * changed through {@link #insertNode} / {@link #removeNode}, so the invariant cannot be broken from
- * outside — previously {@code getNodes()} returned the live list and the GUI could shrink it to one
- * entry.
+ * <p>不变式：导航点数量始终不少于 {@link #MIN_NODES}，因为执行器和编辑界面都直接按下标取用。
+ * 列表本身以只读方式交出，只能通过 {@link #insertNode} / {@link #removeNode} 修改，
+ * 所以不变式无法从外部打破——早先 {@code getNodes()} 返回的是活列表，GUI 能把它删到只剩一项。
  */
 public class Route {
 
-    /** A route needs a start and an end. */
+    /** 一条路径至少要有起点和终点。 */
     public static final int MIN_NODES = 2;
 
     private final String id;
@@ -80,18 +78,18 @@ public class Route {
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
-    /** @return the waypoints, read-only. Use {@link #insertNode} / {@link #removeNode} to edit. */
+    /** @return 导航点列表（只读）。要改请用 {@link #insertNode} / {@link #removeNode}。 */
     public List<RouteNode> getNodes() { return Collections.unmodifiableList(nodes); }
 
     public int getNodeCount() { return nodes.size(); }
 
-    /** @return the waypoint at {@code index}; its coordinates are mutable in place. */
+    /** @return 第 {@code index} 个导航点；它的坐标可以原地修改。 */
     public RouteNode getNode(int index) { return nodes.get(index); }
 
     /**
-     * Insert a waypoint.
+     * 插入一个导航点。
      *
-     * @return whether it was inserted; refused for an index outside the list
+     * @return 是否插入成功；下标越界会被拒绝
      */
     public boolean insertNode(int index, RouteNode node) {
         if (index < 0 || index > nodes.size()) return false;
@@ -100,10 +98,9 @@ public class Route {
     }
 
     /**
-     * Remove a waypoint.
+     * 删除一个导航点。
      *
-     * @return whether it was removed; refused when it would drop below {@link #MIN_NODES}, or for
-     *         an index outside the list
+     * @return 是否删除成功；会让数量低于 {@link #MIN_NODES} 或下标越界时被拒绝
      */
     public boolean removeNode(int index) {
         if (nodes.size() <= MIN_NODES) return false;
@@ -136,12 +133,12 @@ public class Route {
     public ConfigHotkey getHotkey() { return hotkey; }
 
     /**
-     * How many waypoint-to-waypoint legs make up a full run.
+     * 一次完整运行由多少段「导航点到导航点」组成。
      *
-     * <p>With k waypoints one forward pass is k-1 legs.
-     * loopCount 1 is a single forward pass, N &gt; 1 is N round trips, and 0 means never stop.
+     * <p>k 个导航点，单向走一趟是 k-1 段。
+     * loopCount 为 1 表示只单向走一趟，N &gt; 1 表示往返 N 次，0 表示永不停止。
      *
-     * @return the leg count, or -1 for an infinite route
+     * @return 段数；无限循环返回 -1
      */
     public int getTotalSegments() {
         int waypointSegments = Math.max(1, nodes.size() - 1);
@@ -191,7 +188,7 @@ public class Route {
             for (int i = 0; i < nodesArr.size(); i++) {
                 route.nodes.add(RouteNode.fromJson(nodesArr.get(i).getAsJsonObject()));
             }
-            // Restore the invariant if the file was hand-edited down to too few waypoints.
+            // 文件被手工改到导航点不足时，把不变式恢复回来。
             while (route.nodes.size() < MIN_NODES) {
                 route.nodes.add(new RouteNode());
             }

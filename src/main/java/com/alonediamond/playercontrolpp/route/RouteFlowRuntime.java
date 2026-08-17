@@ -9,8 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import java.util.*;
 
 /**
- * Runs the active route executors and reports the forward/sprint input they want.
- * The keys themselves are pressed by {@code ClientEventHandler}.
+ * 运行活动中的路径执行器，并公布它们想要的前进/疾跑输入。键本身由 {@code ClientEventHandler} 按下。
  */
 public class RouteFlowRuntime implements ClientFeature {
     private static final RouteFlowRuntime INSTANCE = new RouteFlowRuntime();
@@ -34,14 +33,14 @@ public class RouteFlowRuntime implements ClientFeature {
     }
 
     /**
-     * Start a route. Returns false if the route has no dimension set and player is not in a world.
+     * 启动一条路径。路径没设维度且玩家不在世界里时返回 false。
      */
     public boolean startRoute(Route route) {
         Minecraft client = Minecraft.getInstance();
         LocalPlayer player = client.player;
         if (player == null) return false;
 
-        // Auto-set dimension on first start
+        // 首次启动时自动写入维度
         if (route.getDimensionId().isEmpty()) {
             route.setDimension(client.level.dimension());
         }
@@ -109,15 +108,14 @@ public class RouteFlowRuntime implements ClientFeature {
             return;
         }
 
-        // Tick all executors
+        // tick 所有执行器
         List<String> toRemove = new ArrayList<>();
         for (Map.Entry<String, RouteExecutor> entry : executors.entrySet()) {
             RouteExecutor executor = entry.getValue();
             executor.tick(client);
 
-            // Per-traversal layer increment: fires at each endpoint arrival,
-            // not just at route completion. For infinite loops (loopCount=0),
-            // this triggers continuously on every pass through the waypoints.
+        // 每趟换层：在到达任一端点时触发，不是只在整条路径跑完时。
+        // 无限循环（loopCount=0）时，每次走完一趟导航点都会触发。
             if (executor.getRoute().isLayerControlEnabled()
                     && executor.consumeLayerIncrementPending()) {
                 LitematicaIntegration.getInstance().incrementLayer(
@@ -146,7 +144,7 @@ public class RouteFlowRuntime implements ClientFeature {
         }
         updateForwardState();
 
-        // Handle jump requests
+        // 处理跳跃请求
         for (RouteExecutor executor : executors.values()) {
             if (executor.needsJump() && player != null) {
                 player.jumpFromGround();
@@ -165,7 +163,7 @@ public class RouteFlowRuntime implements ClientFeature {
         }
     }
 
-    /** Called on dimension switch, disconnect, or world load. */
+    /** 切维度、断开连接或加载世界时调用。 */
     @Override
     public void onWorldChange() {
         if (!executors.isEmpty()) {

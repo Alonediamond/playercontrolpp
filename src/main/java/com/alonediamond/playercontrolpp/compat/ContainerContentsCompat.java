@@ -7,22 +7,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Reading the contents of a shulker box through the {@code CONTAINER} data component.
+ * 通过 {@code CONTAINER} 数据组件读潜影盒内容。
  *
- * <p>Minecraft 26.1 changed the element type of
- * {@code ItemContainerContents.nonEmptyItems()} from {@code ItemStack} to the new
- * lightweight {@code ItemStackTemplate}, which has to be materialised with
- * {@code create()} before it can be inspected. This class hides that difference and
- * always hands back real {@link ItemStack}s.
+ * <p>26.1 把 {@code ItemContainerContents.nonEmptyItems()} 的元素类型从 {@code ItemStack}
+ * 换成了更轻的 {@code ItemStackTemplate}，要先 {@code create()} 才能查看。
+ * 这个类藏掉差异，一律返回真正的 {@link ItemStack}。
  */
 public final class ContainerContentsCompat {
 
     private ContainerContentsCompat() {}
 
-    /**
-     * @return every non-empty stack stored inside the container component.
-     *         The returned stacks are copies — mutating them does not affect the item.
-     */
+    /** @return 容器组件里所有非空物品堆。返回的是副本，改它不影响原物品。 */
     public static List<ItemStack> nonEmptyItems(ItemContainerContents container) {
         List<ItemStack> result = new ArrayList<>();
         if (container == null) {

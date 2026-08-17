@@ -29,9 +29,7 @@ public class BaritoneIntegration implements ModIntegration {
         return provider.getClass().getMethod("getPrimaryBaritone").invoke(provider);
     }
 
-    /**
-     * Start Baritone pathing toward the given block position.
-     */
+    /** 让 Baritone 开始寻路到指定方块坐标。 */
     public void pathTo(BlockPos target) {
         try {
             cancelPathing();
@@ -49,7 +47,7 @@ public class BaritoneIntegration implements ModIntegration {
                     .invoke(customGoalProcess, goal);
 
         } catch (Exception e) {
-            // Fallback: try command execution
+            // 兜底：改用执行命令的方式
             try {
                 Object baritone = getBaritone();
                 Object cmdManager = baritone.getClass()
@@ -60,17 +58,14 @@ public class BaritoneIntegration implements ModIntegration {
                         .getMethod("execute", String.class)
                         .invoke(cmdManager, cmd);
             } catch (Exception ignored) {
-                // Both the API and the command fallback failed, which means this Baritone fork
-                // does not expose either. Staying silent is deliberate: the caller
-                // (BaritonePathingController) notices that pathing never started and reports
-                // that to the player, which is a far more useful message than a reflection trace.
+                // API 和命令兜底都失败了，说明这个 Baritone 分支两者都不暴露。刻意保持沉默：
+                // 调用方（BaritonePathingController）会发现寻路始终没开始并告知玩家，
+                // 那条消息比一段反射异常栈有用得多。
             }
         }
     }
 
-    /**
-     * Cancel any active Baritone pathing and custom goals.
-     */
+    /** 取消所有正在进行的 Baritone 寻路与自定义目标。 */
     public boolean cancelPathing() {
         try {
             Object baritone = getBaritone();
@@ -86,9 +81,7 @@ public class BaritoneIntegration implements ModIntegration {
         }
     }
 
-    /**
-     * Check if Baritone is currently pathing.
-     */
+    /** 查询 Baritone 当前是否在寻路。 */
     public boolean isPathing() {
         try {
             Object baritone = getBaritone();
@@ -102,11 +95,11 @@ public class BaritoneIntegration implements ModIntegration {
         }
     }
 
-    // --- Builder process access (for auto-restock) ---
+    // ---- 建造进程访问（自动续料用）----
 
     /**
-     * @return whether the Baritone BuilderProcess is currently active (i.e. a #litematica build
-     *         is running). Returns false when Baritone is absent or the process is idle.
+     * @return Baritone 的 BuilderProcess 当前是否活动（即有 #litematica 建造在跑）。
+     *         Baritone 不在或进程空闲时返回 false。
      */
     public boolean isBuilderActive() {
         try {
@@ -122,8 +115,8 @@ public class BaritoneIntegration implements ModIntegration {
     }
 
     /**
-     * @return whether the BuilderProcess is currently paused (material shortage / pathing failure /
-     *         liquid targets / …). Returns false when the process is not active.
+     * @return BuilderProcess 当前是否处于暂停（缺料 / 寻路失败 / 目标是液体 / ……）。
+     *         进程本身不活动时返回 false。
      */
     public boolean isBuilderPaused() {
         try {
@@ -139,18 +132,16 @@ public class BaritoneIntegration implements ModIntegration {
     }
 
     /**
-     * Start a new Litematica schematic build through Baritone's BuilderProcess, equivalent to
-     * typing {@code #litematica} in chat (or {@code #litematica <index>} when more than one
-     * schematic is loaded).
+     * 通过 Baritone 的 BuilderProcess 启动一次 Litematica 蓝图建造，等价于在聊天框输入
+     * {@code #litematica}（加载了多个投影时是 {@code #litematica <序号>}）。
      *
-     * <p>{@code buildOpenLitematic} returns {@code void} and swallows its own failures — when no
-     * placement exists at {@code schematicIndex} it merely logs "List of placements has no entry"
-     * and leaves the process idle. So a successful reflective call says nothing about whether a
-     * build actually started; the answer is whether the process is active afterwards, which
-     * {@code build()} sets synchronously on the calling (client) thread.
+     * <p>{@code buildOpenLitematic} 返回 {@code void} 且自己吞掉失败——{@code schematicIndex}
+     * 上没有 placement 时它只打一行「List of placements has no entry」日志，进程照旧空闲。
+     * 所以反射调用成功完全说明不了建造有没有真的开始；判据是调用之后进程是否活动，
+     * 而 {@code build()} 是在调用方（客户端）线程上同步设置这个状态的。
      *
-     * @param schematicIndex zero-based index into Litematica's loaded schematic list.
-     * @return whether the BuilderProcess is running a schematic after the call.
+     * @param schematicIndex Litematica 已加载投影列表的下标，从 0 开始
+     * @return 调用之后 BuilderProcess 是否正在建造某个蓝图
      */
     public boolean startLitematicaBuild(int schematicIndex) {
         try {
@@ -169,13 +160,12 @@ public class BaritoneIntegration implements ModIntegration {
     }
 
     /**
-     * Clear the BuilderProcess pause flag, exactly as Baritone's {@code resume} command does.
+     * 清掉 BuilderProcess 的暂停标志，与 Baritone 的 {@code resume} 命令等效。
      *
-     * <p>Preferred over relaunching the build whenever the process is still alive: a relaunch
-     * re-parses the schematic and resets the layer counter back to {@code startAtLayer}, while
-     * resuming picks up where the pause happened and keeps {@code observedCompleted}.
+     * <p>只要进程还活着就优先用它而不是重启建造：重启会重新解析蓝图并把层数计数器重置回
+     * {@code startAtLayer}，而 resume 从暂停处接着走，还保留 {@code observedCompleted}。
      *
-     * @return whether the call went through.
+     * @return 调用是否成功
      */
     public boolean resumeBuilder() {
         try {
@@ -190,10 +180,9 @@ public class BaritoneIntegration implements ModIntegration {
     }
 
     /**
-     * @return the value of Baritone's {@code allowInventory} setting, which defaults to
-     *         {@code false}. While it is off the builder only places blocks it can find in the
-     *         nine hotbar slots — materials sitting in the main inventory are invisible to it,
-     *         so a restock that lands there does not unblock the build.
+     * @return Baritone 的 {@code allowInventory} 设置值，默认 {@code false}。
+     *         它关闭时建造只放它在快捷栏 9 格里能找到的方块——躺在主背包里的材料它看不见，
+     *         所以补到主背包的料并不能解开暂停。
      */
     public boolean allowsInventory() {
         try {

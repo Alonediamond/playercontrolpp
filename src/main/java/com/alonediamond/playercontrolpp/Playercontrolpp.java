@@ -6,14 +6,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Common entrypoint. Client controls are wired from {@code PlayercontrolppClient}.
+ * 通用入口。客户端部分在 {@code PlayercontrolppClient} 里接线。
  */
 public class Playercontrolpp implements ModInitializer {
 
     /**
-     * The mod id, used for the config registration key, translation key prefixes and resource
-     * paths. Every other class references this constant rather than repeating the literal — a
-     * mismatch would make malilib silently fail to find the config instead of raising an error.
+     * 模组 id，用于配置注册键、翻译键前缀和资源路径。
+     * 其他类一律引用这个常量而不是重复字面量——写错的话 malilib 会静默找不到配置，不会报错。
      */
     public static final String MOD_ID = "playercontrolpp";
 
@@ -21,7 +20,7 @@ public class Playercontrolpp implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        // Common initialization (currently empty)
+        // 通用初始化（目前为空）
     }
 
     public static Identifier id(String path) {

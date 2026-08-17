@@ -10,6 +10,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.BlockHitResult;
@@ -22,57 +24,59 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Opens every whitelisted container in reach so ChestTracker can record its contents, then
- * closes it again. A per-session visited set stops it from re-opening the same one.
+ * 把手长范围内每个白名单容器打开一次让箱子追踪记录内容，然后关掉。
+ * 每次任务维护一份已访问集合，同一个容器不会被反复打开。
  *
- * <pre>
- * SCANNING -&gt; OPENING_CONTAINER -&gt; WAITING_AFTER_OPEN -&gt; CLOSING_GUI -&gt; [COOLDOWN] -&gt; SCANNING
- * </pre>
+ * <pre>SCANNING → OPENING_CONTAINER → [COOLDOWN] → SCANNING</pre>
  *
- * <p>With nothing left uncached it enters AUTO_STOP_COUNTDOWN, which keeps looking at a reduced
- * rate for three seconds so walking to the next room resumes it automatically.
+ * <p>附近没有未缓存容器时进入 AUTO_STOP_COUNTDOWN，三秒内以较低频率继续找，
+ * 所以走到下一个房间会自动接着干。
+ *
+ * <h3>为什么关箱和开下一个箱在同一 tick</h3>
+ * 箱子追踪是挂在 {@code ScreenEvents.remove} 上的：{@code setScreen(null)} 会<b>同步</b>调用
+ * {@code provider.onScreenClose()} 读走菜单内容，然后 {@code InteractionTracker.clear()}。
+ * 所以「先关（落库）→ 再点下一个（建立新的交互记录）」这个顺序在同一 tick 内完全成立，
+ * 不需要为了等落库而额外空转几 tick。
  */
 public class AutoCacheNearbyContainersFeature {
 
     private enum State {
-        SCANNING,               // Looking for uncached containers in range
-        OPENING_CONTAINER,      // Click sent, waiting for the screen
-        WAITING_AFTER_OPEN,     // Screen up, give ChestTracker a tick to record
-        CLOSING_GUI,            // Closed, brief settle before the next scan
-        COOLDOWN,               // Configured delay between containers
-        AUTO_STOP_COUNTDOWN     // Nothing left; counting down to switch off
+        SCANNING,               // 找范围内未缓存的容器
+        OPENING_CONTAINER,      // 右键已发出，等界面与内容包
+        COOLDOWN,               // 配置的容器间隔
+        AUTO_STOP_COUNTDOWN     // 没得干了，倒计时关闭
     }
 
-    /** Auto-stop grace period: 3 seconds at 20 tps. */
+    /** 自动停止的宽限期：20 tps 下 3 秒。 */
     private static final int AUTO_STOP_TICKS = 60;
-    /** During the countdown, only re-scan this often — the sweep is the expensive part. */
+    /** 倒计时期间的重扫间隔——扫描是这里最贵的一步，而玩家四分之一秒走不了多远。 */
     private static final int COUNTDOWN_SCAN_INTERVAL = 5;
-    /** Ticks to wait for the container screen after clicking. */
+    /** 点击后等容器界面的 tick 数。 */
     private static final int OPEN_WAIT_TICKS = 10;
-    /** Ticks to leave the screen open so ChestTracker sees the contents. */
-    private static final int RECORD_WAIT_TICKS = 1;
-    /** Ticks to settle after closing before scanning again. */
-    private static final int CLOSE_SETTLE_TICKS = 2;
+    /** 界面已开但内容包还没到时，最多再宽限的 tick 数。 */
+    private static final int CONTENT_WAIT_TICKS = 2;
+    /** 单 tick 内最多推进几步状态；纯粹是防御性上限，正常只会走 1~2 步。 */
+    private static final int MAX_STEPS_PER_TICK = 8;
 
     private static boolean enabled;
     private static final Set<BlockPos> visitedContainers = new HashSet<>();
     private static State state = State.SCANNING;
     private static BlockPos currentTarget;
     private static int stateTimer;
+    private static int contentTimer;
     private static int autoStopCountdown;
 
     /**
-     * The whitelist resolved from ids to block instances.
+     * 白名单从 id 解析成方块实例后的结果。
      *
-     * <p>The scan used to build the block's registry id as a String and look that up — a registry
-     * reverse-lookup plus a String allocation for each of the ~1300 positions in the cube, every
-     * tick. Resolving once to {@code Set<Block>} makes the inner check an identity-hash lookup.
+     * <p>早先的扫描是把方块的注册 id 拼成字符串再查表——立方体里约 1300 个位置，每 tick
+     * 每个位置一次注册表反查加一次字符串分配。解析成 {@code Set<Block>} 后内层只剩一次引用哈希查表。
      */
     private static Set<Block> whitelistBlocks = Collections.emptySet();
-    /** The config value {@link #whitelistBlocks} was built from, to detect edits. */
+    /** 构建 {@link #whitelistBlocks} 时用的配置值，用来发现玩家改了配置。 */
     private static List<String> whitelistSource;
 
-    /** Registered with {@link FeatureRegistry}; see {@code InitHandler}. */
+    /** 注册进 {@link FeatureRegistry}，见 {@code InitHandler}。 */
     public static final ClientFeature FEATURE = new ClientFeature() {
         @Override public void onClientTick(Minecraft mc) { tick(mc); }
         @Override public void onWorldChange() { AutoCacheNearbyContainersFeature.onWorldChange(); }
@@ -117,58 +121,131 @@ public class AutoCacheNearbyContainersFeature {
         currentTarget = null;
         state = State.SCANNING;
         stateTimer = 0;
+        contentTimer = 0;
         autoStopCountdown = 0;
     }
 
     public static void tick(Minecraft mc) {
         if (!enabled || mc.player == null || mc.level == null) return;
 
-        // Respect other GUIs: scanning and waiting need no screen, but the interactive states
-        // must not run while the player has something else open.
+        // 尊重其它界面：玩家开着非容器界面时整体暂停，不去抢他的操作。
         if (ScreenCompat.getScreen(mc) != null
-                && state != State.SCANNING
-                && state != State.COOLDOWN
-                && state != State.AUTO_STOP_COUNTDOWN
                 && !(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen)) {
             return;
         }
 
-        switch (state) {
-            case SCANNING -> tickScanning(mc);
-            case OPENING_CONTAINER -> tickOpeningContainer(mc);
-            case WAITING_AFTER_OPEN -> tickWaitingAfterOpen(mc);
-            case CLOSING_GUI -> tickClosingGui(mc);
-            case COOLDOWN -> tickCooldown(mc);
-            case AUTO_STOP_COUNTDOWN -> tickAutoStopCountdown(mc);
+        // 没有等待外部事件的状态在同一 tick 内连续推进：关箱与开下一个箱之间不再各自浪费一个 tick。
+        for (int step = 0; step < MAX_STEPS_PER_TICK && advance(mc); step++) {
+            // advance() 返回 true 表示这一步没有消耗服务端往返，可以立刻继续。
         }
     }
 
-    private static void tickScanning(Minecraft mc) {
+    /**
+     * 推进一步状态机。
+     *
+     * @return {@code true} 表示这一步没有等待服务端，可以在同一 tick 内继续推进。
+     */
+    private static boolean advance(Minecraft mc) {
+        switch (state) {
+            case SCANNING -> {
+                return tickScanning(mc);
+            }
+            case OPENING_CONTAINER -> {
+                return tickOpeningContainer(mc);
+            }
+            case COOLDOWN -> {
+                if (--stateTimer <= 0) {
+                    state = State.SCANNING;
+                    return true;
+                }
+                return false;
+            }
+            case AUTO_STOP_COUNTDOWN -> {
+                return tickAutoStopCountdown(mc);
+            }
+        }
+        return false;
+    }
+
+    private static boolean tickScanning(Minecraft mc) {
+        // 还有容器界面开着就先关掉：可能是上一个容器超时之后才姗姗来迟地打开，
+        // 关掉它既让箱子追踪把它落库，也避免下一次右键落到过期的菜单上。
+        if (mc.player.containerMenu != mc.player.inventoryMenu) {
+            closeGuiIfOpen(mc);
+            return false;
+        }
+
         BlockPos target = findNearestUncachedContainer(mc);
         if (target == null) {
             state = State.AUTO_STOP_COUNTDOWN;
             autoStopCountdown = AUTO_STOP_TICKS;
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.cache_nearby.all_cached");
-        } else {
-            currentTarget = target;
-            openContainer(mc, target);
-            state = State.OPENING_CONTAINER;
-            stateTimer = OPEN_WAIT_TICKS;
+            return false;
         }
+
+        beginOpen(mc, target);
+        return false; // 等服务端回包
     }
 
-    private static void tickOpeningContainer(Minecraft mc) {
-        stateTimer--;
+    private static void beginOpen(Minecraft mc, BlockPos target) {
+        currentTarget = target;
+        stateTimer = OPEN_WAIT_TICKS;
+        contentTimer = CONTENT_WAIT_TICKS;
+        state = State.OPENING_CONTAINER;
+        openContainer(mc, target);
+    }
+
+    private static boolean tickOpeningContainer(Minecraft mc) {
         if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
             markVisited();
-            state = State.WAITING_AFTER_OPEN;
-            stateTimer = RECORD_WAIT_TICKS;
-        } else if (stateTimer <= 0) {
-            // Never opened — mark it anyway so we do not retry it forever.
+
+            // 界面已开，但物品内容是另一个包。等到看见东西、或宽限用完再关，
+            // 否则箱子追踪会把还没同步的容器记成空的。
+            if (!menuHasContent(mc) && --contentTimer > 0) {
+                return false;
+            }
+
+            closeGuiIfOpen(mc); // 这一步就是落库时机，见类注释
+            currentTarget = null;
+
+            int delay = Configs.Settings.CACHE_DELAY.getIntegerValue();
+            if (delay > 0) {
+                state = State.COOLDOWN;
+                stateTimer = delay;
+                return false;
+            }
+            state = State.SCANNING;
+            return true; // 延迟为 0 时同一 tick 直接扫下一个
+        }
+
+        if (--stateTimer <= 0) {
+            // 一直没开成——也标记掉，免得永远重试同一个。
             markVisited();
             currentTarget = null;
             state = State.SCANNING;
+            return true; // 没消耗往返，立刻找下一个
         }
+        return false;
+    }
+
+    private static boolean tickAutoStopCountdown(Minecraft mc) {
+        autoStopCountdown--;
+
+        if (autoStopCountdown % COUNTDOWN_SCAN_INTERVAL == 0) {
+            BlockPos found = findNearestUncachedContainer(mc);
+            if (found != null) {
+                // 直接用这次扫到的目标，不要回 SCANNING 再扫一遍。
+                beginOpen(mc, found);
+                return false;
+            }
+        }
+
+        if (autoStopCountdown <= 0) {
+            enabled = false;
+            resetState();
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.cache_nearby.auto_stop");
+        }
+        return false;
     }
 
     private static void markVisited() {
@@ -177,57 +254,23 @@ public class AutoCacheNearbyContainersFeature {
         }
     }
 
-    private static void tickWaitingAfterOpen(Minecraft mc) {
-        if (--stateTimer <= 0) {
-            closeGuiIfOpen(mc);
-            state = State.CLOSING_GUI;
-            stateTimer = CLOSE_SETTLE_TICKS;
-        }
-    }
-
-    private static void tickClosingGui(Minecraft mc) {
-        if (--stateTimer <= 0) {
-            currentTarget = null;
-            int delay = Configs.Settings.CACHE_DELAY.getIntegerValue();
-            if (delay > 0) {
-                state = State.COOLDOWN;
-                stateTimer = delay;
-            } else {
-                state = State.SCANNING;
+    /** @return 当前打开的容器菜单里，属于容器那一侧的槽位是否已经有物品了。 */
+    private static boolean menuHasContent(Minecraft mc) {
+        for (Slot slot : mc.player.containerMenu.slots) {
+            if (!(slot.container instanceof Inventory) && !slot.getItem().isEmpty()) {
+                return true;
             }
         }
-    }
-
-    private static void tickCooldown(Minecraft mc) {
-        if (--stateTimer <= 0) {
-            state = State.SCANNING;
-        }
-    }
-
-    private static void tickAutoStopCountdown(Minecraft mc) {
-        autoStopCountdown--;
-
-        if (autoStopCountdown % COUNTDOWN_SCAN_INTERVAL == 0
-                && findNearestUncachedContainer(mc) != null) {
-            state = State.SCANNING;
-            return;
-        }
-
-        if (autoStopCountdown <= 0) {
-            enabled = false;
-            resetState();
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.cache_nearby.auto_stop");
-        }
+        return false;
     }
 
     /**
-     * Single pass over the reach-limited cube, keeping only the closest hit.
+     * 单趟扫过受手长限制的立方体，只留最近的那个。
      *
-     * <p>Reuses one {@link BlockPos.MutableBlockPos} instead of allocating per position, and
-     * returns the nearest directly rather than collecting every hit and sorting a list whose
-     * first element was the only one ever read.
+     * <p>复用一个 {@link BlockPos.MutableBlockPos}，不是每个位置分配一个；直接返回最近的那个，
+     * 不收集全部再排序——排完序也只会读第一个。
      *
-     * @return the closest whitelisted container not yet visited, or {@code null}
+     * @return 最近的、未访问过的白名单容器；没有则 {@code null}
      */
     private static BlockPos findNearestUncachedContainer(Minecraft mc) {
         Set<Block> whitelist = whitelistBlocks();
@@ -255,7 +298,7 @@ public class AutoCacheNearbyContainersFeature {
                     if (visitedContainers.contains(cursor)) continue;
                     if (!whitelist.contains(level.getBlockState(cursor).getBlock())) continue;
 
-                    best = cursor.immutable(); // must copy: the cursor keeps moving
+                    best = cursor.immutable(); // 必须复制：游标还要继续动
                     bestDistSq = distSq;
                 }
             }
@@ -264,11 +307,10 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     /**
-     * @return the whitelist as block instances, rebuilt only when the config string list changes.
+     * @return 解析成方块实例的白名单，只在配置列表变化时重建。
      *
-     * <p>Resolves by walking the block registry once and keeping the entries whose id is listed.
-     * That avoids per-version differences in the {@code Registry.get(id)} return type, which is
-     * plain {@code Optional<Block>} on some of the supported versions and a Holder on others.
+     * <p>做法是把方块注册表走一遍、留下 id 在列表里的项。这样可以绕开 {@code Registry.get(id)}
+     * 返回类型的版本差异——它在部分支持版本上是 {@code Optional<Block>}，在另一些上是 Holder。
      */
     private static Set<Block> whitelistBlocks() {
         List<String> configured = Configs.CacheNearbySettings.CONTAINER_WHITELIST.getStrings();
@@ -288,8 +330,9 @@ public class AutoCacheNearbyContainersFeature {
         return whitelistBlocks;
     }
 
-    static boolean isWhitelistedContainer(Block block) {
-        return whitelistBlocks().contains(block);
+    /** 供「缓存投影选区容器」共用同一份白名单，避免它自己再解析一遍配置。 */
+    static Set<Block> whitelistedBlocks() {
+        return whitelistBlocks();
     }
 
     private static void openContainer(Minecraft mc, BlockPos target) {
@@ -322,7 +365,7 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     private static void closeGuiIfOpen(Minecraft mc) {
-        if (mc.player != null && ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
+        if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
             mc.player.closeContainer();
         }
     }

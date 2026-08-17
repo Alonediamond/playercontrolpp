@@ -156,9 +156,8 @@
 
   "playercontrolpp.message.schematic_cache.mods_missing": "[PlayerControl++] Cache Schematic Selection Containers requires both Litematica and Chest Tracker.",
   "playercontrolpp.message.schematic_cache.no_memory_bank": "[PlayerControl++] Chest Tracker has no normally loaded memory bank.",
-  "playercontrolpp.message.schematic_cache.waiting_approach": "[PlayerControl++] Container is out of reach, waiting for player to approach (3s)...",
-  "playercontrolpp.message.schematic_cache.skip_out_of_range": "[PlayerControl++] Container is out of range, skipped.",
-  "playercontrolpp.message.schematic_cache.too_far": "[PlayerControl++] Multiple containers are out of reach, stopped. Please get closer to the schematic selection and restart.",
+  "playercontrolpp.message.schematic_cache.waiting_move": "[PlayerControl++] %s containers left in the selection are out of reach — walk up to any of them to keep caching.",
+  "playercontrolpp.message.schematic_cache.chunks_unloaded": "[PlayerControl++] %s sections of the selection are not loaded; scanning resumes when you get closer.",
   "playercontrolpp.message.schematic_cache.busy": "[PlayerControl++] Close the current screen or other container-cache task first.",
   "playercontrolpp.message.schematic_cache.no_selection": "[PlayerControl++] Litematica has no usable current area selection.",
   "playercontrolpp.message.schematic_cache.scanning": "[PlayerControl++] Scanning the schematic selection for containers...",
@@ -204,7 +203,7 @@
 
   "playercontrolpp.config.hotkeys.name.markContainer": "Mark Container",
   "playercontrolpp.config.hotkeys.pretty_name.markContainer": "Mark Container",
-  "playercontrolpp.config.hotkeys.comment.markContainer": "Mark/unmark the container you are looking at as a restock target for auto-build-restock.",
+  "playercontrolpp.config.hotkeys.comment.markContainer": "Mark/unmark the container you are looking at as a restock target for auto-build-restock. Sneak + hotkey enables/disables a container that is already marked.",
 
   "playercontrolpp.config.baritone.name.autoRestockToggle": "Auto Build Restock",
   "playercontrolpp.config.baritone.pretty_name.autoRestockToggle": "Auto Build Restock",
@@ -212,7 +211,7 @@
 
   "playercontrolpp.config.baritone.name.markedContainers": "Marked Container List",
   "playercontrolpp.config.baritone.pretty_name.markedContainers": "Marked Container List",
-  "playercontrolpp.config.baritone.comment.markedContainers": "Container positions for auto-restock. Each entry: dimension x y z. Use the Mark Container hotkey or edit this list directly.",
+  "playercontrolpp.config.baritone.comment.markedContainers": "Container positions for auto-restock. Each entry: dimension x y z [off] — a trailing 'off' disables that container without deleting it. Use the Mark Container hotkey, sneak + the hotkey to enable/disable, or edit this list directly.",
 
   "playercontrolpp.config.hotkeys.name.oneClickBuildRestock": "One-Click Build + Restock",
   "playercontrolpp.config.hotkeys.pretty_name.oneClickBuildRestock": "One-Click Build + Restock",
@@ -226,12 +225,20 @@
   "playercontrolpp.config.baritone.pretty_name.restockStacksPerItem": "Restock: Stacks Per Material",
   "playercontrolpp.config.baritone.comment.restockStacksPerItem": "How many stacks of each missing material to top up to per restock trip. Litematica reports what the whole schematic still needs, which is usually far more than an inventory holds, so the target is capped here to leave room for the other materials.",
 
+  "playercontrolpp.config.baritone.name.restockContainerMaxDistance": "Restock: Container Range Limit",
+  "playercontrolpp.config.baritone.pretty_name.restockContainerMaxDistance": "Restock: Container Range Limit",
+  "playercontrolpp.config.baritone.comment.restockContainerMaxDistance": "Marked containers further than this many blocks from the player are ignored, so restocking never walks across the map for one chest. 0 means no limit.",
+
   "playercontrolpp.message.restock.started": "[PlayerControl++] Auto Restock: ON — monitoring build for material shortages.",
   "playercontrolpp.message.restock.stopped": "[PlayerControl++] Auto Restock: OFF.",
   "playercontrolpp.message.restock.pause_detected": "[PlayerControl++] Builder paused — checking what is missing...",
   "playercontrolpp.message.restock.gathering": "[PlayerControl++] Short of %d item types. Searching %d marked container(s)...",
   "playercontrolpp.message.restock.container_marked": "[PlayerControl++] Container marked at %d, %d, %d.",
   "playercontrolpp.message.restock.container_unmarked": "[PlayerControl++] Container unmarked at %d, %d, %d.",
+  "playercontrolpp.message.restock.container_enabled": "[PlayerControl++] Marked container at %d, %d, %d enabled.",
+  "playercontrolpp.message.restock.container_disabled": "[PlayerControl++] Marked container at %d, %d, %d disabled (restock will not path to it).",
+  "playercontrolpp.message.restock.containers_filtered": "[PlayerControl++] Skipping %s disabled and %s out-of-range marked containers.",
+  "playercontrolpp.message.restock.all_containers_filtered": "[PlayerControl++] Every marked container is disabled or out of range. Enable one, or raise the container range limit.",
   "playercontrolpp.message.restock.no_containers": "[PlayerControl++] No marked containers in this dimension. Mark containers before starting the build.",
   "playercontrolpp.message.restock.nothing_found": "[PlayerControl++] No needed materials found. Build will retry with available inventory.",
   "playercontrolpp.message.restock.stock_complete": "[PlayerControl++] Restock run complete — resuming the build.",

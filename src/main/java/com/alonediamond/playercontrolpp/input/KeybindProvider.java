@@ -11,9 +11,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Tells malilib which keys this mod uses. Route hotkeys are enumerated from
- * {@code RouteManager} on every call, so adding or deleting a route only needs
- * {@code updateUsedKeys()} — this is the single registration path for them.
+ * 告诉 malilib 本模组用了哪些键。路径热键每次调用都从 {@code RouteManager} 重新枚举，
+ * 所以增删路径只需要 {@code updateUsedKeys()}——这是它们唯一的注册路径。
  */
 public class KeybindProvider implements IKeybindProvider {
 
@@ -35,7 +34,7 @@ public class KeybindProvider implements IKeybindProvider {
         allHotkeys.addAll(RouteManager.getInstance().getRouteHotkeyList());
         manager.addHotkeysForCategory(MOD_NAME, "playercontrolpp.gui.tab.hotkeys", allHotkeys);
 
-        // The Baritone category only makes sense with all three companion mods installed.
+        // Baritone 分类只有在三个配套模组都装了时才有意义。
         if (AutoMaterialGatherer.areAllThreeModsPresent()) {
             manager.addHotkeysForCategory(MOD_NAME, "playercontrolpp.gui.tab.baritone",
                     List.of(Configs.Hotkeys.BARITONE_AUTO_GATHER));

@@ -3,8 +3,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 import net.minecraft.world.item.Item;
 
 /**
- * Represents a single item entry from the Litematica material list
- * that still needs to be gathered.
+ * Litematica 材料清单里还需要收集的单个条目。
  */
 public class MaterialItemEntry {
     public final Item item;

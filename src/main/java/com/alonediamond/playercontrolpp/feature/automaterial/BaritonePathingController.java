@@ -8,18 +8,17 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Navigates to container positions with Baritone, and decides when it has arrived, stalled, or
- * never got going at all.
+ * 用 Baritone 走到容器位置，并判断是「到了」、「卡住了」还是「根本没开始走」。
  */
 public class BaritonePathingController {
 
-    /** Grace period before progress is judged at all, in ticks. */
+    /** 开始判断进度之前的宽限 tick 数。 */
     private static final int SETTLE_TICKS = 5;
-    /** Ticks of no movement while pathing before giving up. */
+    /** 寻路中连续多少 tick 没移动就放弃。 */
     private static final int STUCK_LIMIT_TICKS = 100;
-    /** Ticks to wait for Baritone to start pathing at all before giving up. */
+    /** 等 Baritone 开始寻路的最长 tick 数，超了就放弃。 */
     private static final int START_TIMEOUT_TICKS = 40;
-    /** Squared distance under which the player counts as not having moved (0.2 blocks). */
+    /** 小于这个距离平方就算「没动过」（0.2 格）。 */
     private static final double MOVED_EPSILON_SQ = 0.04;
 
     private final BaritoneIntegration baritone;
@@ -42,7 +41,7 @@ public class BaritonePathingController {
         baritone.cancelPathing();
     }
 
-    /** Called every tick in the PATHING state; transitions to OPENING_CONTAINER on arrival. */
+    /** PATHING 状态下每 tick 调用；到达时转入 OPENING_CONTAINER。 */
     public void checkProgress(GatherContext ctx, TaskStateMachine tsm, ContainerOpener opener) {
         if (ctx.client.player == null) return;
 
@@ -73,7 +72,7 @@ public class BaritonePathingController {
             ctx.lastPlayerPos = currentPos;
         }
 
-        // Baritone stopped pathing after actually having started: we have arrived.
+        // Baritone 确实开始过、现在又停了：说明已经到了。
         if (ctx.pathingWasActive && ctx.pathingTicks > SETTLE_TICKS && !baritone.isPathing()) {
             ctx.stuckTicks = 0;
             ctx.lastPlayerPos = Vec3.ZERO;

@@ -4,25 +4,23 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 
 /**
- * Reading values out of a {@link CompoundTag}.
+ * 从 {@link CompoundTag} 读值。
  *
- * <p>Minecraft 1.21.5 turned every {@code CompoundTag} getter into an
- * {@code Optional}-returning method:
+ * <p>1.21.5 把 {@code CompoundTag} 的全部 getter 改成返回 {@code Optional}：
  * <pre>
- *   int    getInt(String)                &rarr; Optional&lt;Integer&gt; getInt(String)
- *   String getString(String)             &rarr; Optional&lt;String&gt;  getString(String)
- *   ListTag getList(String, int type)    &rarr; Optional&lt;ListTag&gt; getList(String)
+ *   int    getInt(String)             &rarr; Optional&lt;Integer&gt; getInt(String)
+ *   String getString(String)          &rarr; Optional&lt;String&gt;  getString(String)
+ *   ListTag getList(String, int type) &rarr; Optional&lt;ListTag&gt; getList(String)
  * </pre>
- * Older versions returned a zero/empty default directly and had no way to tell
- * "absent" from "present but zero", so every accessor here takes an explicit default
- * and both branches behave identically.
+ * 老版本直接返回 0 / 空串，分不出"不存在"和"存在但是 0"，所以这里每个方法都要求显式传默认值，
+ * 两个分支行为完全一致。
  *
- * <p>The 1.21.4 branch passes the numeric NBT tag id to {@code getList} — {@code 10}
- * is {@code TAG_COMPOUND}, which is the only list element type this mod stores.
+ * <p>1.21.4 及更早的分支要给 {@code getList} 传 NBT 类型 id：{@code 10} 是 {@code TAG_COMPOUND}，
+ * 也是本模组唯一会存的列表元素类型。
  */
 public final class NbtCompat {
 
-    /** NBT tag id for {@code TAG_COMPOUND}, needed by the pre-1.21.5 {@code getList} overload. */
+    /** {@code TAG_COMPOUND} 的 NBT 类型 id，1.21.5 之前的 {@code getList} 重载需要。 */
     private static final int TAG_COMPOUND = 10;
 
     private NbtCompat() {}
@@ -67,7 +65,7 @@ public final class NbtCompat {
         //#endif
     }
 
-    /** @return the list stored under {@code key}, or an empty list when absent. */
+    /** @return {@code key} 下的列表；不存在时返回空列表。 */
     public static ListTag getCompoundList(CompoundTag tag, String key) {
         //#if MC >= 12105
         return tag.getList(key).orElse(new ListTag());
@@ -76,7 +74,7 @@ public final class NbtCompat {
         //#endif
     }
 
-    /** @return element {@code index} of {@code list} as a compound, or {@code null} if it is not one. */
+    /** @return 把 {@code list} 的第 {@code index} 项当复合标签取出；不是复合标签则 {@code null}。 */
     public static CompoundTag getCompoundAt(ListTag list, int index) {
         //#if MC >= 12105
         return list.getCompound(index).orElse(null);

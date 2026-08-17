@@ -5,8 +5,7 @@ import com.alonediamond.playercontrolpp.compat.NbtCompat;
 import net.minecraft.nbt.CompoundTag;
 
 /**
- * HP mode position keyframe — recorded every 20 ticks during recording.
- * Used during playback to correct position drift.
+ * 位置关键帧——录制期间每 20 tick 存一个，回放时用来纠正位置偏差。
  */
 public class PositionKeyframe {
     public int tick;

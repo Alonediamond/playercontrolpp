@@ -3,18 +3,17 @@ package com.alonediamond.playercontrolpp.compat;
 import net.minecraft.world.entity.player.Inventory;
 
 /**
- * The selected hotbar slot.
+ * 当前选中的快捷栏槽位。
  *
- * <p>Minecraft 1.21.5 encapsulated the public {@code Inventory.selected} field behind
- * {@code getSelectedSlot()} / {@code setSelectedSlot(int)}. The setter also gained an
- * {@code isHotbarSlot} range check, so callers must keep passing values in {@code 0..8}
- * on every version.
+ * <p>1.21.5 把 public 字段 {@code Inventory.selected} 封进了
+ * {@code getSelectedSlot()} / {@code setSelectedSlot(int)}，setter 还加了
+ * {@code isHotbarSlot} 范围检查，所以在所有版本上都必须传 {@code 0..8}。
  */
 public final class InventoryCompat {
 
     private InventoryCompat() {}
 
-    /** @return the currently selected hotbar slot, {@code 0..8}. */
+    /** @return 当前选中的快捷栏槽位，{@code 0..8}。 */
     public static int getSelectedSlot(Inventory inventory) {
         //#if MC >= 12105
         return inventory.getSelectedSlot();
@@ -24,10 +23,10 @@ public final class InventoryCompat {
     }
 
     /**
-     * Selects a hotbar slot client-side. Callers still have to sync the change to the
-     * server with a {@code ServerboundSetCarriedItemPacket}.
+     * 只改客户端的选中槽位。调用方还得发 {@code ServerboundSetCarriedItemPacket} 同步给服务端，
+     * 否则服务端仍认为玩家手持之前那个物品。
      *
-     * @param slot hotbar slot, must be in {@code 0..8}
+     * @param slot 快捷栏槽位，必须在 {@code 0..8}
      */
     public static void setSelectedSlot(Inventory inventory, int slot) {
         //#if MC >= 12105

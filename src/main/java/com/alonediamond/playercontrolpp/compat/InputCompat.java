@@ -3,31 +3,28 @@ package com.alonediamond.playercontrolpp.compat;
 import net.minecraft.client.player.LocalPlayer;
 
 /**
- * Reading the player's raw movement key state.
+ * 读玩家移动键的原始按下状态。
  *
- * <p>Minecraft 1.21.2 replaced the loose boolean fields on {@code Input} with a
- * {@code PlayerInput} record exposed as {@code input.keyPresses}:
+ * <p>1.21.2 把 {@code Input} 上散装的 boolean 字段换成了 {@code PlayerInput} record，
+ * 通过 {@code input.keyPresses} 暴露：
  * <table border="1">
  *   <tr><th>&le; 1.21.1</th><th>&ge; 1.21.2</th></tr>
  *   <tr><td>{@code input.jumping}</td><td>{@code input.keyPresses.jump()}</td></tr>
  *   <tr><td>{@code input.shiftKeyDown}</td><td>{@code input.keyPresses.shift()}</td></tr>
- *   <tr><td>(no sprint field)</td><td>{@code input.keyPresses.sprint()}</td></tr>
+ *   <tr><td>（没有疾跑字段）</td><td>{@code input.keyPresses.sprint()}</td></tr>
  * </table>
+ * 本项目最老的版本节点是 1.21.1，所以 {@code 12102} 这道门槛实际上只把 1.21.1 单独分出去。
  *
- * <p>The version nodes in this project are 1.21.1 and 1.21.4, so the {@code 12102}
- * threshold only ever selects between those two branches.
- *
- * <p><b>Sprint on 1.21.1 is not equivalent.</b> There is no sprint key state on
- * {@code Input} before 1.21.2, so the pre-1.21.2 branch falls back to the entity's
- * sprint <em>state</em> ({@code player.isSprinting()}). That is what the standalone
- * 1.21.1 build of this mod already did, so recordings behave the same as before — but
- * a recording made on 1.21.1 stores "was sprinting", not "held the sprint key".
+ * <p><b>1.21.1 的疾跑语义不等价。</b>1.21.2 之前 {@code Input} 上没有疾跑<em>按键</em>状态，
+ * 所以那条分支退化为读实体的疾跑<em>状态</em>（{@code player.isSprinting()}）。
+ * 这与本模组早先的 1.21.1 独立版行为一致，录制文件表现不变——但 1.21.1 上录到的是
+ * "当时在疾跑"，不是"按住了疾跑键"。
  */
 public final class InputCompat {
 
     private InputCompat() {}
 
-    /** @return whether the jump key is held this tick. */
+    /** @return 本 tick 是否按住跳跃键。 */
     public static boolean isJumping(LocalPlayer player) {
         //#if MC >= 12102
         return player.input.keyPresses.jump();
@@ -36,7 +33,7 @@ public final class InputCompat {
         //#endif
     }
 
-    /** @return whether the sneak key is held this tick. */
+    /** @return 本 tick 是否按住潜行键。 */
     public static boolean isSneaking(LocalPlayer player) {
         //#if MC >= 12102
         return player.input.keyPresses.shift();
@@ -45,10 +42,7 @@ public final class InputCompat {
         //#endif
     }
 
-    /**
-     * @return whether the sprint key is held this tick — or, on 1.21.1, whether the
-     *         player is currently sprinting (see the class javadoc).
-     */
+    /** @return 本 tick 是否按住疾跑键；1.21.1 上是"玩家是否正在疾跑"（见类注释）。 */
     public static boolean isSprinting(LocalPlayer player) {
         //#if MC >= 12102
         return player.input.keyPresses.sprint();

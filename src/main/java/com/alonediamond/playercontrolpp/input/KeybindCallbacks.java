@@ -46,9 +46,8 @@ public class KeybindCallbacks {
         MARK_CONTAINER.getKeybind().setCallback(new MarkContainerCallback());
         ONE_CLICK_BUILD_RESTOCK.getKeybind().setCallback(new OneClickBuildRestockCallback());
 
-        // Route hotkey callbacks are attached by RouteManager when a route is created or loaded,
-        // which is the only moment they exist. There used to be a second loop here as well, but
-        // it ran before loadRoutes() and so always iterated an empty list.
+        // 路径热键的回调由 RouteManager 在路径被创建或加载时挂上——那是它们唯一存在的时刻。
+        // 这里早先还有第二个循环，但它跑在 loadRoutes() 之前，遍历的永远是空列表。
     }
 
     private static class AutoForwardCallback implements IHotkeyCallback {
@@ -108,10 +107,10 @@ public class KeybindCallbacks {
                 RecordingFile rf = rec.stopRecording();
                 RecordingManager.getInstance().addRecording(rf);
             } else {
-                // Prevent recording during playback, including while it is still loading
+                // 回放期间（含还在加载）禁止开始新录制
                 if (RecordingManager.getInstance().getPlayer().isBusy()) return false;
                 rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
-                ScreenCompat.setScreen(client, null); // exit all GUIs
+                ScreenCompat.setScreen(client, null); // 退出所有界面
             }
             return true;
         }

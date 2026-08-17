@@ -10,27 +10,23 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The single writer of simulated key state.
+ * 模拟按键的唯一写入点。
  *
- * <p>Several features need to hold movement or click keys down: input playback, auto-forward,
- * route following, container opening, shulker-box mining. Before this class existed each of
- * them called {@code KeyMapping.setDown()} directly, so whichever ran last won — releasing a
- * key another feature still needed, or (in {@code ContainerOpener}) pressing a key that nothing
- * ever released, which left right-click stuck on.
+ * <p>输入回放、自动前进、路径跟随、容器开启、潜影盒挖掘都需要按住移动键或点击键。
+ * 各自直接调 {@code KeyMapping.setDown()} 的话后写的会覆盖前写的——别人还要用的键被松开，
+ * 或者按下去再没人松（早期 {@code ContainerOpener} 就把右键按死过）。
  *
- * <p>Now features only declare intent. Every key is reference-counted by owner, and
- * {@link #apply()} — called once at the end of the client tick — is the only place that touches
- * {@code setDown}. A key stays down while at least one owner wants it and is released on the
- * tick the last owner lets go.
+ * <p>现在功能只<b>声明意图</b>：按 owner 引用计数，{@link #apply()} 是唯一碰 {@code setDown}
+ * 的地方，每 tick 末尾在所有功能 tick 完之后跑一次。只要还有一个 owner 要这个键就保持按下，
+ * 最后一个 owner 松手的那一 tick 才释放。
  *
- * <p>Keys nobody has ever declared are never written to, so the player's real input is
- * untouched. Client-thread only; no synchronization.
+ * <p>从未被声明过的键永不写入，玩家真实输入不受影响。仅客户端线程使用，无需同步。
  */
 public final class SimulatedInput {
 
-    /** key -&gt; owners currently requesting it. Identity-keyed: KeyMappings are singletons. */
+    /** 键 → 当前要求它按下的 owner 集合。KeyMapping 是单例，所以按引用哈希。 */
     private static final Map<KeyMapping, Set<Object>> HOLDERS = new IdentityHashMap<>();
-    /** Keys this class has pressed and not yet released — all {@link #apply()} may clear. */
+    /** 本类按下且还没松开的键——只有 {@link #apply()} 能清。 */
     private static final Set<KeyMapping> PRESSED = newIdentitySet();
 
     private SimulatedInput() {}
@@ -39,12 +35,12 @@ public final class SimulatedInput {
         return Collections.newSetFromMap(new IdentityHashMap<>());
     }
 
-    /** Declare that {@code owner} needs {@code key} held down. Idempotent. */
+    /** 声明 {@code owner} 需要按住 {@code key}。可重复调用。 */
     public static void hold(KeyMapping key, Object owner) {
         HOLDERS.computeIfAbsent(key, k -> newIdentitySet()).add(owner);
     }
 
-    /** Withdraw {@code owner}'s request for {@code key}. Other owners keep it down. */
+    /** 撤销 {@code owner} 对 {@code key} 的要求；其他 owner 仍可让它保持按下。 */
     public static void release(KeyMapping key, Object owner) {
         Set<Object> owners = HOLDERS.get(key);
         if (owners != null && owners.remove(owner) && owners.isEmpty()) {
@@ -52,10 +48,7 @@ public final class SimulatedInput {
         }
     }
 
-    /**
-     * Convenience for per-tick declarations: callers that recompute a boolean every tick
-     * (playback, auto-forward) pass it straight through instead of branching.
-     */
+    /** 每 tick 重算布尔值的调用方（回放、自动前进）直接传结果，不用自己分支。 */
     public static void set(KeyMapping key, Object owner, boolean held) {
         if (held) {
             hold(key, owner);
@@ -64,10 +57,7 @@ public final class SimulatedInput {
         }
     }
 
-    /**
-     * Withdraw every request made by {@code owner}. Call this when a feature stops, aborts or
-     * fails — it makes cleanup a single line and cannot leave a key behind.
-     */
+    /** 撤销 {@code owner} 的全部要求。功能停止/中断/失败时调一行即可，不会留下卡键。 */
     public static void releaseAll(Object owner) {
         List<KeyMapping> emptied = null;
         for (Map.Entry<KeyMapping, Set<Object>> entry : HOLDERS.entrySet()) {
@@ -82,20 +72,17 @@ public final class SimulatedInput {
         }
     }
 
-    /** Drop all requests from all owners. Used when the player leaves the world. */
+    /** 丢弃所有 owner 的所有要求。玩家离开世界时用。 */
     public static void clear() {
         HOLDERS.clear();
     }
 
-    /** @return whether any owner currently wants {@code key} held. */
+    /** @return 当前是否有 owner 要求按住 {@code key}。 */
     public static boolean isHeld(KeyMapping key) {
         return HOLDERS.containsKey(key);
     }
 
-    /**
-     * Reconcile the declared state onto the actual {@link KeyMapping}s. Must run once per client
-     * tick, after every feature has ticked.
-     */
+    /** 把声明状态落到真正的 {@link KeyMapping} 上。每 tick 一次，在所有功能 tick 完之后。 */
     public static void apply() {
         for (KeyMapping key : HOLDERS.keySet()) {
             key.setDown(true);

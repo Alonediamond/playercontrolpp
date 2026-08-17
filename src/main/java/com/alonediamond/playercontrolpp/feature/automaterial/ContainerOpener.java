@@ -19,36 +19,35 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Opens containers: aiming, retries, and falling back to adjacent blocks when the target
- * turns out to be the wrong half of a double chest.
+ * 打开容器：瞄准、重试，以及在目标其实是双箱另一半时回退去试相邻方块。
  */
 public class ContainerOpener {
 
-    /** Attempts at the same block before moving on to its neighbours. */
+    /** 同一个方块尝试几次后才去试它的邻居。 */
     private static final int MAX_OPEN_ATTEMPTS = 3;
-    /** On which attempt to try jumping first, in case the line of sight is blocked. */
+    /** 第几次尝试时先跳一下，以防视线被挡。 */
     private static final int JUMP_ON_ATTEMPT = 2;
-    /** Distinct blocks tried before giving up on this container position entirely. */
+    /** 一个容器坐标上总共试过几个不同方块后彻底放弃。 */
     private static final int MAX_CHEST_RETRIES = 3;
-    /** Ticks to wait for the container screen after clicking. */
+    /** 点击后等容器界面的 tick 数。 */
     private static final int OPEN_WAIT_TICKS = 10;
-    /** Shorter wait used by the right-click fallback, which reacts faster. */
+    /** 右键回退路径用的较短等待，它反应更快。 */
     private static final int FALLBACK_WAIT_TICKS = 6;
 
-    /** Open the container at {@code target}. Entry point from the OPENING_CONTAINER transition. */
+    /** 打开 {@code target} 处的容器。OPENING_CONTAINER 转换的入口。 */
     public void openContainerAt(BlockPos target, GatherContext ctx) {
         openContainerWithRetry(target, false, 0, ctx);
     }
 
     /**
-     * Opens a container by sending an explicit BlockHitResult through {@code useItemOn()},
-     * bypassing client-side raycasting so an adjacent container cannot steal the click.
+     * 通过 {@code useItemOn()} 发送一个明确的 BlockHitResult 来开容器，绕过客户端射线检测，
+     * 相邻的容器就抢不走这次点击。
      */
     public void openContainerWithRetry(BlockPos target, boolean jumpBeforeClick, int attemptNumber, GatherContext ctx) {
         ctx.currentContainerTarget = target;
         ctx.openAttemptCount = attemptNumber;
 
-        // Any key held by a previous attempt's fallback path is stale now.
+        // 上一次尝试的回退路径按下的键现在已经过期了。
         releaseKeys();
 
         if (jumpBeforeClick && ctx.client.player != null) {
@@ -81,28 +80,26 @@ public class ContainerOpener {
             ctx.containerJustOpened = true;
 
         } catch (Exception e) {
-            // useItemOn failed outright — fall back to letting vanilla's own raycast do it by
-            // holding right-click. The hold is registered with SimulatedInput so it is released
-            // when this opener stops, instead of leaving right-click stuck on.
+            // useItemOn 直接失败了——退回让原版自己的射线检测来做，办法是按住右键。
+            // 这个按住登记在 SimulatedInput 上，opener 停止时会被释放，不会把右键按死。
             SimulatedInput.hold(ctx.client.options.keyUse, this);
             ctx.transferCooldown = FALLBACK_WAIT_TICKS;
             ctx.containerJustOpened = true;
         }
     }
 
-    /** Drop every key this opener is holding. Called from the state machine's terminal states. */
+    /** 松开本 opener 按住的所有键。由状态机的终态调用。 */
     public void releaseKeys() {
         SimulatedInput.releaseAll(this);
     }
 
     /**
-     * Runs when the open cooldown expires: did a container screen appear, and does it hold
-     * anything we still need?
+     * 开容器冷却结束时运行：容器界面出现了吗？里面有我们还需要的东西吗？
      */
     public void checkOpenResult(GatherContext ctx, TaskStateMachine tsm, BaritonePathingController pathing) {
         Minecraft mc = ctx.client;
 
-        // The click has resolved one way or the other; stop holding right-click either way.
+        // 点击已经有了结果（成或不成），两种情况都不再按住右键。
         releaseKeys();
 
         if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>) {
@@ -126,7 +123,7 @@ public class ContainerOpener {
         }
     }
 
-    /** Called when the current target will not open, or opened but held nothing useful. */
+    /** 当前目标打不开、或打开了但没有有用的东西时调用。 */
     public void retryAdjacentOrFail(GatherContext ctx, TaskStateMachine tsm,
                                      BaritonePathingController pathing) {
         if (ctx.adjacentContainerTargets == null) {
@@ -171,7 +168,7 @@ public class ContainerOpener {
         }
     }
 
-    /** Close whatever container screen is open. */
+    /** 关掉当前打开的容器界面。 */
     public void closeAnyContainer(Minecraft mc) {
         if (mc.player != null && ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
             mc.player.closeContainer();
@@ -183,7 +180,7 @@ public class ContainerOpener {
         return nearestFace(ctx.client.player.getEyePosition(), target);
     }
 
-    /** @return the face of {@code target} pointing most directly at {@code eye}. */
+    /** @return {@code target} 上最正对 {@code eye} 的那个面。 */
     static Direction nearestFace(Vec3 eye, BlockPos target) {
         Vec3 center = Vec3.atCenterOf(target);
         double dx = eye.x - center.x;
@@ -199,7 +196,7 @@ public class ContainerOpener {
         return dz > 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
-    /** The target itself plus its six neighbours — covers double chests and slight mis-aims. */
+    /** 目标本身加它的六个邻居——覆盖双箱和轻微瞄偏。 */
     private List<BlockPos> getAdjacentContainerTargets(BlockPos target) {
         List<BlockPos> adj = new ArrayList<>(7);
         adj.add(target);

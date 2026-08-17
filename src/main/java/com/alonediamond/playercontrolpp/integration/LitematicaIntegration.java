@@ -19,13 +19,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Litematica integration, entirely through reflection so the mod stays optional.
+ * Litematica 联动，全部走反射，模组保持可选。
  *
- * <p>Every {@link Method} this class resolves is cached. That matters because
- * {@code getPlacementBounds()} sits in a per-tick scan path, and the previous version probed four
- * candidate method names by calling {@code getMethod} on each and catching the failures —
- * building and filling up to three exception stack traces every tick. Resolution now walks
- * {@code getMethods()} once and throws nothing.
+ * <p>本类解析出的每个 {@link Method} 都会缓存。这很重要：{@code getPlacementBounds()} 处在
+ * 每 tick 的扫描路径上，而早先的实现是对四个候选方法名逐个 {@code getMethod} 并吞掉失败——
+ * 每 tick 构造并填充最多三个异常栈。现在改成把 {@code getMethods()} 走一遍，一个异常都不抛。
  */
 public class LitematicaIntegration implements ModIntegration {
 
@@ -33,8 +31,8 @@ public class LitematicaIntegration implements ModIntegration {
     private static final String WORLD_HANDLER = "fi.dy.masa.litematica.world.SchematicWorldHandler";
 
     /**
-     * Litematica has renamed this getter across releases and there is no way to know which name
-     * a given build carries, so all known spellings are accepted.
+     * Litematica 在不同版本里给这个 getter 改过名，而且无法预知某个构建用的是哪个名字，
+     * 所以所有已知拼写都接受。
      */
     private static final Set<String> PLACEMENTS_GETTERS = Set.of(
             "getAllSchematicPlacements",
@@ -46,8 +44,7 @@ public class LitematicaIntegration implements ModIntegration {
 
     private boolean loaded;
 
-    // Resolved lazily on first use, then reused. Cleared if the owning class ever changes,
-    // which in practice only happens across a Litematica hot-swap during development.
+    // 首次使用时惰性解析，之后复用。宿主类变了才清空——实践中只在开发期热替换 Litematica 时发生。
     private Class<?> dataManagerClass;
     private Method getPlacementManagerMethod;
     private Method getMaterialListMethod;
@@ -80,7 +77,7 @@ public class LitematicaIntegration implements ModIntegration {
         loaded = FabricLoader.getInstance().isModLoaded("litematica");
     }
 
-    /** World-space bounding box of one schematic placement. */
+    /** 一个投影 placement 的世界坐标外框。 */
     public record PlacementBounds(BlockPos origin, int sizeX, int sizeY, int sizeZ) {
         public boolean contains(BlockPos pos) {
             return pos.getX() >= origin.getX() && pos.getX() < origin.getX() + sizeX
@@ -89,7 +86,7 @@ public class LitematicaIntegration implements ModIntegration {
         }
     }
 
-    /** Inclusive world-space bounds of one box in Litematica's current area selection. */
+    /** Litematica 当前区域选区里一个盒子的世界坐标范围（闭区间）。 */
     public record SelectionBounds(BlockPos min, BlockPos max) {
         public long volume() {
             long sizeX = (long) max.getX() - min.getX() + 1L;
@@ -104,11 +101,10 @@ public class LitematicaIntegration implements ModIntegration {
     }
 
     /**
-     * Read every box from Litematica's current area selection.
+     * 读出 Litematica 当前区域选区的所有盒子。
      *
-     * <p>This intentionally does not use schematic placement bounds. The printer inventory
-     * feature operates on the player's current area selection and reads real-world blocks inside
-     * it, matching Litematica Printer's {@code Printer.siftBlock()} behavior.
+     * <p>刻意不用投影 placement 的范围：容器缓存功能操作的是玩家当前的区域选区，
+     * 读的是选区内真实世界的方块，与 Litematica Printer 的 {@code Printer.siftBlock()} 一致。
      */
     public List<SelectionBounds> getCurrentSelectionBounds() {
         if (!loaded) return Collections.emptyList();
@@ -192,14 +188,14 @@ public class LitematicaIntegration implements ModIntegration {
         }
     }
 
-    /** @return whether at least one schematic placement is loaded. */
+    /** @return 是否至少加载了一个投影 placement。 */
     public boolean isSchematicLoaded() {
         return !getAllPlacements().isEmpty();
     }
 
     /**
-     * @return Litematica's schematic world (a {@code BlockGetter}) for reading schematic block
-     *         states, or {@code null} when no schematic is loaded.
+     * @return Litematica 的投影世界（一个 {@code BlockGetter}），用来读投影方块状态；
+     *         没加载投影时返回 {@code null}。
      */
     public Object getSchematicWorld() {
         if (!loaded) return null;
@@ -213,7 +209,7 @@ public class LitematicaIntegration implements ModIntegration {
         }
     }
 
-    /** @return every loaded {@code SchematicPlacement}, or an empty list. */
+    /** @return 所有已加载的 {@code SchematicPlacement}；没有则空列表。 */
     public List<?> getAllPlacements() {
         if (!loaded) return Collections.emptyList();
         try {
@@ -231,8 +227,8 @@ public class LitematicaIntegration implements ModIntegration {
     }
 
     /**
-     * @return the world-space bounds of every loaded placement. Empty when Litematica is absent,
-     *         nothing is loaded, or its internals no longer match what this code expects.
+     * @return 所有已加载 placement 的世界坐标范围。Litematica 不在、没加载投影、
+     *         或它的内部结构不再符合本代码预期时返回空。
      */
     public List<PlacementBounds> getPlacementBounds() {
         List<?> placements = getAllPlacements();
@@ -271,12 +267,12 @@ public class LitematicaIntegration implements ModIntegration {
             if (size == null) return null;
             return new PlacementBounds(origin, size.getX(), size.getY(), size.getZ());
         } catch (Exception e) {
-            // One malformed placement should not blank out the others.
+            // 一个畸形的 placement 不该把其余的一起抹掉。
             return null;
         }
     }
 
-    /** All DataManager accessors are static — there is no getInstance(). */
+    /** DataManager 的访问器都是静态的——没有 getInstance()。 */
     private Class<?> dataManagerClass() throws ClassNotFoundException {
         if (dataManagerClass == null) {
             dataManagerClass = Class.forName(DATA_MANAGER);
@@ -306,8 +302,8 @@ public class LitematicaIntegration implements ModIntegration {
     }
 
     /**
-     * Resolve a zero-argument method by trying several names, without the cost of a thrown
-     * {@code NoSuchMethodException} per miss.
+     * 试若干个名字来解析一个无参方法，且不为每次未命中付一个
+     * {@code NoSuchMethodException} 的代价。
      */
     private static Method findNoArgMethod(Class<?> owner, Set<String> candidateNames) {
         for (Method method : owner.getMethods()) {
@@ -318,7 +314,7 @@ public class LitematicaIntegration implements ModIntegration {
         return null;
     }
 
-    /** @return Litematica's current MaterialList, or {@code null}. */
+    /** @return Litematica 当前的 MaterialList；没有则 {@code null}。 */
     public Object getMaterialList() {
         if (!loaded) return null;
         try {
@@ -332,13 +328,12 @@ public class LitematicaIntegration implements ModIntegration {
     }
 
     /**
-     * @return Litematica's internal ignored-entries set, or an empty set when it cannot be read.
+     * @return Litematica 内部的「已忽略条目」集合；读不到时返回空集。
      *
-     * <p>Needs {@code getDeclaredField} + {@code setAccessible} because the field is
-     * {@code protected} in MaterialListBase from 1.21.11 onwards. It also has to walk up the
-     * hierarchy: {@code getMaterialList()} hands back a {@code MaterialListPlacement} or
-     * {@code MaterialListSchematic}, and {@code getDeclaredField} does not look at superclasses,
-     * so asking the concrete class alone always missed and quietly returned nothing.
+     * <p>需要 {@code getDeclaredField} + {@code setAccessible}，因为 1.21.11 起该字段在
+     * MaterialListBase 里是 {@code protected}。还必须沿继承链往上找：{@code getMaterialList()}
+     * 返回的是 {@code MaterialListPlacement} 或 {@code MaterialListSchematic}，
+     * 而 {@code getDeclaredField} 不看父类，只问具体类必然找不到并静默返回空。
      */
     @SuppressWarnings("unchecked")
     public Set<Object> getIgnoredSet(Object materialList) {
@@ -349,7 +344,7 @@ public class LitematicaIntegration implements ModIntegration {
                 Object value = field.get(materialList);
                 return value instanceof Set<?> set ? (Set<Object>) set : Collections.emptySet();
             } catch (NoSuchFieldException ignored) {
-                // Declared further up; keep walking.
+                // 声明在更上层；继续往上找。
             } catch (Exception e) {
                 return Collections.emptySet();
             }
@@ -357,7 +352,7 @@ public class LitematicaIntegration implements ModIntegration {
         return Collections.emptySet();
     }
 
-    /** Move the render layer, exactly as Litematica's own PageUp/PageDown hotkeys do. */
+    /** 移动渲染层，行为与 Litematica 自己的 PageUp/PageDown 热键一致。 */
     public boolean incrementLayer(int amount) {
         if (amount == 0 || !loaded) return false;
 

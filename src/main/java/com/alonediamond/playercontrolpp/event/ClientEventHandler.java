@@ -14,16 +14,14 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 
 /**
- * Bridges malilib's tick and world-load events to {@link FeatureRegistry}, and turns the movement
- * features' desired input into held keys.
+ * 把 malilib 的 tick 与世界加载事件桥接到 {@link FeatureRegistry}，并把移动类功能想要的输入落成按键。
  *
- * <p>Key presses are declared through {@link SimulatedInput} and committed once, at the end of the
- * tick, after every feature has run — so container opening and shulker mining cannot fight
- * playback over the same key.
+ * <p>按键都经 {@link SimulatedInput} 声明，在所有功能跑完后的 tick 末尾统一提交一次——
+ * 这样开容器、挖潜影盒就不会和回放抢同一个键。
  */
 public class ClientEventHandler {
 
-    /** Owner token for the holds this class declares. */
+    /** 本类声明的按键归属令牌。 */
     private static final Object MOVEMENT_OWNER = new Object();
 
     public static void register() {
@@ -35,8 +33,7 @@ public class ClientEventHandler {
         @Override
         public void onWorldLoadPre(ClientLevel world1, ClientLevel world2, Minecraft client) {
             FeatureRegistry.notifyWorldChange();
-            // No feature is simulating input across a world change; drop every hold so nothing
-            // carries a pressed key into the new world.
+            // 跨世界不会有功能还在模拟输入，全部清掉，别把按下的键带进新世界。
             SimulatedInput.clear();
             SimulatedInput.apply();
         }
@@ -60,16 +57,15 @@ public class ClientEventHandler {
                 playback.applyYaw(mc);
             }
 
-            // The single point where declared state reaches the KeyMappings.
+            // 声明状态到达 KeyMapping 的唯一出口。
             SimulatedInput.apply();
         }
 
         /**
-         * Re-declare, from scratch, every key the movement features want this tick.
+         * 每 tick 从零重新声明移动类功能要的键。
          *
-         * <p>Starting from a clean slate matters: the playback branch touches nine keys and the
-         * auto-forward branch only two, so leaving the previous tick's declarations in place would
-         * keep strafe or sneak held after playback ended while auto-forward was still on.
+         * <p>必须从零开始：回放分支管九个键，自动前进分支只管两个。留着上一 tick 的声明，
+         * 回放结束而自动前进还开着时，横移或潜行就会一直按住。
          */
         private void declareMovementKeys(Minecraft mc, InputPlayer playback) {
             SimulatedInput.releaseAll(MOVEMENT_OWNER);

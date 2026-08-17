@@ -1,6 +1,6 @@
 # PlayerControl++ — 多版本构建工程
 
-PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构建 **5 个** Minecraft 版本的模组 jar。
+PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构建 **7 个** Minecraft 版本的模组 jar。
 
 模组功能与设计说明详见 [PlayerControl++模组详细介绍.md](PlayerControl++模组详细介绍.md)。
 
@@ -8,11 +8,17 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 
 | 子项目 | Minecraft | Java | 映射 | malilib | ModMenu |
 |--------|-----------|------|------|---------|---------|
-| `:1.21.1`  | 1.21 – 1.21.1 | 21 | Mojang + Parchment | 0.21.10 | 11.0.4 |
-| `:1.21.4`  | 1.21.4        | 21 | Mojang + Parchment | 0.23.5  | 13.0.3 |
-| `:1.21.11` | 1.21.11       | 21 | Mojang + Parchment | 0.27.12 | 17.0.0 |
-| `:26.1.2`  | 26.1 – 26.1.2 | 25 | Mojang（未混淆）    | 0.28.6  | 18.0.0-beta.1 |
-| `:26.2`    | 26.2          | 25 | Mojang（未混淆）    | 0.29.3  | 20.0.1 |
+| `:1.21.1`  | 1.21 – 1.21.1   | 21 | Mojang + Parchment | 0.21.10 | 11.0.4 |
+| `:1.21.4`  | 1.21.4          | 21 | Mojang + Parchment | 0.23.5  | 13.0.3 |
+| `:1.21.6`  | 1.21.6 – 1.21.7 | 21 | Mojang             | 0.25.7  | 15.0.2 |
+| `:1.21.8`  | 1.21.8          | 21 | Mojang             | 0.25.7  | 15.0.2 |
+| `:1.21.11` | 1.21.11         | 21 | Mojang + Parchment | 0.27.12 | 17.0.0 |
+| `:26.1.2`  | 26.1 – 26.1.2   | 25 | Mojang（未混淆）    | 0.28.9  | 18.0.0-beta.1 |
+| `:26.2`    | 26.2            | 25 | Mojang（未混淆）    | 0.29.3  | 20.0.1 |
+
+> `1.21.6` 与 `1.21.8` 的预处理产物逐字节相同，malilib / ModMenu 也是同一个 jar 覆盖
+> 1.21.6–1.21.8；两个子项目只是为了各自声明 `game_versions` 与 `minecraft_dependency`。
+> Parchment 没有 1.21.6–1.21.8 的发布。
 
 **主工程（mainProject）= `26.2`**：`src/main/java` 里的源码就是 26.2 版本的源码，
 其余版本由预处理器在 `versions/<mc>/build/preprocessed/` 下自动生成。**只编辑 `src/main/`。**
@@ -20,7 +26,7 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 ## 构建
 
 ```bash
-# 构建全部 5 个版本，并把 jar 汇总到 build/libs/
+# 构建全部 7 个版本，并把 jar 汇总到 build/libs/
 ./gradlew buildAndGather
 
 # 只构建单个版本
@@ -34,14 +40,16 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 
 ```
 build/libs/
-├── PlayerControlpp-v1.5-mc1.21.1-SNAPSHOT.jar
-├── PlayerControlpp-v1.5-mc1.21.4-SNAPSHOT.jar
-├── PlayerControlpp-v1.5-mc1.21.11-SNAPSHOT.jar
-├── PlayerControlpp-v1.5-mc26.1.2-SNAPSHOT.jar
-└── PlayerControlpp-v1.5-mc26.2-SNAPSHOT.jar
+├── PlayerControlpp-v1.6-mc1.21.1.jar
+├── PlayerControlpp-v1.6-mc1.21.4.jar
+├── PlayerControlpp-v1.6-mc1.21.6.jar
+├── PlayerControlpp-v1.6-mc1.21.8.jar
+├── PlayerControlpp-v1.6-mc1.21.11.jar
+├── PlayerControlpp-v1.6-mc26.1.2.jar
+└── PlayerControlpp-v1.6-mc26.2.jar
 ```
 
-设置环境变量 `BUILD_RELEASE=true` 可去掉 `-SNAPSHOT` 后缀。
+环境变量 `BUILD_RELEASE=false` 会给版本号加上 `-SNAPSHOT` / `+build.<N>` 后缀。
 
 ## 工程结构
 
@@ -99,11 +107,11 @@ java -cp /tmp/icon MakeIcon src/main/resources/assets/playercontrolpp/icon.png
 | `NbtCompat` | `CompoundTag` 全部 getter 改为返回 `Optional` | 1.21.5 |
 | `InventoryCompat` | `Inventory.selected` 字段 → `getSelectedSlot()` / `setSelectedSlot()` | 1.21.5 |
 | `InputCompat` | `Input.jumping` / `shiftKeyDown` 字段 → `input.keyPresses` (`PlayerInput` record) | 1.21.2 |
-| `MaLiLibCompat` | malilib `JsonUtils` 移包到 `util.data.json` | 1.21.11 (malilib 0.27) |
+| `MaLiLibCompat` | malilib `JsonUtils` 移包 + `getConfigDirectory()` 返回类型 | 1.21.11 (malilib 0.27) |
 
 兼容层没有覆盖、也不需要覆盖的一处：`Inventory.SELECTION_SIZE`（快捷栏大小）
 从 1.21.4 起才存在，1.21.1 没有，所以用自有常量 `PlayerUtil.HOTBAR_SIZE`；
-`Inventory.INVENTORY_SIZE` 五个版本都有，直接用官方常量。
+`Inventory.INVENTORY_SIZE` 所有版本都有，直接用官方常量。
 
 另外三处差异直接写在业务代码里（因为要拆分方法签名，无法藏进工具类）：
 
@@ -134,7 +142,12 @@ this.delegate.text(font, text, x, y, color, shadow);     // 生效分支：正�
 2. `build.gradle` 的 `preprocess` 块里 `createNode(...)` 并 `link` 到相邻节点；
 3. 建 `versions/<mc>/gradle.properties`（照抄邻近版本改 MC 版本号与依赖）；
 4. 把该版本的 malilib / ModMenu jar 放进 `libs/`，并在上一步的 properties 里填 `malilib_jar` / `modmenu_jar`；
-5. `./gradlew :<mc>:compileJava`，按报错逐个在 `compat/` 里补桥接。
+5. `./gradlew :<mc>:compileJava`，按报错逐个在 `compat/` 里补桥接；
+6. `diff -rq versions/<新>/build/preprocessed/main versions/<邻近>/build/preprocessed/main`
+   核对差异是否只落在预期的兼容类上。
+
+> malilib / ModMenu 1.21.4 之后的版本不在 masa 的 maven 上，走 Modrinth API：
+> `https://api.modrinth.com/v2/project/{malilib,modmenu}/version?loaders=["fabric"]&game_versions=["<mc>"]`。
 
 ## 致谢
 

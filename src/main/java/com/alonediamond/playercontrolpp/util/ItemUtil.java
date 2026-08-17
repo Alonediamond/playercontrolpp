@@ -13,19 +13,17 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Item predicates shared by the gathering, storage and water-fill features. Each of these was
- * previously copy-pasted into three or four classes.
+ * 备货、存盒、填水三个功能共用的物品判定。这些方法早先在三四个类里各抄了一份。
  */
 public final class ItemUtil {
 
     private ItemUtil() {}
 
     /**
-     * @return whether this stack is a shulker box of any colour.
+     * @return 是否为任意颜色的潜影盒。
      *
-     * <p>Checks the block type rather than matching {@code "shulker_box"} against the registry
-     * path. Same answer for vanilla, no string allocation per call, and it does not depend on a
-     * modded shulker box happening to be named conveniently.
+     * <p>判方块类型而不是拿注册名去匹配 {@code "shulker_box"}：原版结果一致，
+     * 每次调用不分配字符串，也不指望模组潜影盒刚好取了个方便的名字。
      */
     public static boolean isShulkerBox(ItemStack stack) {
         return stack.getItem() instanceof BlockItem blockItem
@@ -33,27 +31,23 @@ public final class ItemUtil {
     }
 
     /**
-     * @return whether this stack is the given item.
+     * @return 这个物品堆是否就是该物品。
      *
-     * <p>Plain identity: {@link Item}s are registry singletons, so two references are the same
-     * item exactly when they are the same object. (The previous version compared registry keys as
-     * a fallback, which cost two lookups per call in per-tick counting loops and would report two
-     * <em>unregistered</em> items as equal, since both resolve to the default key.)
+     * <p>直接比引用：{@link Item} 是注册表单例，同一物品必然同一对象。
+     * （早先还回退比较注册名，每次调用多两次查表，而且会把两个<em>未注册</em>物品判为相等，
+     * 因为它们都解析到默认 key。）
      */
     public static boolean is(ItemStack stack, Item item) {
         return stack.getItem() == item;
     }
 
-    /**
-     * @return the non-empty stacks stored inside a shulker box, or an empty list if it has no
-     *         container component. Reflects the client's last-synced copy of the contents.
-     */
+    /** @return 潜影盒里的非空物品堆；没有容器组件时返回空表。读的是客户端最后同步到的内容。 */
     public static List<ItemStack> contentsOf(ItemStack shulkerBox) {
         ItemContainerContents contents = shulkerBox.get(DataComponents.CONTAINER);
         return contents == null ? Collections.emptyList() : ContainerContentsCompat.nonEmptyItems(contents);
     }
 
-    /** @return how many of {@code item} are inside this shulker box. */
+    /** @return 该潜影盒里有多少个 {@code item}。 */
     public static int countInside(ItemStack shulkerBox, Item item) {
         int count = 0;
         for (ItemStack inner : contentsOf(shulkerBox)) {
@@ -64,7 +58,7 @@ public final class ItemUtil {
         return count;
     }
 
-    /** @return whether this shulker box holds at least one {@code item}. */
+    /** @return 该潜影盒里是否至少有一个 {@code item}。 */
     public static boolean containsInside(ItemStack shulkerBox, Item item) {
         for (ItemStack inner : contentsOf(shulkerBox)) {
             if (is(inner, item)) return true;

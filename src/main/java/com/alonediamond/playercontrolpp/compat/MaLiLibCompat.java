@@ -13,36 +13,32 @@ import fi.dy.masa.malilib.util.data.json.JsonUtils;
 //#endif
 
 /**
- * malilib helpers that changed shape between the malilib versions this mod targets.
+ * 在本模组覆盖的 malilib 版本之间改过形状的几个 malilib 工具方法。
  *
- * <p>Two independent changes landed in malilib 0.27.x (shipped alongside MC 1.21.11):
+ * <p>malilib 0.27.x（随 MC 1.21.11 发布）里有两处互不相关的改动：
  * <ul>
- *   <li>{@code FileUtils.getConfigDirectory()} changed return type {@code File} &rarr;
- *       {@code Path}.</li>
- *   <li>{@code JsonUtils} moved from {@code fi.dy.masa.malilib.util} to
- *       {@code fi.dy.masa.malilib.util.data.json}, and its {@code File}-taking overloads
- *       became {@code Path}-taking ones.</li>
+ *   <li>{@code FileUtils.getConfigDirectory()} 返回类型 {@code File} &rarr; {@code Path}；</li>
+ *   <li>{@code JsonUtils} 从 {@code fi.dy.masa.malilib.util} 移到
+ *       {@code fi.dy.masa.malilib.util.data.json}，吃 {@code File} 的重载改成吃 {@code Path}。</li>
  * </ul>
  *
- * <p>Both malilib generations do expose a common {@code *AsPath} method pair, which would
- * avoid the {@code //#if} entirely — but those are annotated
- * {@code @Deprecated(forRemoval = true)} in 0.29.3, so this class deliberately calls the
- * non-deprecated method on each version instead.
+ * <p>两代 malilib 其实都有一对通用的 {@code *AsPath} 方法，用它就不需要 {@code //#if}——
+ * 但那些方法在 0.29.3 里被标了 {@code @Deprecated(forRemoval = true)}，
+ * 所以这里刻意在每个版本上都调该版本里没被废弃的那个。
  */
 public final class MaLiLibCompat {
 
     private MaLiLibCompat() {}
 
     /**
-     * @return malilib's {@code .minecraft/config} directory.
+     * @return malilib 的 {@code .minecraft/config} 目录。
      *
-     * <p>Which of the two accessors is the deprecated one flips between malilib
-     * generations, so each branch picks the non-deprecated method for its own version:
+     * <p>两个访问器里"哪个被废弃"在两代 malilib 之间是反的，所以各分支各选自己版本里没废弃的：
      * <ul>
-     *   <li>0.21.10 / 0.23.5 — {@code getConfigDirectory()} returns {@code File} and is
-     *       deprecated-for-removal; {@code getConfigDirectoryAsPath()} is the good one.</li>
-     *   <li>0.27.12+ — {@code getConfigDirectory()} returns {@code Path} and is the good
-     *       one; {@code getConfigDirectoryAsPath()} is now the deprecated alias.</li>
+     *   <li>0.21.10 / 0.23.5 / 0.25.7 —— {@code getConfigDirectory()} 返回 {@code File} 且已废弃，
+     *       该用 {@code getConfigDirectoryAsPath()}；</li>
+     *   <li>0.27.12+ —— {@code getConfigDirectory()} 返回 {@code Path} 且是正主，
+     *       {@code getConfigDirectoryAsPath()} 变成废弃别名。</li>
      * </ul>
      */
     public static Path configDirectory() {
@@ -53,7 +49,7 @@ public final class MaLiLibCompat {
         //#endif
     }
 
-    /** @return the parsed JSON tree, or {@code null} when the file is missing or malformed. */
+    /** @return 解析出的 JSON 树；文件不存在或格式错误时返回 {@code null}。 */
     public static JsonElement parseJsonFile(Path path) {
         //#if MC >= 12111
         return JsonUtils.parseJsonFile(path);
@@ -62,7 +58,7 @@ public final class MaLiLibCompat {
         //#endif
     }
 
-    /** @return {@code true} when the file was written successfully. */
+    /** @return 写入成功返回 {@code true}。 */
     public static boolean writeJsonToFile(JsonObject root, Path path) {
         //#if MC >= 12111
         return JsonUtils.writeJsonToFile(root, path);

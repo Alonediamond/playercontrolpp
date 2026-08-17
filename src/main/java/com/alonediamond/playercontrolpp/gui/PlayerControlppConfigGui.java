@@ -40,7 +40,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         int x = 10;
         int y = 26;
         for (ConfigGuiTab tab : ConfigGuiTab.values()) {
-            // Only show Baritone tab if all 3 mods are present
+            // 三个模组都装了才显示 Baritone 标签页
             if (tab == ConfigGuiTab.BARITONE && !AutoMaterialGatherer.areAllThreeModsPresent()) {
                 continue;
             }
@@ -74,8 +74,6 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                     }
                     baritoneOptions.add(opt);
                 }
-                // Restock feature
-                //baritoneOptions.add(Configs.BaritoneSettings.AUTO_RESTOCK_TOGGLE);
                 baritoneOptions.add(Configs.Hotkeys.MARK_CONTAINER);
                 baritoneOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
                 for (IConfigBase opt : Configs.Restocks.OPTIONS) {
@@ -102,7 +100,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     //$$ }
     //#endif
 
-    /** Version-agnostic part of the render pass: the red warning banner on the Baritone tab. */
+    /** render 里版本无关的部分：Baritone 标签页顶部的红色警示。 */
     private void renderOverlay(DrawCtx drawContext) {
         if (selectedTab == ConfigGuiTab.BARITONE && AutoMaterialGatherer.areAllThreeModsPresent()) {
             String warning = StringUtils.translate("playercontrolpp.gui.baritone.warning");

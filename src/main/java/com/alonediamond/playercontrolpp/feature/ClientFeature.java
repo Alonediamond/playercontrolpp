@@ -3,23 +3,22 @@ package com.alonediamond.playercontrolpp.feature;
 import net.minecraft.client.Minecraft;
 
 /**
- * One client-side feature's lifecycle.
+ * 一个客户端功能的生命周期。
  *
- * <p>Registering with {@link FeatureRegistry} is what makes a feature tick and what makes it
- * get told about world changes. Adding a feature no longer means editing
- * {@code ClientEventHandler}, and the world-change broadcast can no longer miss one.
+ * <p>在 {@link FeatureRegistry} 注册后才会被 tick、才会收到世界切换通知。
+ * 新增功能不必再改 {@code ClientEventHandler}，世界切换的广播也不会漏掉谁。
  *
- * <p>Every method has a default, so a feature implements only the parts it needs.
+ * <p>所有方法都有默认实现，功能只实现自己需要的部分。
  */
 public interface ClientFeature {
 
-    /** Called once per client tick while a player exists. */
+    /** 有玩家存在时每客户端 tick 调用一次。 */
     default void onClientTick(Minecraft mc) {}
 
-    /** Called before the client level is swapped: dimension change, disconnect, or world load. */
+    /** 客户端世界被替换前调用：切维度、断开连接、加载世界。 */
     default void onWorldChange() {}
 
-    /** @return whether this feature is currently doing something the user would call "running". */
+    /** @return 本功能当前是否处于用户会称之为"正在运行"的状态。 */
     default boolean isActive() {
         return false;
     }

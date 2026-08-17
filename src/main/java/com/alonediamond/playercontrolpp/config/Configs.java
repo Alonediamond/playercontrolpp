@@ -28,24 +28,23 @@ public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = "playercontrolpp.json";
 
     /**
-     * Bumped when the on-disk layout changes in a way that needs migrating. Nothing needs
-     * migrating yet; the version is written and checked so a config from a future build is
-     * flagged instead of being silently half-read.
+     * 磁盘格式改到需要迁移时就 +1。目前还没有需要迁移的东西；写入并检查这个版本号，
+     * 是为了让来自更新版本的配置被显式标记出来，而不是被静默地读一半。
      */
     private static final int CONFIG_VERSION = 1;
 
-    // malilib derives every translation key from these prefixes, so a typo silently yields an
-    // untranslated option rather than an error. One constant each, referenced everywhere.
+    // malilib 的所有翻译键都由这些前缀推导，写错只会静默得到一个未翻译的选项而不是报错。
+    // 每个前缀一个常量，所有地方都引用它。
     private static final String KEY_HOTKEYS = Playercontrolpp.MOD_ID + ".config.hotkeys";
     private static final String KEY_SETTINGS = Playercontrolpp.MOD_ID + ".config.settings";
     private static final String KEY_BARITONE = Playercontrolpp.MOD_ID + ".config.baritone";
     private static final String KEY_CACHE_NEARBY = Playercontrolpp.MOD_ID + ".config.cache_nearby";
 
     /**
-     * Every shulker box item id: the undyed one plus one per dye colour.
+     * 所有潜影盒物品 id：未染色的那个加每种染料色一个。
      *
-     * <p>Generated from {@link DyeColor} rather than written out twice by hand — the two lists
-     * below used to repeat the same seventeen ids, so adding a colour meant remembering both.
+     * <p>由 {@link DyeColor} 生成而不是手写两遍——下面两个列表早先各重复了同样的十七个 id，
+     * 加一种颜色得记着两边都改。
      */
     private static final ImmutableList<String> ALL_SHULKER_BOX_IDS = allShulkerBoxIds();
 
@@ -109,14 +108,14 @@ public class Configs implements IConfigHandler {
                 KeybindSettings.PRESS_ALLOWEXTRA)
                 .apply(KEY_HOTKEYS);
 
-        /** The single source of truth for the hotkey set. */
+        /** 热键集合的唯一真源。 */
         public static final ImmutableList<IHotkey> HOTKEY_LIST = ImmutableList.of(
                 OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE,
                 BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS,
                 CACHE_SCHEMATIC_SELECTION_CONTAINERS, WATER_FILL_TOGGLE, MARK_CONTAINER,
                 ONE_CLICK_BUILD_RESTOCK);
 
-        /** Same hotkeys seen as plain configs; derived so the two lists cannot diverge. */
+        /** 同一批热键当普通配置看；由上面推导而来，两个列表不会走偏。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.copyOf(HOTKEY_LIST);
     }
 
@@ -138,10 +137,8 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_SETTINGS);
 
         /**
-         * Off by default on purpose. Playback reproduces input, not positions, so some drift is
-         * normal; snapping the client's position back to the recorded one contradicts the
-         * server's authoritative position and looks like a movement cheat. Enable it only in
-         * single-player or where that is acceptable.
+         * 刻意默认关闭。回放复现的是输入而不是坐标，有些偏差属于正常；把客户端坐标拉回录制位置
+         * 会与服务端权威位置矛盾，看起来像移动作弊。只在单人世界、或明确可接受的场合开启。
          */
         public static final ConfigBoolean PLAYBACK_POSITION_CORRECTION = new ConfigBoolean(
                 "playbackPositionCorrection", false,
@@ -201,20 +198,26 @@ public class Configs implements IConfigHandler {
                 "How many stacks of each missing material to top up to per restock trip. Litematica reports what the whole schematic still needs, which is usually far more than an inventory holds, so the target is capped at this many stacks per item type to leave room for the other materials.")
                 .apply(KEY_BARITONE);
 
+        public static final ConfigInteger RESTOCK_CONTAINER_MAX_DISTANCE = new ConfigInteger(
+                "restockContainerMaxDistance", 0, 0, 1000,
+                "Marked containers further than this many blocks from the player are ignored (no pathing). 0 means no limit.")
+                .apply(KEY_BARITONE);
+
         public static final ConfigStringList MARKED_CONTAINERS = new ConfigStringList(
                 "markedContainers", ImmutableList.of(),
-                "Marked container positions for auto-restock. Each entry: dimension x y z (e.g. minecraft:overworld 10 64 -20). Use the Mark Container hotkey to add/remove, or edit this list directly.")
+                "Marked container positions for auto-restock. Each entry: dimension x y z [off] (e.g. minecraft:overworld 10 64 -20). A trailing 'off' disables that container without deleting it. Use the Mark Container hotkey to add/remove, sneak + the hotkey to enable/disable, or edit this list directly.")
                 .apply(KEY_BARITONE);
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                RESTOCK_SHULKER_MODE, RESTOCK_STACKS_PER_ITEM, MARKED_CONTAINERS);
+                RESTOCK_SHULKER_MODE, RESTOCK_STACKS_PER_ITEM, RESTOCK_CONTAINER_MAX_DISTANCE,
+                MARKED_CONTAINERS);
     }
 
     private static ImmutableList<String> withWaterBucket(List<String> ids) {
         return ImmutableList.<String>builder().add("minecraft:water_bucket").addAll(ids).build();
     }
 
-    /** Every vanilla block with an inventory, plus all the shulker box colours. */
+    /** 所有带物品栏的原版方块，加全部颜色的潜影盒。 */
     private static ImmutableList<String> defaultContainerWhitelist() {
         return ImmutableList.<String>builder()
                 .add("minecraft:chest",
@@ -264,7 +267,7 @@ public class Configs implements IConfigHandler {
         try {
             Files.createDirectories(dir);
         } catch (Exception e) {
-            // Every later save will fail too, so say so once rather than returning in silence.
+            // 之后每次保存都会同样失败，所以说一次，而不是静默 return。
             Playercontrolpp.LOGGER.warn("Cannot create the config directory {}; settings will not persist",
                     dir, e);
             return;
@@ -292,9 +295,8 @@ public class Configs implements IConfigHandler {
     @Override
     public void onConfigsChanged() {
         saveToFile();
-        // Route hotkeys are edited in the same GUI but live in the routes file, which
-        // saveToFile() does not touch — without this, a key bound on the Route Hotkeys tab
-        // worked until the game was restarted and then came back unbound.
+        // 路径热键在同一个 GUI 里编辑，但数据存在路径文件里，saveToFile() 不碰那个文件——
+        // 没有这一行，在「路径热键」标签页绑的键在重启游戏前有效，重启后又变成未绑定。
         RouteManager.getInstance().saveRoutes();
     }
 }

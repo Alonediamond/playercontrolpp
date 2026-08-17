@@ -10,18 +10,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Records the player's input once per tick, run-length encoded: consecutive ticks with identical
- * input become one {@link RecordedSegment} with a duration counter, and a new segment is only
- * allocated when something changes. Holding W for ten seconds is one segment, not two hundred.
+ * 每 tick 采一次玩家输入，用行程长度编码压缩：连续几 tick 输入完全相同就合成一个
+ * {@link RecordedSegment} 加一个持续计数，只有输入变化时才新建一段。
+ * 按住 W 十秒是一段，而不是两百段。
  *
- * <p>A position keyframe is stored every {@link #KEYFRAME_INTERVAL} ticks so playback can tell
- * whether it has drifted off the recorded path.
+ * <p>每 {@link #KEYFRAME_INTERVAL} tick 存一个位置关键帧，回放时用来判断有没有偏离录制路径。
  */
 public class InputRecorder {
 
-    /** Ticks between position keyframes. */
+    /** 两个位置关键帧之间的 tick 数。 */
     private static final int KEYFRAME_INTERVAL = 20;
-    /** Ticks between "still recording" action bar reminders. */
+    /** 「录制中」ActionBar 提示的间隔 tick 数。 */
     private static final int STATUS_INTERVAL = 40;
 
     private boolean recording;
@@ -34,7 +33,7 @@ public class InputRecorder {
     private String recordingName;
 
     private final List<RecordedSegment> segments = new ArrayList<>();
-    /** The segment being extended; not yet in {@link #segments}. */
+    /** 正在延长的那一段；还没进 {@link #segments}。 */
     private RecordedSegment currentSegment;
 
     private final List<PositionKeyframe> keyframes = new ArrayList<>();
@@ -70,7 +69,7 @@ public class InputRecorder {
     public RecordingFile stopRecording() {
         recording = false;
 
-        // Commit whatever segment was still being extended.
+        // 把还在延长中的那一段提交掉。
         if (currentSegment != null) {
             segments.add(currentSegment);
             currentSegment = null;
@@ -90,7 +89,7 @@ public class InputRecorder {
         file.setStartZ(startZ);
         file.setStartYaw(startYaw);
         file.setStartPitch(startPitch);
-        // Copies, so continuing to record cannot mutate what was handed out.
+        // 交出副本，继续录制不会改到已经交出去的东西。
         file.setSegments(new ArrayList<>(segments));
         file.setKeyframes(new ArrayList<>(keyframes));
         return file;
@@ -124,7 +123,7 @@ public class InputRecorder {
             if (currentSegment != null) {
                 segments.add(currentSegment);
             }
-            // Always a fresh object: reusing it would rewrite the segment already in the list.
+            // 永远新建对象：复用会改写已经进列表的那一段。
             currentSegment = new RecordedSegment(1, fw, sw, j, sn, sp, y, p, at, us);
         }
 

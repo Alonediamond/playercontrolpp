@@ -12,8 +12,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Inventory;
 
 /**
- * Asks ChestTracker where the current target item is, then either opens the container or hands the
- * position to Baritone depending on whether it is already in reach.
+ * 问箱子追踪当前目标物品在哪，然后根据它是否已在手长范围内，决定直接开容器还是把坐标交给 Baritone。
  */
 public class ContainerSearcher {
 
@@ -23,7 +22,7 @@ public class ContainerSearcher {
         this.chestTracker = chestTracker;
     }
 
-    /** Run the ChestTracker query for the current target and route to the first result. */
+    /** 为当前目标跑一次箱子追踪查询，并前往第一个结果。 */
     public void search(GatherContext ctx, TaskStateMachine tsm,
                         ContainerOpener opener, BaritonePathingController pathing) {
         try {
@@ -32,8 +31,7 @@ public class ContainerSearcher {
                 return;
             }
 
-            // An unbounded range would make ChestTracker walk its entire memory; refuse rather
-            // than freeze the client.
+            // 范围设为无限会让箱子追踪把整个记忆库走一遍；宁可拒绝，也不要卡死客户端。
             int searchRange = chestTracker.getSearchRange();
             int listRange = chestTracker.getListRange();
             if (searchRange == Integer.MAX_VALUE || listRange == Integer.MAX_VALUE) {

@@ -18,25 +18,22 @@ import net.minecraft.world.item.ItemStack;
 import java.util.List;
 
 /**
- * Moves items out of an open container: loose stacks and whole shulker boxes, both capped by the
- * plan {@link ItemTransferStrategy} produced for the current item.
+ * 从打开的容器里往外挪物品：散装堆和整个潜影盒，两者都受 {@link ItemTransferStrategy}
+ * 为当前物品算出的计划约束。
  */
 public class ItemTransferExecutor {
 
     /**
-     * Minimum shortfall before taking a whole shulker box is worth it rather than loose stacks.
-     * Two stacks: below that a box is almost certainly more than needed.
+     * 缺口小于这个值就不值得搬整盒，改取散装。取两组：低于此数时一整盒几乎肯定超量。
      */
     private static final int SHULKER_WORTH_IT_THRESHOLD = 128;
-    /** Ticks between container clicks, to stay within the server's rate expectations. */
+    /** 两次容器点击之间的 tick 数，别超出服务端对点击频率的预期。 */
     private static final int CLICK_COOLDOWN = 4;
-    /** Ticks to settle after closing a container before verifying what we got. */
+    /** 关闭容器后先稳定几 tick 再核对拿到了多少。 */
     private static final int CLOSE_COOLDOWN = 8;
 
     /**
-     * @return whether enough of the current item has been gathered, counting the inventory and
-     *         the contents of any shulker boxes in it. Used after auto-store to decide whether to
-     *         keep going.
+     * @return 当前物品是否已经凑够，物品栏里的和其中潜影盒内的都算。自动存盒之后用它决定要不要继续。
      */
     public boolean isCurrentItemSatisfied(GatherContext ctx) {
         if (ctx.currentTargetItem == null) return false;
@@ -44,7 +41,7 @@ public class ItemTransferExecutor {
         return ctx.currentlyGathered >= ctx.targetNeededTotal;
     }
 
-    /** Move on to the next missing item, or finish. */
+    /** 换到下一个缺失物品，或者结束。 */
     public void nextItem(GatherContext ctx, TaskStateMachine tsm) {
         ctx.justTookShulkerBox = false;
         ctx.totalBoxesTakenForItem = 0;
@@ -77,7 +74,7 @@ public class ItemTransferExecutor {
         tsm.setState(State.SEARCHING);
     }
 
-    /** Take what we can from the container that is currently open. */
+    /** 从当前打开的容器里能拿多少拿多少。 */
     public void transfer(GatherContext ctx, TaskStateMachine tsm) {
         Minecraft mc = ctx.client;
 
@@ -97,8 +94,7 @@ public class ItemTransferExecutor {
         AbstractContainerMenu handler = mc.player.containerMenu;
         List<Slot> slots = handler.slots;
 
-        // When the plan calls for whole boxes, take those first so loose stacks do not fill the
-        // inventory before there is room for a box.
+        // 计划里要整盒时先拿盒子，免得散装先把背包塞满、腾不出放盒子的空间。
         boolean boxesFirst = ctx.currentTransferPlan.shulkerBoxes > 0
                 && ctx.totalBoxesTakenForItem < ctx.currentTransferPlan.shulkerBoxes;
 
@@ -115,7 +111,7 @@ public class ItemTransferExecutor {
         tsm.setState(State.VERIFYING);
     }
 
-    /** Recount after closing a container, then either advance or try the next location. */
+    /** 关闭容器后重新数一遍，然后决定推进还是换下一个位置。 */
     public void verify(GatherContext ctx, TaskStateMachine tsm,
                         ContainerOpener opener, BaritonePathingController pathing) {
         ctx.currentlyGathered = countEverywhere(ctx.currentTargetItem, ctx.client);
@@ -153,7 +149,7 @@ public class ItemTransferExecutor {
 
     // --- Transfer phases ---
 
-    /** Take a whole shulker box holding something we need, within the plan's box budget. */
+    /** 在计划的盒子额度内，搬走一个装有所需物品的整盒。 */
     private boolean tryTransferShulkerBoxes(Minecraft mc, AbstractContainerMenu handler,
                                             List<Slot> slots, GatherContext ctx) {
         for (Slot slot : slots) {
@@ -173,7 +169,7 @@ public class ItemTransferExecutor {
         return false;
     }
 
-    /** Take one loose stack of a needed item, within the plan's stack budget. */
+    /** 在计划的组数额度内，取一组所需物品的散装。 */
     private boolean tryTransferLooseItems(Minecraft mc, AbstractContainerMenu handler,
                                           List<Slot> slots, GatherContext ctx) {
         for (Slot slot : slots) {
@@ -202,8 +198,8 @@ public class ItemTransferExecutor {
     }
 
     /**
-     * @return the missing item inside {@code shulkerBox} that we are shortest of, but only if the
-     *         shortfall is big enough that taking a whole box is sensible.
+     * @return {@code shulkerBox} 里我们缺得最狠的那个缺失物品；
+     *         但只有缺口大到「搬整盒才合理」时才返回。
      */
     private MaterialItemEntry findBestMissingItemForShulker(ItemStack shulkerBox, GatherContext ctx) {
         MaterialItemEntry best = null;
@@ -270,7 +266,7 @@ public class ItemTransferExecutor {
 
     // --- Counting ---
 
-    /** @return how many of {@code item} the player holds, loose plus inside shulker boxes. */
+    /** @return 玩家持有多少个 {@code item}，散装加潜影盒内的一起算。 */
     private int countEverywhere(Item item, Minecraft mc) {
         if (mc.player == null || item == null) return 0;
         int count = 0;
@@ -286,7 +282,7 @@ public class ItemTransferExecutor {
         return count;
     }
 
-    /** @return how many of {@code item} sit loose in the inventory, not counting boxes. */
+    /** @return 物品栏里散装的 {@code item} 有多少个，不算盒子里的。 */
     private int countInInventory(Item item, Minecraft mc) {
         if (mc.player == null || item == null) return 0;
         int count = 0;

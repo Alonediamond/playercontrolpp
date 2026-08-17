@@ -30,7 +30,7 @@ public class RouteListGui extends Screen {
     private static final int RIGHT_X = 200;
     private static final int LEFT_ITEM_H = 20;
     private static final int WPT_ROW_H = 24;
-    // Waypoint field layout: only X and Z (Y is ignored)
+    // 导航点输入框布局：只有 X 和 Z（Y 忽略）
     private static final int FIELD_X = RIGHT_X + 50;
     private static final int FIELD_W = 62;
     private static final int FIELD_GAP = 12;
@@ -71,7 +71,7 @@ public class RouteListGui extends Screen {
         this.waypointFields.clear();
         this.wptHitAreas.clear();
 
-        // Left panel: add/remove
+        // 左侧面板：增删
         this.addRenderableWidget(Button.builder(
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.route.add")),
                 btn -> {
@@ -226,7 +226,7 @@ public class RouteListGui extends Screen {
     //$$ }
     //#endif
 
-    /** Prevent double-blur crash in 1.21.10 — draw simple dark background instead */
+    /** 避开 1.21.10 的二次模糊崩溃——改为画一层简单的深色背景 */
     private void renderDimBackground(DrawCtx context) {
         context.fill(0, 0, this.width, this.height, 0x80000000);
     }
@@ -285,7 +285,7 @@ public class RouteListGui extends Screen {
                 RIGHT_X + 10, ry + 2, 0xFFAAAAAA,true);
         ry += 18;
 
-        // Waypoint rows (X + Z only, no Y)
+        // 导航点各行（只有 X + Z，没有 Y）
         wptHitAreas.clear();
         List<RouteNode> nodes = selectedRoute.getNodes();
         int xFieldX = FIELD_X;
@@ -329,7 +329,7 @@ public class RouteListGui extends Screen {
             }
             context.text(font, Component.nullToEmpty(setLabel), setBtnX, ry + 4, setColor,true);
 
-            // [X] button (intermediate only)
+            // [X] 按钮（仅中间导航点有）
             int xBtnX = setBtnX + setBtnW + 8;
             int xBtnW = 0;
             if (i > 0 && i < nodes.size() - 1) {
@@ -346,7 +346,7 @@ public class RouteListGui extends Screen {
             ry += WPT_ROW_H;
         }
 
-        // [+ Add Node] button
+        // [+ 添加节点] 按钮
         String addLabel = "[+ " + StringUtils.translate("playercontrolpp.gui.route.add_node") + "]";
         int addBtnW = font.width(addLabel);
         int addBtnX = zFieldX + FIELD_W + 10;
@@ -360,7 +360,7 @@ public class RouteListGui extends Screen {
         wptHitAreas.add(new WptHitArea(addBtnX, addBtnY, addBtnW, -1, 0, 0, -1));
         ry += 22;
 
-        // Settings row 1: arrival radius + loop count
+        // 设置第 1 行：到达半径 + 循环次数
         context.text(font,
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.route.arrival_radius") + ":"),
                 RIGHT_X, ry + 4, 0xFFFFFFFF,true);
@@ -377,7 +377,7 @@ public class RouteListGui extends Screen {
         context.renderWidget(loopField, mouseX, mouseY, delta);
         ry += 24;
 
-        // Settings row 2: layer increment (only shown when LayerCtrl is ON)
+        // 设置第 2 行：图层增量（仅在图层控制开启时显示）
         if (selectedRoute.isLayerControlEnabled()) {
             context.text(font,
                     Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.route.layer_increment") + ":"),
@@ -388,7 +388,7 @@ public class RouteListGui extends Screen {
             ry += 24;
         }
 
-        // Settings row 3: Sprint + LayerCtrl toggles
+        // 设置第 3 行：疾跑 + 图层控制开关
         int toggleY = ry + 4;
 
         String sprintLabel = "[" + StringUtils.translate("playercontrolpp.gui.route.sprint") + ": "
@@ -408,7 +408,7 @@ public class RouteListGui extends Screen {
         int lcColor = selectedRoute.isLayerControlEnabled() ? 0xFF55FF55 : 0xFF888888;
         context.text(font, Component.nullToEmpty(lcLabel), lcX, toggleY, lcColor,true);
 
-        // Record toggle hit areas
+        // 录制开关的点击区域
         wptHitAreas.add(new WptHitArea(ry, RIGHT_X, sprintW, lcX, lcW, -2));
 
         ry += 24;
@@ -436,7 +436,7 @@ public class RouteListGui extends Screen {
     //$$ }
     //#endif
 
-    /** Version-agnostic click handling. @return {@code true} when the click was consumed. */
+    /** 版本无关的点击处理。@return 点击被消费时返回 {@code true}。 */
     private boolean handleClick(double mouseX, double mouseY, int button) {
         List<Route> routes = RouteManager.getInstance().getRoutes();
         int listTop = TOP + 30;
@@ -455,7 +455,7 @@ public class RouteListGui extends Screen {
 
         if (selectedRoute != null) {
             for (WptHitArea area : wptHitAreas) {
-                // Sprint / LayerCtrl toggles (nodeIndex == -2)
+                // 疾跑 / 图层控制开关（nodeIndex == -2）
                 if (area.nodeIndex == -2) {
                     if (mouseX >= area.setBtnX && mouseX <= area.setBtnX + area.setBtnW
                             && mouseY >= area.y && mouseY <= area.y + WPT_ROW_H) {
@@ -506,7 +506,7 @@ public class RouteListGui extends Screen {
         return false;
     }
 
-    /** Insert a waypoint just before the end, positioned midway along the last leg. */
+    /** 在终点前插入一个导航点，位置取最后一段的中点。 */
     private void addWaypointAtEnd() {
         if (selectedRoute == null) return;
         List<RouteNode> nodes = selectedRoute.getNodes();
@@ -525,7 +525,7 @@ public class RouteListGui extends Screen {
         refreshFieldValues();
     }
 
-    /** Remove an intermediate waypoint. The start and end are not removable. */
+    /** 删除一个中间导航点。起点和终点不可删。 */
     private void removeWaypoint(int index) {
         if (selectedRoute == null) return;
         if (index <= 0 || index >= selectedRoute.getNodeCount() - 1) return;
@@ -556,8 +556,8 @@ public class RouteListGui extends Screen {
     private static final int KEY_ESCAPE = 256;
 
     /**
-     * @return the text field that currently has focus, checked in the same order the
-     *         per-field {@code isFocused()} chain used to use, or {@code null} if none has.
+     * @return 当前获得焦点的输入框，检查顺序与早先那串逐字段 {@code isFocused()} 一致；
+     *         没有焦点则 {@code null}。
      */
     private EditBox focusedField() {
         if (nameField.isFocused()) return nameField;

@@ -9,28 +9,26 @@ import net.minecraft.world.inventory.ContainerInput;
 //#endif
 
 /**
- * Sending a container slot click to the server.
+ * 向服务端发送容器槽位点击。
  *
- * <p>Minecraft 26.1 renamed both halves of this API at once:
+ * <p>26.1 把这套 API 的两半一起改了名：
  * <ul>
  *   <li>{@code MultiPlayerGameMode.handleInventoryMouseClick} &rarr; {@code handleContainerInput}</li>
  *   <li>{@code ClickType} &rarr; {@code ContainerInput}</li>
  * </ul>
- * Because the method signature changed together with the enum, the source remapper
- * cannot bridge it automatically, so the whole call lives here.
+ * 方法签名跟着枚举一起变，源码重映射器桥接不了，所以整个调用收在这里。
  *
- * <p>All PlayerControl++ call sites use mouse button {@code 0} (left click).
+ * <p>模组所有调用点都用鼠标键 {@code 0}（左键）。
  */
 public final class SlotActionCompat {
 
     private SlotActionCompat() {}
 
     /**
-     * Left-clicks {@code slotIndex}: picks up the stack under the cursor, or places
-     * the carried stack into the slot.
+     * 左键点 {@code slotIndex}：拿起该槽的物品，或把手上的物品放进去。
      *
-     * @param containerId the {@code containerId} of the currently open menu
-     * @param slotIndex   the slot index <em>in screen space</em> (not inventory space)
+     * @param containerId 当前打开菜单的 {@code containerId}
+     * @param slotIndex   槽位索引，<em>界面空间</em>（不是物品栏空间）
      */
     public static void pickup(Minecraft mc, int containerId, int slotIndex) {
         //#if MC >= 260000
@@ -41,10 +39,10 @@ public final class SlotActionCompat {
     }
 
     /**
-     * Shift-left-clicks {@code slotIndex}, moving the whole stack to the other inventory.
+     * Shift + 左键点 {@code slotIndex}，整堆移到另一侧物品栏。
      *
-     * @param containerId the {@code containerId} of the currently open menu
-     * @param slotIndex   the slot index <em>in screen space</em> (not inventory space)
+     * @param containerId 当前打开菜单的 {@code containerId}
+     * @param slotIndex   槽位索引，<em>界面空间</em>
      */
     public static void quickMove(Minecraft mc, int containerId, int slotIndex) {
         //#if MC >= 260000
@@ -55,15 +53,14 @@ public final class SlotActionCompat {
     }
 
     /**
-     * The number-key swap: exchanges the contents of {@code slotIndex} with hotbar slot
-     * {@code hotbarIndex}, exactly as pressing 1-9 while hovering a slot does.
+     * 数字键交换：把 {@code slotIndex} 与快捷栏第 {@code hotbarIndex} 格互换，
+     * 等价于鼠标悬停在槽位上按 1-9。
      *
-     * <p>One packet instead of the two-click pickup/place pair, so the swap cannot be left
-     * half-applied if the run is aborted between ticks.
+     * <p>一个包搞定，不用"拿起 + 放下"两次点击，所以中途 tick 被中断也不会留下半个交换。
      *
-     * @param containerId the {@code containerId} of the currently open menu
-     * @param slotIndex   the slot index <em>in screen space</em> (not inventory space)
-     * @param hotbarIndex hotbar slot 0-8, in <em>inventory</em> space
+     * @param containerId 当前打开菜单的 {@code containerId}
+     * @param slotIndex   槽位索引，<em>界面空间</em>
+     * @param hotbarIndex 快捷栏 0-8，<em>物品栏空间</em>
      */
     public static void swapWithHotbar(Minecraft mc, int containerId, int slotIndex, int hotbarIndex) {
         //#if MC >= 260000

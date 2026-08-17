@@ -35,11 +35,11 @@ public class InitHandler implements IInitializationHandler {
 
         Configs.loadFromFile();
         RouteManager.getInstance().loadRoutes();
-        // Routes exist now, so have malilib pick up their hotkeys.
+        // 路径已经存在了，让 malilib 收录它们的热键。
         RouteManager.getInstance().refreshKeybinds();
         RecordingManager.getInstance().loadRecordings();
 
-        // Optional integrations: each one just records whether its mod is present.
+        // 可选联动：每个只记录对应模组在不在。
         LitematicaIntegration.getInstance().initialize();
         BaritoneIntegration.getInstance().initialize();
         ChestTrackerIntegration.getInstance().initialize();
@@ -47,11 +47,10 @@ public class InitHandler implements IInitializationHandler {
     }
 
     /**
-     * Registration order is the tick order and the world-change order.
+     * 注册顺序就是 tick 顺序，也是世界切换的通知顺序。
      *
-     * <p>Routes and recordings come first because they produce the movement input that
-     * {@code ClientEventHandler} reads after all features have ticked; the automation features
-     * follow. This is the order these features were called in before the registry existed.
+     * <p>路径与录制排在前面，因为它们产生的移动输入要由 {@code ClientEventHandler}
+     * 在所有功能 tick 完之后读取；自动化类功能排在后面。这也是注册表出现之前这些功能的调用顺序。
      */
     private void registerFeatures() {
         FeatureRegistry.register(AutoForwardFeature.FEATURE);

@@ -4,14 +4,14 @@ import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
 
 /**
- * Holds the forward key down until toggled off. The key itself is pressed by
- * {@code ClientEventHandler} through {@code SimulatedInput}, not from here.
+ * 一直按住前进键直到再次关闭。键是由 {@code ClientEventHandler} 经 {@code SimulatedInput} 按下的，
+ * 不在这里按。
  */
 public class AutoForwardFeature {
 
     private static boolean enabled;
 
-    /** Registered with {@link FeatureRegistry}; see {@code InitHandler}. */
+    /** 注册进 {@link FeatureRegistry}，见 {@code InitHandler}。 */
     public static final ClientFeature FEATURE = new ClientFeature() {
         @Override public void onWorldChange() { AutoForwardFeature.onWorldChange(); }
         @Override public boolean isActive() { return enabled; }

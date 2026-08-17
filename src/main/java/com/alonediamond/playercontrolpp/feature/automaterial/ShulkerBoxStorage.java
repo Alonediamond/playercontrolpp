@@ -27,17 +27,15 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Frees inventory space during auto-gathering by moving already-collected building materials into
- * a shulker box.
+ * 自动备货途中把已收集的建筑材料存进潜影盒，腾出背包空间。
  *
  * <pre>
  * FINDING_SHULKER -&gt; FINDING_POSITION -&gt; SWITCHING_SHULKER -&gt; PLACING
  *                 -&gt; OPENING -&gt; TRANSFERRING -&gt; CLOSING -&gt; MINING -&gt; WAITING_PICKUP -&gt; DONE
  * </pre>
  *
- * <p>With QuickShulker installed and selected in the config the middle of that is skipped: the box
- * is opened in place (FINDING_SHULKER -&gt; QUICK_OPEN -&gt; TRANSFERRING -&gt; CLOSING -&gt; DONE), which
- * avoids placing and mining a block altogether.
+ * <p>装了 QuickShulker 且在配置里选了它时，中间一段整体跳过：盒子就地打开
+ * （FINDING_SHULKER -&gt; QUICK_OPEN -&gt; TRANSFERRING -&gt; CLOSING -&gt; DONE），完全不用放置和挖掘。
  */
 public class ShulkerBoxStorage {
 
@@ -51,33 +49,33 @@ public class ShulkerBoxStorage {
         ACTIVE, DONE, FAILED
     }
 
-    /** Slots in a shulker box's own container screen: indices 0..26. */
+    /** 潜影盒界面里盒子自己的槽位：索引 0..26。 */
     private static final int BOX_SLOT_COUNT = ItemTransferStrategy.SHULKER_SLOT_COUNT;
-    /** First player-inventory slot in a shulker box screen (27 box slots come first). */
+    /** 潜影盒界面里玩家背包的第一个槽位（前面 27 格是盒子的）。 */
     private static final int BOX_SCREEN_PLAYER_START = BOX_SLOT_COUNT;
-    /** Last player-inventory slot in a shulker box screen. */
+    /** 潜影盒界面里玩家背包的最后一个槽位。 */
     private static final int BOX_SCREEN_PLAYER_END = BOX_SLOT_COUNT + Inventory.INVENTORY_SIZE - 1;
-    /** Safety cap on quick-move clicks in one storage cycle. */
+    /** 单个存储周期内 shift 点击次数的安全上限。 */
     private static final int MAX_TRANSFERS_PER_CYCLE = 200;
 
-    /** Retries when looking for somewhere to put the box down. */
+    /** 找放盒位置的重试次数。 */
     private static final int MAX_POSITION_RETRIES = 3;
-    /** Retries when QuickShulker's open packet does not take. */
+    /** QuickShulker 开盒包没生效时的重试次数。 */
     private static final int MAX_QUICK_OPEN_RETRIES = 5;
-    /** Ticks after clicking before checking whether the box really got placed. */
+    /** 点击后等几 tick 再检查盒子是不是真放下去了。 */
     private static final int PLACE_VERIFY_TICKS = 4;
-    /** Total attempts at placing before failing. */
+    /** 放置总尝试次数，超了就算失败。 */
     private static final int MAX_PLACE_ATTEMPTS = 10;
-    /** Ticks to wait for the box's screen to appear. */
+    /** 等盒子界面出现的 tick 数。 */
     private static final int OPEN_VERIFY_LIMIT = 30;
-    /** Ticks to keep mining before assuming something is wrong. */
+    /** 持续挖掘多少 tick 后认为出了问题。 */
     private static final int MAX_MINING_TICKS = 100;
-    /** Ticks to wait for the mined box to be picked up. */
+    /** 等挖下来的盒子被捡起的 tick 数。 */
     private static final int MAX_PICKUP_WAIT_TICKS = 100;
 
     private StorageState state = StorageState.IDLE;
     private boolean active;
-    /** Set once a terminal outcome is reached, so tick() can report it exactly once. */
+    /** 到达终态时设一次，让 tick() 只报告一次结果。 */
     private StorageResult terminalResult = StorageResult.ACTIVE;
     private int cooldown;
     private int retryCount;
@@ -88,13 +86,13 @@ public class ShulkerBoxStorage {
     private final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
     private boolean useQuickShulkerMode;
     private boolean anyItemsTransferred;
-    /** Inventory slots whose box turned out to be full; remembered across cycles. */
+    /** 实测已满的盒子所在物品栏槽位；跨周期保留。 */
     private final java.util.Set<Integer> knownFullSlots = new java.util.HashSet<>();
 
     private int shulkerSlotIndex = -1;
-    private BlockPos placedPos;           // where the box was placed
-    private BlockPos placeAgainst;        // the block clicked against to place it
-    private Direction placeClickFace;     // which face of placeAgainst was clicked
+    private BlockPos placedPos;           // 盒子放在了哪
+    private BlockPos placeAgainst;        // 放置时点的那个靠山方块
+    private Direction placeClickFace;     // 点的是 placeAgainst 的哪个面
     private int transferIndex;
     private int prevSelectedSlot;
 
@@ -104,7 +102,7 @@ public class ShulkerBoxStorage {
         return Configs.BaritoneSettings.AUTO_STORE_TO_SHULKER.getBooleanValue();
     }
 
-    /** @return whether QuickShulker mode applies: selected in the config <em>and</em> installed. */
+    /** @return 是否走 QuickShulker 模式：配置里选了它<em>并且</em>它装了。 */
     public static boolean isQuickShulkerModeEnabled() {
         StorageMode mode = (StorageMode) Configs.BaritoneSettings.SHULKER_STORAGE_MODE.getOptionListValue();
         return mode == StorageMode.QUICKSHULKER
@@ -130,7 +128,7 @@ public class ShulkerBoxStorage {
         transferIndex = 0;
         prevSelectedSlot = InventoryCompat.getSelectedSlot(mc.player.getInventory());
         anyItemsTransferred = false;
-        // knownFullSlots is deliberately kept: a box that was full last cycle is still full.
+        // knownFullSlots 刻意不清：上个周期满的盒子现在还是满的。
         useQuickShulkerMode = isQuickShulkerModeEnabled();
 
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_start");
@@ -176,9 +174,9 @@ public class ShulkerBoxStorage {
             if (knownFullSlots.contains(i)) continue;
             ItemStack stack = mc.player.getInventory().getItem(i);
             if (!ItemUtil.isShulkerBox(stack)) continue;
-            // Never store into a box we are supposed to be collecting.
+            // 不能把材料存进我们正要收集的那种盒子里。
             if (isOnMissingList(stack, ctx)) continue;
-            // Fullness is judged from the open screen, not the item's NBT, which can be stale.
+            // 「满没满」按打开后的界面判断，不看物品 NBT——NBT 可能是过期的。
             shulkerSlotIndex = i;
             state = useQuickShulkerMode ? StorageState.QUICK_OPEN : StorageState.FINDING_POSITION;
             return;
@@ -189,8 +187,8 @@ public class ShulkerBoxStorage {
     }
 
     /**
-     * QuickShulker mode: open the box where it sits. No swapping — just translate the inventory
-     * index into a player-screen slot index and send QuickShulker's own packet.
+     * QuickShulker 模式：盒子在哪就在哪开。不用换手，只要把物品栏索引换算成玩家界面槽位索引，
+     * 再发 QuickShulker 自己的包。
      */
     private void doQuickOpen(Minecraft mc) {
         if (!quickShulker.isLoaded()) {
@@ -217,8 +215,7 @@ public class ShulkerBoxStorage {
     }
 
     /**
-     * Find somewhere at the player's own feet level to put the box, in front first, then behind
-     * and to the sides. Never on the block the player is standing on.
+     * 在玩家脚下同一高度找个地方放盒子：先前方，再后方与两侧。绝不放在玩家站着的那个方块上。
      */
     private void doFindPosition(Minecraft mc) {
         BlockPos playerFeet = mc.player.blockPosition();
@@ -249,8 +246,8 @@ public class ShulkerBoxStorage {
             BlockState groundState = mc.level.getBlockState(ground);
             BlockState placeState = mc.level.getBlockState(placeAt);
 
-            // isFaceSturdy is the non-deprecated way to ask "can something stand on top of this";
-            // the old isSolid() was Mojang's legacy approximation and is cached less well.
+            // isFaceSturdy 是「这个方块上面能不能放东西」的正确问法（未废弃）；
+            // 老的 isSolid() 是 Mojang 的遗留近似，缓存也差。
             if (!groundState.isFaceSturdy(mc.level, ground, Direction.UP)) continue;
             if (!placeState.isAir() && !placeState.canBeReplaced()) continue;
             if (playerFeet.distSqr(placeAt) > reachSq) continue;
@@ -269,7 +266,7 @@ public class ShulkerBoxStorage {
             fail(mc);
             return;
         }
-        // Look down and give the ground a moment to load, then try again.
+        // 低头看一下、给地面一点加载时间，然后再试。
         mc.player.setXRot(90f);
         cooldown = 10;
     }
@@ -278,7 +275,7 @@ public class ShulkerBoxStorage {
         if (shulkerSlotIndex < PlayerUtil.HOTBAR_SIZE) {
             InventoryCompat.setSelectedSlot(mc.player.getInventory(), shulkerSlotIndex);
         } else {
-            // Swap the box down into whichever hotbar slot is selected, via three clicks.
+            // 用三次点击把盒子换到当前选中的快捷栏格。
             int hotbarSlot = InventoryCompat.getSelectedSlot(mc.player.getInventory());
             int containerId = mc.player.containerMenu.containerId;
             int hotbarScreenSlot = InventoryMenu.USE_ROW_SLOT_START + hotbarSlot;
@@ -306,7 +303,7 @@ public class ShulkerBoxStorage {
             try {
                 mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
             } catch (Exception e) {
-                // Fall back to vanilla's own raycast; released by releaseKeys() when we stop.
+                // 退回原版自己的射线检测；停止时由 releaseKeys() 松开。
                 SimulatedInput.hold(mc.options.keyUse, this);
                 cooldown = 2;
                 return;
@@ -319,7 +316,7 @@ public class ShulkerBoxStorage {
             return;
         }
 
-        // Placed successfully if the target is no longer air.
+        // 目标位置不再是空气就算放置成功。
         if (mc.level.getBlockState(placedPos).isAir()) {
             if (retryCount < MAX_PLACE_ATTEMPTS) {
                 cooldown = 3;
@@ -386,7 +383,7 @@ public class ShulkerBoxStorage {
             mc.player.closeContainer();
             knownFullSlots.add(shulkerSlotIndex);
             if (!anyItemsTransferred) {
-                // Nothing fit here; only loop back if another box is worth trying.
+                // 这里塞不下了；只有还有别的盒子值得试才绕回去。
                 if (!hasCandidateShulker(mc, ctx)) {
                     MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_box");
                     fail(mc);
@@ -400,7 +397,7 @@ public class ShulkerBoxStorage {
             return;
         }
 
-        // Move one matching stack per tick from the player half of the screen into the box.
+        // 每 tick 从界面的玩家一侧往盒子里挪一组匹配的物品。
         for (int i = BOX_SCREEN_PLAYER_START;
              i <= BOX_SCREEN_PLAYER_END && transferIndex < MAX_TRANSFERS_PER_CYCLE; i++) {
             transferIndex++;
@@ -416,11 +413,11 @@ public class ShulkerBoxStorage {
                 cooldown = 2;
                 return;
             } catch (Exception e) {
-                // This slot refused; try the next one.
+                // 这一格不收，试下一格。
             }
         }
 
-        // A box with no empty slot left cannot accept a new item type either.
+        // 一个没有空格的盒子也接不了新的物品类型。
         if (!hasEmptySlotInShulkerBox()) {
             knownFullSlots.add(shulkerSlotIndex);
         }
@@ -434,7 +431,7 @@ public class ShulkerBoxStorage {
         }
 
         if (useQuickShulkerMode) {
-            // Nothing was placed, so there is nothing to mine or pick up.
+            // 什么都没放下去，也就没有东西可挖、可捡。
             InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
             terminalResult = StorageResult.DONE;
             state = StorageState.DONE;
@@ -512,8 +509,8 @@ public class ShulkerBoxStorage {
     // ---- Helpers ----
 
     /**
-     * Translate an inventory index into its slot index in the player's own inventory screen:
-     * hotbar 0-8 sits at screen 36-44, main inventory 9-35 keeps its number.
+     * 把物品栏索引换算成玩家自己物品栏界面里的槽位索引：
+     * 快捷栏 0-8 在界面的 36-44，主背包 9-35 保持原编号。
      */
     private static int playerScreenSlot(int inventoryIndex) {
         return inventoryIndex < PlayerUtil.HOTBAR_SIZE
@@ -522,11 +519,9 @@ public class ShulkerBoxStorage {
     }
 
     /**
-     * @return whether the inventory holds anything a storage cycle could actually move: a
-     *         non-shulker stack that is on the missing-materials list. Checked before starting a
-     *         cycle — with nothing storable, a cycle would open a box, move nothing, close it and
-     *         report DONE, and the still-full inventory would immediately start the next cycle,
-     *         opening and closing the box forever.
+     * @return 物品栏里是否有存储周期真能挪动的东西：非潜影盒、且在缺失材料清单上的物品堆。
+     *         开始一个周期前必须查——没有可存的东西时，一个周期会开盒、什么都不挪、关盒、报 DONE，
+     *         而依然满着的背包立刻又启动下一个周期，于是无限开关同一个盒子。
      */
     public boolean hasStorableMaterials(GatherContext ctx) {
         Minecraft mc = ctx.client;
@@ -534,14 +529,14 @@ public class ShulkerBoxStorage {
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             ItemStack stack = mc.player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
-            // Boxes cannot nest, so a shulker box itself is never storable.
+            // 盒子不能套盒子，所以潜影盒本身永远不算可存物品。
             if (ItemUtil.isShulkerBox(stack)) continue;
             if (isOnMissingList(stack, ctx)) return true;
         }
         return false;
     }
 
-    /** @return whether another box is worth opening, so we do not cycle through known-full ones. */
+    /** @return 是否还有别的盒子值得打开，免得在已知满的盒子之间打转。 */
     private boolean hasCandidateShulker(Minecraft mc, GatherContext ctx) {
         if (mc.player == null) return false;
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
@@ -554,7 +549,7 @@ public class ShulkerBoxStorage {
         return false;
     }
 
-    /** Drop every key this feature holds. */
+    /** 松开本功能按下的所有键。 */
     public void releaseKeys() {
         SimulatedInput.releaseAll(this);
     }
@@ -567,7 +562,7 @@ public class ShulkerBoxStorage {
         active = false;
     }
 
-    /** Abort with a FAILED result, telling the task machine to stop entirely. */
+    /** 以 FAILED 结果中止，让任务状态机整体停下。 */
     private void fail(Minecraft mc) {
         terminalResult = StorageResult.FAILED;
         abort(mc);
@@ -575,7 +570,7 @@ public class ShulkerBoxStorage {
 
     public void cancel(Minecraft mc) { abort(mc); }
 
-    /** Called when auto-gathering starts fresh, clearing state kept across cycles. */
+    /** 自动备货重新开始时调用，清掉跨周期保留的状态。 */
     public void resetKnownFullSlots() {
         knownFullSlots.clear();
     }
@@ -587,7 +582,7 @@ public class ShulkerBoxStorage {
         return false;
     }
 
-    /** @return whether the open box has a completely empty slot, i.e. room for a new item type. */
+    /** @return 打开的盒子里是否还有完全空的格，也就是能不能接新的物品类型。 */
     private boolean hasEmptySlotInShulkerBox() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.player.containerMenu == null) return false;

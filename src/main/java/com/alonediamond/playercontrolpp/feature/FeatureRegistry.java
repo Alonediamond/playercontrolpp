@@ -7,13 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The list of {@link ClientFeature}s, in tick order.
+ * 按 tick 顺序排列的 {@link ClientFeature} 列表。
  *
- * <p>Registration order is the tick order and the world-change notification order, so it is
- * meaningful — see {@code InitHandler} for the order and why.
+ * <p>注册顺序就是 tick 顺序和世界切换的通知顺序，有意义——顺序与原因见 {@code InitHandler}。
  *
- * <p>A feature that throws is logged and skipped rather than being allowed to kill the tick
- * handler, which would silently disable every feature after it.
+ * <p>某个功能抛异常只记日志并跳过，不让它掀掉整个 tick 回调（那会让它后面的功能全部静默失效）。
  */
 public final class FeatureRegistry {
 
@@ -30,7 +28,7 @@ public final class FeatureRegistry {
             try {
                 feature.onClientTick(mc);
             } catch (Exception e) {
-                Playercontrolpp.LOGGER.error("Feature {} threw during client tick",
+                Playercontrolpp.LOGGER.error("功能 {} 在客户端 tick 中抛出异常",
                         feature.getClass().getName(), e);
             }
         }
@@ -41,13 +39,13 @@ public final class FeatureRegistry {
             try {
                 feature.onWorldChange();
             } catch (Exception e) {
-                Playercontrolpp.LOGGER.error("Feature {} threw during world change",
+                Playercontrolpp.LOGGER.error("功能 {} 在世界切换中抛出异常",
                         feature.getClass().getName(), e);
             }
         }
     }
 
-    /** @return whether any registered feature reports itself active. */
+    /** @return 是否有任一已注册功能自报正在运行。 */
     public static boolean anyActive() {
         for (ClientFeature feature : FEATURES) {
             if (feature.isActive()) return true;

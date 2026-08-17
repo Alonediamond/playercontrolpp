@@ -9,15 +9,14 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 
 /**
- * Auto material gathering — the public face of the {@code automaterial} package.
+ * 自动投影材料备货——{@code automaterial} 包对外的门面。
  *
- * <p>Delegates to {@code GatherContext}, {@code TaskStateMachine} and the specialised modules
- * around them ({@code MaterialAnalyzer}, {@code ContainerSearcher},
- * {@code BaritonePathingController}, {@code ContainerOpener}, {@code ItemTransferExecutor},
- * {@code ShulkerBoxStorage}).
+ * <p>实际工作转交给 {@code GatherContext}、{@code TaskStateMachine} 以及围绕它们的专职模块
+ * （{@code MaterialAnalyzer}、{@code ContainerSearcher}、{@code BaritonePathingController}、
+ * {@code ContainerOpener}、{@code ItemTransferExecutor}、{@code ShulkerBoxStorage}）。
  *
- * <p>Requires Baritone, Litematica and ChestTracker; without all three the hotkey reports the
- * missing dependency instead of doing nothing.
+ * <p>需要 Baritone、Litematica、ChestTracker 三者齐备；缺任何一个时热键会报出缺哪个，
+ * 而不是按下去没反应。
  */
 public class AutoMaterialGatherer implements ClientFeature {
     private static final AutoMaterialGatherer INSTANCE = new AutoMaterialGatherer();

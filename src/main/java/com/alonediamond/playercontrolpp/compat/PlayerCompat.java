@@ -4,18 +4,17 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 
 /**
- * Player-facing helpers whose signature changed across Minecraft versions.
+ * 签名在版本间变过的玩家相关方法。
  */
 public final class PlayerCompat {
 
     private PlayerCompat() {}
 
     /**
-     * Shows {@code text} on the action bar (above the hotbar).
+     * 在 ActionBar（快捷栏上方）显示 {@code text}。
      *
-     * <p>Minecraft 26.1 split the overlay case out of the general
-     * {@code displayClientMessage(Component, boolean)} into a dedicated
-     * {@code sendOverlayMessage(Component)}.
+     * <p>26.1 把这个用途从 {@code displayClientMessage(Component, boolean)} 里拆成了独立的
+     * {@code sendOverlayMessage(Component)}。
      */
     public static void sendOverlayMessage(LocalPlayer player, Component text) {
         //#if MC >= 260000

@@ -26,18 +26,17 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 /**
- * Recording persistence: a small JSON index the GUI can read instantly, plus one NBT
- * {@code .pcr} file per recording holding the bulk data.
+ * 录制的持久化：一个 GUI 可以瞬间读完的小 JSON 索引，加上每条录制一个装主体数据的 NBT
+ * {@code .pcr} 文件。
  *
  * <pre>
  * config/playercontrolpp/recordings/
- *   index.json      metadata only (id, name, duration, dimension)
- *   record_001.pcr  segments + keyframes, NBT binary, gzipped
+ *   index.json      只有元数据（id、名称、时长、维度）
+ *   record_001.pcr  段 + 关键帧，NBT 二进制，gzip 压缩
  * </pre>
  *
- * <p>All disk work happens on a single background thread and every write is atomic, so a crash
- * mid-save cannot leave the index truncated. Both the recording and the playback tick run from
- * here as one {@link ClientFeature}.
+ * <p>所有磁盘操作都在同一个后台线程上，且每次写入都是原子的，保存中途崩溃不会把索引截断。
+ * 录制与回放的 tick 都从这里走，对外是一个 {@link ClientFeature}。
  */
 public class RecordingManager implements ClientFeature {
     private static final RecordingManager INSTANCE = new RecordingManager();
@@ -50,9 +49,8 @@ public class RecordingManager implements ClientFeature {
     private boolean loaded;
 
     /**
-     * One daemon thread for every read and write. Daemon so it cannot hold the game open on exit;
-     * single so saves cannot interleave; reused so recording repeatedly does not spawn a thread
-     * each time.
+     * 所有读写共用一个守护线程。守护 = 退出时不会拖着游戏不放；单线程 = 保存不会互相交错；
+     * 复用 = 反复录制不会每次都开一个线程。
      */
     private final ExecutorService io = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "PCpp-RecordingIO");
@@ -82,18 +80,17 @@ public class RecordingManager implements ClientFeature {
         return getRecordingsDir().resolve(id + ".pcr");
     }
 
-    // --- Index loading (GUI only — no segment data) ---
+    // ---- 索引加载（只给 GUI 用，不含段数据）----
 
     /**
-     * Read the index. Safe to call repeatedly; only a successful read is remembered, so a
-     * transient failure does not lock the list empty for the rest of the session.
+     * 读索引。可以反复调用；只有成功读取才会被记住，所以一次偶发失败不会让列表在整局里一直空着。
      */
     public void loadRecordings() {
         if (loaded) return;
 
         Path indexFile = getIndexFile();
         if (!Files.exists(indexFile) || Files.isDirectory(indexFile)) {
-            loaded = true; // nothing to read is a valid, final answer
+            loaded = true; // “没东西可读”也是一个有效的终结果
             return;
         }
 
@@ -111,8 +108,8 @@ public class RecordingManager implements ClientFeature {
                 }
             }
         } catch (Exception e) {
-            // Do not mark loaded: the very next saveIndex() would overwrite a file the user may
-            // still be able to repair. Move it aside instead so nothing is lost silently.
+            // 不要标记为已加载：紧接着的 saveIndex() 会覆盖掉用户可能还能修的文件。
+            // 改为把它挪到一边，什么都不会被静默丢掉。
             Path quarantined = AtomicFiles.quarantine(indexFile);
             Playercontrolpp.LOGGER.warn("Failed to read the recording index; moved it to {}",
                     quarantined != null ? quarantined.getFileName() : "(move failed)", e);
@@ -120,8 +117,7 @@ public class RecordingManager implements ClientFeature {
             return;
         }
 
-        // Drop entries whose .pcr went missing, so the GUI never offers a recording that
-        // cannot play.
+        // 剔除 .pcr 已丢失的条目，GUI 不会列出根本播不了的录制。
         parsed.removeIf(rf -> {
             boolean missing = !Files.exists(getRecordingFile(rf.getId()));
             if (missing) {
@@ -157,9 +153,8 @@ public class RecordingManager implements ClientFeature {
         rec.setId(nextId());
         recordings.add(rec);
 
-        // Serialize on the client thread, write on the IO thread, and only add the index entry
-        // once the data file is really there — otherwise a crash in between leaves an index
-        // entry pointing at nothing, which shows up as "Play does nothing".
+        // 在客户端线程序列化，在 IO 线程写盘，且只有数据文件真的落地后才添加索引条目——
+        // 否则中途崩溃会留下一条指向空文件的索引，表现为「点播放没反应」。
         CompoundTag data = rec.toNbt();
         Path file = getRecordingFile(rec.getId());
         io.execute(() -> {
@@ -177,7 +172,7 @@ public class RecordingManager implements ClientFeature {
         });
     }
 
-    /** @return the next free {@code record_NNN} id. */
+    /** @return 下一个空闲的 {@code record_NNN} id。 */
     private String nextId() {
         int maxId = 0;
         for (RecordingFile r : recordings) {
@@ -186,7 +181,7 @@ public class RecordingManager implements ClientFeature {
                 try {
                     maxId = Math.max(maxId, Integer.parseInt(rid.substring("record_".length())));
                 } catch (NumberFormatException ignored) {
-                    // Hand-edited or foreign id; it just does not take part in numbering.
+                    // 手工改过或外来的 id；它只是不参与编号而已。
                 }
             }
         }
@@ -200,26 +195,24 @@ public class RecordingManager implements ClientFeature {
             try {
                 Files.deleteIfExists(file);
             } catch (IOException e) {
-                // The index entry is already gone, so this leaves an orphan .pcr on disk.
-                // loadRecordings() cannot clean it up (it only prunes the other direction), so
-                // log it loudly enough that a user reporting "disk filling up" has an answer.
+                // 索引条目已经删掉了，所以这里会在磁盘上留下一个孤儿 .pcr。
+                // loadRecordings() 清不掉它（它只清另一个方向），所以日志要打得够显眼，
+                // 让「磁盘越来越满」的反馈有个说法。
                 Playercontrolpp.LOGGER.warn("Could not delete recording data file {}", file, e);
             }
         });
         saveIndex();
     }
 
-    // --- Individual file I/O (NBT binary) ---
+    // ---- 单个文件的读写（NBT 二进制）----
 
     /**
-     * Load full recording data off-thread and hand it to {@code onLoaded} back on the client
-     * thread.
+     * 在别的线程上加载完整录制数据，然后回到客户端线程交给 {@code onLoaded}。
      *
-     * <p>{@code NbtIo.readCompressed} means gzip inflate plus a full NBT parse — for a ten-minute
-     * recording that is thousands of segments. Doing it inline in the Play button handler stalled
-     * the render thread for a visible hitch.
+     * <p>{@code NbtIo.readCompressed} 意味着 gzip 解压加一次完整 NBT 解析——十分钟的录制就是几千个段。
+     * 早先直接在播放按钮的回调里做，会让渲染线程卡出可见的一顿。
      *
-     * @param onLoaded called on the client thread, with {@code null} if loading failed
+     * @param onLoaded 在客户端线程回调；加载失败时参数为 {@code null}
      */
     public void loadRecordingFileAsync(String id, Consumer<RecordingFile> onLoaded) {
         Path file = getRecordingFile(id);
@@ -242,7 +235,7 @@ public class RecordingManager implements ClientFeature {
         }
     }
 
-    /** Persist the index after the GUI edited names or the recording list. */
+    /** GUI 改了名字或录制列表之后把索引写回磁盘。 */
     public void saveRecordings() {
         saveIndex();
     }

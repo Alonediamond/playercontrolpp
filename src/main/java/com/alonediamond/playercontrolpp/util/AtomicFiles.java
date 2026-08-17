@@ -10,12 +10,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
 /**
- * Crash-safe file writing.
+ * 崩溃安全的文件写入。
  *
- * <p>Opening a {@code FileOutputStream} on the real target truncates it immediately, so an
- * exception halfway through serialization — or a crash — leaves the file empty and the data
- * gone. Everything here writes a sibling {@code .tmp} first and only then replaces the target,
- * so a reader ever sees either the old contents or the new ones, never a half-written file.
+ * <p>直接对目标文件开流会立刻把它截断，序列化中途抛异常或游戏崩溃就只剩一个空文件，数据没了。
+ * 这里一律先写同目录的 {@code .tmp} 再替换目标，读者看到的永远是完整的旧内容或完整的新内容。
  */
 public final class AtomicFiles {
 
@@ -23,12 +21,12 @@ public final class AtomicFiles {
 
     private AtomicFiles() {}
 
-    /** A writer that is allowed to throw {@link IOException}. */
+    /** 允许抛 {@link IOException} 的写入回调。 */
     public interface IoSink<T> {
         void accept(T target) throws IOException;
     }
 
-    /** Write UTF-8 text, replacing {@code target} atomically. */
+    /** 写 UTF-8 文本，原子替换 {@code target}。 */
     public static void writeString(Path target, String content) throws IOException {
         writeVia(target, tmp -> {
             try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
@@ -37,7 +35,7 @@ public final class AtomicFiles {
         });
     }
 
-    /** Stream bytes, replacing {@code target} atomically. */
+    /** 写字节流，原子替换 {@code target}。 */
     public static void writeStream(Path target, IoSink<OutputStream> body) throws IOException {
         writeVia(target, tmp -> {
             try (OutputStream out = Files.newOutputStream(tmp)) {
@@ -47,9 +45,8 @@ public final class AtomicFiles {
     }
 
     /**
-     * Hand {@code body} a temporary path to write, then move it onto {@code target}.
-     * Use this for APIs that insist on writing a {@link Path} themselves, such as
-     * {@code NbtIo.writeCompressed}.
+     * 把临时路径交给 {@code body} 自己写，写完再挪到 {@code target}。
+     * 给那些坚持自己拿 {@link Path} 写的 API 用，比如 {@code NbtIo.writeCompressed}。
      */
     public static void writeVia(Path target, IoSink<Path> body) throws IOException {
         Path parent = target.getParent();
@@ -61,19 +58,18 @@ public final class AtomicFiles {
             body.accept(tmp);
             move(tmp, target);
         } finally {
-            // A failed write must not leave debris behind for the next attempt to trip over.
+            // 写失败不要留下残骸，否则下次写入会踩到它。
             try {
                 Files.deleteIfExists(tmp);
             } catch (IOException ignored) {
-                // Nothing useful to do; the next write overwrites it anyway.
+                // 没什么可做的，下次写入反正会覆盖。
             }
         }
     }
 
     /**
-     * ATOMIC_MOVE works on NTFS and ext4 within one volume, which covers every realistic
-     * config directory. Fall back to a plain replace when the filesystem refuses — still far
-     * better than truncate-then-write, because the data is already fully on disk.
+     * ATOMIC_MOVE 在同卷的 NTFS / ext4 上都可用，覆盖所有现实中的配置目录。
+     * 文件系统拒绝时退化为普通替换——数据已经完整落盘，仍然远好于"先截断再写"。
      */
     private static void move(Path from, Path to) throws IOException {
         try {
@@ -84,10 +80,9 @@ public final class AtomicFiles {
     }
 
     /**
-     * Move a file that failed to parse out of the way, so the next save cannot silently
-     * overwrite data the user might still want to recover by hand.
+     * 把解析失败的文件挪走，避免下一次保存把用户还想手工抢救的数据静默覆盖掉。
      *
-     * @return the path the file was moved to, or {@code null} if it could not be moved
+     * @return 挪到的新路径；挪不动时返回 {@code null}
      */
     public static Path quarantine(Path file) {
         for (int n = 1; n <= 100; n++) {

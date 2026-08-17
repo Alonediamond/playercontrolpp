@@ -9,6 +9,12 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * 全模组唯一的 Mixin。
+ *
+ * <p>潜行与疾跑是实体<b>状态</b>，不是按键状态：只声明按键不足以让原版在 tick 末尾保持它们，
+ * 所以回放和路径疾跑要在 {@code LocalPlayer.tick()} 之后把状态补回去。
+ */
 @Mixin(LocalPlayer.class)
 public abstract class MixinLocalPlayer {
 

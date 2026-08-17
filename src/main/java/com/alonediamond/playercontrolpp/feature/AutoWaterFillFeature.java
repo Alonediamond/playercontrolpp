@@ -34,19 +34,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Waterlogs blocks that a loaded Litematica schematic wants waterlogged but the world does not
- * have filled yet.
+ * 给「投影里该含水、世界里还没含水」的方块填水。
  *
  * <pre>
  * SCANNING -&gt; FINDING_BUCKET -&gt; [SHULKERING] -&gt; ROTATING -&gt; PLACING_WATER -&gt; COOLDOWN -&gt; SCANNING
  * </pre>
  *
- * <p>SHULKERING is entered only when no loose water bucket is left but one is sitting inside a
- * shulker box in the inventory and QuickShulker is installed to open it in place.
+ * <p>只有散装水桶用完、物品栏里有潜影盒装着水桶、且装了 QuickShulker 能就地开盒时，
+ * 才会进入 SHULKERING。
  *
- * <p>When nothing in range needs water the feature enters AUTO_STOP_COUNTDOWN and keeps
- * re-scanning at a reduced rate for three seconds, so walking to the next spot resumes it
- * without another hotkey press.
+ * <p>范围内没有要填的方块时进入 AUTO_STOP_COUNTDOWN，三秒内以较低频率继续扫，
+ * 走到下一处会自动接着干，不必再按一次热键。
  */
 public class AutoWaterFillFeature {
 
@@ -60,23 +58,22 @@ public class AutoWaterFillFeature {
         AUTO_STOP_COUNTDOWN
     }
 
-    /** Auto-stop grace period: 3 seconds at 20 tps. */
+    /** 自动停止的宽限期：20 tps 下 3 秒。 */
     private static final int AUTO_STOP_TICKS = 60;
-    /** During the countdown, only re-scan this often — it is otherwise a per-tick 11³ sweep. */
+    /** 倒计时期间的重扇间隔（否则就是每 tick 扫一遍 11³ 的立方体）。 */
     private static final int COUNTDOWN_SCAN_INTERVAL = 5;
-    /** Ticks to wait for a QuickShulker-opened container screen before giving up. */
+    /** 等 QuickShulker 打开的容器界面，超过这么多 tick 就放弃。 */
     private static final int SHULKER_OPEN_WAIT_TICKS = 20;
-    /** How many times to try pulling a bucket out of a shulker box before stopping. */
+    /** 从潜影盒里掏水桶最多试几次，超了就停。 */
     private static final int MAX_SHULKER_ATTEMPTS = 3;
-    /** Max rotation per tick while aiming, in degrees. */
+    /** 瞄准时每 tick 最大转动角度。 */
     private static final float MAX_TURN_STEP = 20.0f;
-    /** Aim tolerance before clicking, in degrees. */
+    /** 点击前允许的瞄准误差（度）。 */
     private static final float AIM_YAW_TOLERANCE = 2.0f;
     private static final float AIM_PITCH_TOLERANCE = 1.0f;
     /**
-     * How long a block stays on the "just tried it" list. The server takes a few ticks to echo
-     * the new waterlogged state back, and without this the next scan re-targets the same block
-     * and right-clicks it again.
+     * 一个方块留在「刚试过」名单里的时长。服务端要几 tick 才把新的含水状态回传，
+     * 没有这个冷却，下一次扫描会又选中同一个方块再右键一次。
      */
     private static final int RETRY_BLOCK_COOLDOWN = 20;
 
@@ -87,15 +84,15 @@ public class AutoWaterFillFeature {
     private static int tickCounter;
     private static int shulkerAttempts;
     private static BlockPos currentTarget;
-    /** pos -&gt; the tick at which it becomes a candidate again. */
+    /** 坐标 -&gt; 它重新成为候选的 tick。 */
     private static final Map<BlockPos, Integer> recentlyAttempted = new HashMap<>();
     private static final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
-    /** Cached handle for {@code schematicWorld.getBlockState(BlockPos)}. */
+    /** {@code schematicWorld.getBlockState(BlockPos)} 的缓存句柄。 */
     private static Method schematicGetBlockStateMethod;
     private static Object lastSchematicWorld;
 
-    /** Registered with {@link FeatureRegistry}; see {@code InitHandler}. */
+    /** 注册进 {@link FeatureRegistry}，见 {@code InitHandler}。 */
     public static final ClientFeature FEATURE = new ClientFeature() {
         @Override public void onClientTick(Minecraft mc) { tick(mc); }
         @Override public void onWorldChange() { AutoWaterFillFeature.onWorldChange(); }
@@ -149,7 +146,7 @@ public class AutoWaterFillFeature {
     public static void tick(Minecraft mc) {
         if (!enabled || mc.player == null || mc.level == null) return;
 
-        // Safety: pause while sneaking, so the player can always take back control.
+        // 安全阀：潜行时暂停，玩家随时能夺回控制权。
         if (mc.player.isShiftKeyDown()) return;
 
         if (mc.player.isDeadOrDying()) {
@@ -172,9 +169,7 @@ public class AutoWaterFillFeature {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // State: SCANNING
-    // -------------------------------------------------------------------------
+    // ---- SCANNING ----
 
     private static void tickScanning(Minecraft mc) {
         currentTarget = findNearestTarget(mc);
@@ -190,14 +185,12 @@ public class AutoWaterFillFeature {
         autoStopCountdown = AUTO_STOP_TICKS;
     }
 
-    // -------------------------------------------------------------------------
-    // State: FINDING_BUCKET
-    // -------------------------------------------------------------------------
+    // ---- FINDING_BUCKET ----
 
     private static void tickFindingBucket(Minecraft mc) {
         Inventory inv = mc.player.getInventory();
 
-        // 1) Already in the hotbar — just select it.
+        // 1) 快捷栏里就有：直接选中。
         for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
             if (isWaterBucket(inv.getItem(i))) {
                 selectHotbarSlot(mc, i);
@@ -207,7 +200,7 @@ public class AutoWaterFillFeature {
             }
         }
 
-        // 2) In the main inventory — swap it down into the hotbar.
+        // 2) 在主背包里：换到快捷栏。
         int bucketSlot = -1;
         for (int i = PlayerUtil.HOTBAR_SIZE; i < Inventory.INVENTORY_SIZE; i++) {
             if (isWaterBucket(inv.getItem(i))) {
@@ -224,7 +217,7 @@ public class AutoWaterFillFeature {
             return;
         }
 
-        // 3) Last resort: a bucket inside a shulker box, opened in place via QuickShulker.
+        // 3) 最后一招：潜影盒里的水桶，用 QuickShulker 就地开盒取出。
         int shulkerSlot = findShulkerSlotWithWaterBucket(inv);
         if (shulkerSlot < 0) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.water_fill.no_bucket");
@@ -239,12 +232,11 @@ public class AutoWaterFillFeature {
             return;
         }
 
-        // Count the attempt before making it, not after it succeeds. The countdown state resets
-        // its own timer whenever it re-finds a target, so an attempt that keeps failing would
-        // otherwise ping-pong between the two states forever, spamming the action bar.
+        // 先计次再去试，而不是成功后才计。倒计时状态每次重新找到目标都会重置计时器，
+        // 一直失败的尝试若不先计次，两个状态会无限来回弹，把 ActionBar 刷爆。
         shulkerAttempts++;
 
-        // QuickShulker addresses slots by container-screen index, not inventory index.
+        // QuickShulker 的槽位参数是容器界面索引，不是物品栏索引。
         int screenSlot = shulkerSlot < PlayerUtil.HOTBAR_SIZE
                 ? InventoryMenu.USE_ROW_SLOT_START + shulkerSlot
                 : shulkerSlot;
@@ -257,7 +249,7 @@ public class AutoWaterFillFeature {
         state = State.SHULKERING;
     }
 
-    /** @return an empty hotbar slot, or the currently selected one if the hotbar is full. */
+    /** @return 一个空的快捷栏格；快捷栏满了则返回当前选中格。 */
     private static int firstFreeHotbarSlot(Inventory inv) {
         for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
             if (inv.getItem(i).isEmpty()) return i;
@@ -265,7 +257,7 @@ public class AutoWaterFillFeature {
         return InventoryCompat.getSelectedSlot(inv);
     }
 
-    /** @return the inventory index of a shulker box holding a water bucket, or -1. */
+    /** @return 装着水桶的潜影盒所在的物品栏索引；没有则 -1。 */
     private static int findShulkerSlotWithWaterBucket(Inventory inv) {
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             ItemStack stack = inv.getItem(i);
@@ -277,11 +269,10 @@ public class AutoWaterFillFeature {
     }
 
     /**
-     * Select a hotbar slot and tell the server about it.
+     * 选中一个快捷栏格并告知服务端。
      *
-     * <p>Setting the selected slot only changes the client; without
-     * ServerboundSetCarriedItemPacket the server still believes the previous item is held, and
-     * {@code useItemOn} silently does nothing.
+     * <p>只改选中槽位只影响客户端；不发 ServerboundSetCarriedItemPacket 的话服务端仍认为
+     * 玩家手持之前那个物品，{@code useItemOn} 会静默失败。
      */
     private static void selectHotbarSlot(Minecraft mc, int slot) {
         InventoryCompat.setSelectedSlot(mc.player.getInventory(), slot);
@@ -291,17 +282,15 @@ public class AutoWaterFillFeature {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // State: SHULKERING
-    // -------------------------------------------------------------------------
+    // ---- SHULKERING ----
 
     /**
-     * Waits for the QuickShulker-opened screen, pulls out exactly one water bucket, closes up
-     * and goes back through FINDING_BUCKET so the bucket ends up selected in the hotbar.
+     * 等 QuickShulker 开出的界面，只取一个水桶，关掉，再回 FINDING_BUCKET
+     * 让水桶最终被选到手上。
      */
     private static void tickShulkering(Minecraft mc) {
         if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
-            // The packet round-trip takes a few ticks; only fail once the wait runs out.
+            // 包往返要几 tick，等满了才算失败。
             if (--stateTimer <= 0) {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
                 beginAutoStopCountdown();
@@ -312,12 +301,12 @@ public class AutoWaterFillFeature {
         AbstractContainerMenu handler = mc.player.containerMenu;
         boolean tookOne = false;
         for (Slot slot : handler.slots) {
-            // Skip the player-inventory half of the screen; we only want the box's own slots.
+            // 跳过界面里玩家背包那一半，只要盒子自己的槽位。
             if (slot.container == mc.player.getInventory()) continue;
             if (!isWaterBucket(slot.getItem())) continue;
             SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
             tookOne = true;
-            break; // one bucket is all we need — the original emptied the whole box
+            break; // 一个水桶就够，早先的实现会把整盒描空
         }
 
         mc.player.closeContainer();
@@ -330,9 +319,7 @@ public class AutoWaterFillFeature {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // State: ROTATING
-    // -------------------------------------------------------------------------
+    // ---- ROTATING ----
 
     private static void tickRotating(Minecraft mc) {
         if (currentTarget == null) {
@@ -368,9 +355,7 @@ public class AutoWaterFillFeature {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // State: PLACING_WATER
-    // -------------------------------------------------------------------------
+    // ---- PLACING_WATER ----
 
     private static void tickPlacingWater(Minecraft mc) {
         if (currentTarget == null || mc.gameMode == null) {
@@ -378,7 +363,7 @@ public class AutoWaterFillFeature {
             return;
         }
 
-        // The bucket emptied, or something else got selected — keep the target, re-arm the hand.
+        // 桶空了或手上被换成别的：保留目标，重新装备。
         if (!isWaterBucket(mc.player.getMainHandItem())) {
             state = State.FINDING_BUCKET;
             return;
@@ -394,8 +379,8 @@ public class AutoWaterFillFeature {
             return;
         }
 
-        // Both calls are needed: useItemOn sends the block-targeted packet, useItem makes the
-        // server run BucketItem's use-on-block path that actually waterlogs.
+        // 两个调用都要：useItemOn 发出针对方块的交互包，useItem 才让服务端走
+        // BucketItem 那条真正含水的分支。
         Vec3 center = Vec3.atCenterOf(currentTarget);
         BlockHitResult hitResult = new BlockHitResult(center, Direction.UP, currentTarget, false);
         mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
@@ -407,7 +392,7 @@ public class AutoWaterFillFeature {
         stateTimer = Configs.Settings.WATER_FILL_OPERATION_DELAY.getIntegerValue();
     }
 
-    /** Give up on the current target without counting it as an attempt worth cooling down. */
+    /** 放弃当前目标（仍记入冷却，免得下一趟又选它）。 */
     private static void abandonTarget() {
         if (currentTarget != null) {
             markAttempted(currentTarget);
@@ -416,9 +401,7 @@ public class AutoWaterFillFeature {
         state = State.SCANNING;
     }
 
-    // -------------------------------------------------------------------------
-    // State: COOLDOWN
-    // -------------------------------------------------------------------------
+    // ---- COOLDOWN ----
 
     private static void tickCooldown(Minecraft mc) {
         if (--stateTimer <= 0) {
@@ -426,15 +409,12 @@ public class AutoWaterFillFeature {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // State: AUTO_STOP_COUNTDOWN
-    // -------------------------------------------------------------------------
+    // ---- AUTO_STOP_COUNTDOWN ----
 
     private static void tickAutoStopCountdown(Minecraft mc) {
         autoStopCountdown--;
 
-        // Re-scan periodically rather than every tick: the sweep is the expensive part and the
-        // player cannot walk far in a quarter of a second.
+        // 定期重扫而不是每 tick 扫：扫描是最贵的一步，而玩家四分之一秒走不了多远。
         if (autoStopCountdown % COUNTDOWN_SCAN_INTERVAL == 0) {
             BlockPos found = findNearestTarget(mc);
             if (found != null) {
@@ -451,19 +431,15 @@ public class AutoWaterFillFeature {
         }
     }
 
-    // =========================================================================
-    // Scanning
-    // =========================================================================
+    // ---- 扫描 ----
 
     /**
-     * Sweeps the reach-limited cube around the player for the closest block the schematic wants
-     * waterlogged and the world does not have filled.
+     * 在受手长限制的立方体里找最近的「投影要含水、世界还没含水」的方块。
      *
-     * <p>Single pass with a reused {@link BlockPos.MutableBlockPos}: the old version allocated a
-     * BlockPos per candidate, collected every hit into a list and then sorted the whole list only
-     * to read element 0.
+     * <p>单趟扫描 + 复用一个 {@link BlockPos.MutableBlockPos}：早先的实现每个候选分配一个
+     * BlockPos、把命中全收进列表再排序，而结果只读第 0 个。
      *
-     * @return the nearest candidate, or {@code null} if there is none
+     * @return 最近的候选；没有则 {@code null}
      */
     private static BlockPos findNearestTarget(Minecraft mc) {
         BlockGetter schematicWorld = schematicWorldOrNull();
@@ -496,7 +472,7 @@ public class AutoWaterFillFeature {
                     try {
                         schematicState = schematicWorld.getBlockState(cursor);
                     } catch (Exception e) {
-                        continue; // outside the schematic's own bounds
+                        continue; // 超出投影自身范围
                     }
                     if (!isWaterlogged(schematicState)) continue;
 
@@ -504,7 +480,7 @@ public class AutoWaterFillFeature {
                     if (worldState.getBlock() != schematicState.getBlock()) continue;
                     if (isWaterlogged(worldState)) continue;
 
-                    best = cursor.immutable(); // must copy: the cursor keeps moving
+                    best = cursor.immutable(); // 必须复制：游标还要继续动
                     bestDistSq = distSq;
                 }
             }
@@ -530,13 +506,12 @@ public class AutoWaterFillFeature {
     }
 
     /**
-     * Confirms against the schematic that {@code pos} really should be waterlogged, and that the
-     * world block there is the one the schematic expects. Re-checked immediately before clicking
-     * because the scan may be several ticks old by then.
+     * 点击前再跟投影核对一次：{@code pos} 确实该含水，且世界里那个方块就是投影期望的方块。
+     * 必须重查——扫描结果到这时可能已经过期几 tick。
      */
     private static boolean schematicWantsWaterAt(Minecraft mc, BlockPos pos, BlockState worldState) {
         Object schematicWorld = LitematicaIntegration.getInstance().getSchematicWorld();
-        if (schematicWorld == null) return true; // no schematic to contradict us
+        if (schematicWorld == null) return true; // 没有投影能反驳，就按扫描结果办
 
         if (schematicWorld != lastSchematicWorld || schematicGetBlockStateMethod == null) {
             lastSchematicWorld = schematicWorld;
@@ -555,14 +530,12 @@ public class AutoWaterFillFeature {
                 return worldState.getBlock() == schemState.getBlock() && isWaterlogged(schemState);
             }
         } catch (Exception ignored) {
-            // Litematica internals changed shape — fall through and trust the scan.
+            // Litematica 内部结构变了：往下走，相信扫描结果。
         }
         return true;
     }
 
-    // =========================================================================
-    // Retry cooldown bookkeeping
-    // =========================================================================
+    // ---- 重试冷却记账 ----
 
     private static void markAttempted(BlockPos pos) {
         recentlyAttempted.put(pos.immutable(), tickCounter + RETRY_BLOCK_COOLDOWN);
@@ -573,22 +546,20 @@ public class AutoWaterFillFeature {
         recentlyAttempted.values().removeIf(expiry -> expiry <= tickCounter);
     }
 
-    // =========================================================================
-    // Misc helpers
-    // =========================================================================
+    // ---- 杂项 ----
 
     private static boolean isWaterBucket(ItemStack stack) {
         return ItemUtil.is(stack, Items.WATER_BUCKET);
     }
 
     /**
-     * Swap the item in {@code inventorySlot} (Inventory index 9-35) with the one in
-     * {@code hotbarSlot} (Inventory index 0-8), via three container clicks so the server agrees.
+     * 把 {@code inventorySlot}（物品栏索引 9-35）与 {@code hotbarSlot}（0-8）的物品互换，
+     * 走三次容器点击，让服务端跟着换。
      */
     private static void swapSlotWithHotbar(Minecraft mc, int inventorySlot, int hotbarSlot) {
         int syncId = mc.player.inventoryMenu.containerId;
-        // Inventory indices and screen slot indices are not the same numbering:
-        //   main[9-35] -> screen 9-35, main[0-8] -> screen 36-44.
+        // 物品栏索引和界面槽位索引不是同一套编号：
+        //   主背包[9-35] -> 界面 9-35，快捷栏[0-8] -> 界面 36-44。
         int screenInvSlot = inventorySlot;
         int screenHotbarSlot = InventoryMenu.USE_ROW_SLOT_START + hotbarSlot;
         SlotActionCompat.pickup(mc, syncId, screenInvSlot);
