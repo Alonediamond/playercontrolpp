@@ -34,3 +34,17 @@ run/
 
 # NOTE: libs/ is intentionally NOT ignored — the malilib / ModMenu jars for every
 # supported Minecraft version are committed so the project builds after a plain clone.
+/.gradle-user-home/daemon/9.5.1/daemon-37432.out.log
+/.gradle-user-home/daemon/9.5.1/daemon-44924.out.log
+/.gradle-user-home/native/0.2.8/x86_64-windows-gnu/gradle-fileevents.dll
+/.gradle-user-home/native/0.2.8/x86_64-windows-gnu/gradle-fileevents.dll.lock
+/.gradle-user-home/native/jansi/2.4.2/Windows/x86_64/jansi.dll
+/.gradle-user-home/native/660c5614fbf4a5f2a75b1949f50a0caf5cd603558e7d8a26e50b933a0cfb79d1/windows-amd64/native-platform.dll
+/.gradle-user-home/native/660c5614fbf4a5f2a75b1949f50a0caf5cd603558e7d8a26e50b933a0cfb79d1/windows-amd64/native-platform.dll.lock
+/.gradle-user-home/daemon/9.5.1/registry.bin
+/.gradle-user-home/daemon/9.5.1/registry.bin.lock
+/.gradle-user-home/notifications/9.5.1/release-features.rendered
+/功能改进完成报告.md
+/容器缓存功能重构说明.md
+/最终完成报告.md
+/缓存投影选区容器-使用指南.md
