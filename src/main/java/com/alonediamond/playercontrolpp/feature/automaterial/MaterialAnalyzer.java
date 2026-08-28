@@ -21,9 +21,15 @@ import java.util.Set;
 /**
  * 读材料清单，算出还要收集什么，同时尊重清单方自己的忽略列表和本模组的全局忽略列表。
  *
- * <p>数据来源由 {@code materialListSource} 配置决定：跟随投影时读 Litematica 的材料清单
- * （要求其信息HUD开着，即使 LitematList 已接管也照常读HUD）；跟随 LitematList 时读它
+ * <p>数据来源由 {@code materialListSource} 配置决定：跟随投影时读 Litematica 自己的材料清单
+ * （要求其信息HUD开着；若清单已被 LitematList 接管则停机提示）；跟随 LitematList 时读它
  * 上传区域里处理过替换/忽略/聚合的清单，不要求投影HUD。
+ *
+ * <p>条目的 {@code neededCount} 一律写<b>需求总量</b>（投影的 countMissing / LitematList 的
+ * totalCount），不是扣除持有量后的缺口。缺口只用来过滤「已经齐了」的条目；
+ * 「还差多少」由运行中的 countEverywhere（含潜影盒内的持有量）对总量实时判定。
+ * 两者口径必须一致：早先把「总量−持有量」当目标量、又拿持有总量去比满足，
+ * 拿过一整盒后重启就会双重扣减——缺口 1152 被持有 1786 直接判满，误报「备货完毕」。
  */
 public class MaterialAnalyzer {
 
@@ -45,7 +51,7 @@ public class MaterialAnalyzer {
             ctx.missingItems.clear();
             ctx.missingItems.addAll(missing);
 
-            // 缺口最大的排前面：这些最可能需要整盒搬。
+            // 需求量最大的排前面：这些最可能需要整盒搬。
             ctx.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
 
             if (ctx.missingItems.isEmpty()) {
@@ -87,10 +93,11 @@ public class MaterialAnalyzer {
     }
 
     /**
-     * 跟随投影：读 Litematica 的材料清单。
+     * 跟随投影：读 Litematica 自己的材料清单。
      *
-     * <p>就算 LitematList 接管了 DataManager 里的清单也走这条路——接管后 HUD 显示的就是
-     * 接管后的内容，「跟随投影」的含义本来就是跟随HUD当前显示的清单。
+     * <p>LitematList 接管后 DataManager 里躺着的已是它的注入清单，投影自身的清单读不到，
+     * 这条路与「跟随LitematList」也就无从区分——所以检测到接管时直接停机提示，
+     * 让玩家在 LitematList 里取消接管，或把数据来源切换成跟随LitematList。
      */
     private List<MaterialItemEntry> readFromLitematica(GatherContext ctx, TaskStateMachine tsm) throws Exception {
         Object materialList = litematica.getMaterialList();
@@ -100,7 +107,17 @@ public class MaterialAnalyzer {
             return null;
         }
 
-        // Litematica 只在自己的 HUD 开着时才维护这个清单。
+        // DataManager 里的清单被换成了非投影包名的实现（LitematList 的注入清单等）：
+        // 投影自身的清单已被接管、无从读取。继续跑只会拿着接管数据冒充「跟随投影」，
+        // 所以按玩家「跟随投影」的意图直接停机提示。
+        if (!materialList.getClass().getName().startsWith("fi.dy.masa.litematica.")) {
+            MessageUtil.sendActionBar(ctx.client,
+                    "playercontrolpp.message.baritone.litematlist_took_over");
+            tsm.setState(State.STOPPED);
+            return null;
+        }
+
+        // 投影只在自己的 HUD 开着时才维护原生清单。
         Object hudRenderer = materialList.getClass().getMethod("getHudRenderer").invoke(materialList);
         boolean hudShowing = (Boolean) hudRenderer.getClass()
                 .getMethod("getShouldRenderCustom").invoke(hudRenderer);
@@ -130,9 +147,9 @@ public class MaterialAnalyzer {
 
             int countMissing = (Integer) entry.getClass().getMethod("getCountMissing").invoke(entry);
             int countAvailable = (Integer) entry.getClass().getMethod("getCountAvailable").invoke(entry);
-            int needed = countMissing - countAvailable;
-            if (needed > 0) {
-                missing.add(new MaterialItemEntry(stack.getItem(), needed,
+            // 目标量写总量 countMissing；countAvailable 只用来判断这条还缺不缺。
+            if (countAvailable < countMissing) {
+                missing.add(new MaterialItemEntry(stack.getItem(), countMissing,
                         stack.getMaxStackSize()));
             }
         }
@@ -166,10 +183,10 @@ public class MaterialAnalyzer {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
 
-            // missingCount 与投影清单的「countMissing - countAvailable」同义：
-            // 已按 LitematList 自己的口径（含潜影盒内的持有量）扣除。
+            // missingCount 是 LitematList 按它自己的口径（含潜影盒内持有量）算出的缺口，
+            // 这里只拿它过滤已齐的条目；目标量同样写总量 totalCount，口径与投影路径一致。
             if (entry.missingCount() > 0) {
-                missing.add(new MaterialItemEntry(entry.stack().getItem(), entry.missingCount(),
+                missing.add(new MaterialItemEntry(entry.stack().getItem(), entry.totalCount(),
                         entry.stack().getMaxStackSize()));
             }
         }

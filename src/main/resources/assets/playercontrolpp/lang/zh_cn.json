@@ -109,6 +109,7 @@
 
   "playercontrolpp.message.baritone.litematlist_no_list": "[PlayerControl++] LitematList 中没有已上传的材料列表，请先在 LitematList 中上传投影文件或材料清单。",
   "playercontrolpp.message.baritone.litematlist_not_loaded": "[PlayerControl++] 未检测到 LitematList 模组，无法跟随其材料清单。",
+  "playercontrolpp.message.baritone.litematlist_took_over": "[PlayerControl++] 检测到 LitematList 已接管投影材料清单，无法跟随投影自身的信息HUD。请在 LitematList 中取消上传（接管），或将「备货数据来源」切换为「跟随LitematList清单」。",
 
   "playercontrolpp.config.baritone.name.enableGlobalIgnore": "启用全局材料忽略",
   "playercontrolpp.config.baritone.pretty_name.enableGlobalIgnore": "启用全局材料忽略",
@@ -138,7 +139,7 @@
 
   "playercontrolpp.config.baritone.name.shulkerBoxPriorityThreshold": "整盒优先阈值",
   "playercontrolpp.config.baritone.pretty_name.shulkerBoxPriorityThreshold": "整盒优先阈值",
-  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "当某种材料的缺口超过该数量（64~1728）时，若箱子追踪缓存中存有装着该材料的整盒（潜影盒），则优先搬走整盒，而不是按组取散装；缓存里没有整盒时仍按组取散装。默认：256。",
+  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "当某种材料的缺口超过该数量（64~1728）时，若箱子追踪缓存中存有装着该材料的整盒（潜影盒），则优先搬走整盒，而不是按组取散装；缓存里没有整盒时仍按组取散装。默认：864。",
 
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] 背包已满 — 正在将材料存入潜影盒...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] 潜影盒存储完成，继续备货。",

@@ -30,6 +30,7 @@ public class LitematListIntegration implements ModIntegration {
     private Method getMaterialListMethod;
     private Class<?> entryClass;
     private Method itemStackMethod;
+    private Method totalCountMethod;
     private Method missingCountMethod;
 
     private LitematListIntegration() {}
@@ -44,8 +45,10 @@ public class LitematListIntegration implements ModIntegration {
         loaded = FabricLoader.getInstance().isModLoaded("litematlist");
     }
 
-    /** LitematList 上传清单里的一条：物品堆，以及按它的算法算出的还缺多少。 */
-    public record MaterialEntry(ItemStack stack, int missingCount) {}
+    /**
+     * LitematList 上传清单里的一条：物品堆、需求总量，以及按它的算法算出的还缺多少。
+     */
+    public record MaterialEntry(ItemStack stack, int totalCount, int missingCount) {}
 
     /**
      * 读取 LitematList 上传区域的材料列表（已含替换、忽略与项目聚合处理）。
@@ -65,6 +68,7 @@ public class LitematListIntegration implements ModIntegration {
             if (entryClass != first.getClass()) {
                 entryClass = first.getClass();
                 itemStackMethod = entryClass.getMethod("itemStack");
+                totalCountMethod = entryClass.getMethod("totalCount");
                 missingCountMethod = entryClass.getMethod("missingCount");
             }
 
@@ -72,8 +76,9 @@ public class LitematListIntegration implements ModIntegration {
             for (Object item : items) {
                 ItemStack stack = (ItemStack) itemStackMethod.invoke(item);
                 if (stack == null || stack.isEmpty()) continue;
+                int total = (Integer) totalCountMethod.invoke(item);
                 int missing = (Integer) missingCountMethod.invoke(item);
-                result.add(new MaterialEntry(stack, missing));
+                result.add(new MaterialEntry(stack, total, missing));
             }
             return result;
         } catch (Exception e) {

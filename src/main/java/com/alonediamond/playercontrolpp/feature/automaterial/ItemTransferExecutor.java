@@ -4,7 +4,6 @@ import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
-import com.alonediamond.playercontrolpp.feature.ItemTransferStrategy;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
@@ -19,8 +18,17 @@ import net.minecraft.world.item.ItemStack;
 import java.util.List;
 
 /**
- * 从打开的容器里往外挪物品：散装堆和整个潜影盒，两者都受 {@link ItemTransferStrategy}
- * 为当前物品算出的计划约束。
+ * 从打开的容器里往外挪物品。
+ *
+ * <p>取货量不靠开工前的计划，而是每次点击都用实时缺口重判，规则只有两条：
+ * <ul>
+ *   <li>缺口 &gt; 整盒阈值 → 优先搬走装有所需物品的整盒（连拿，直到缺口降回阈值以内）；</li>
+ *   <li>缺口 ≤ 阈值且 &gt; 0 → 按组取散装补满。</li>
+ * </ul>
+ *
+ * <p>所以缺 1.7 盒会一次性连拿 2 盒；阈值设 1728 时，拿 1 盒后剩余缺口不足一盒，
+ * 会自动改拿散装。整个流程没有事先算好的「几盒几组」计划——计划是开工前按当时缺口
+ * 定死的，而缺口每拿一下都在变，按计划封顶反而会在同一容器里提前收手。
  */
 public class ItemTransferExecutor {
 
@@ -41,8 +49,6 @@ public class ItemTransferExecutor {
     /** 换到下一个缺失物品，或者结束。 */
     public void nextItem(GatherContext ctx, TaskStateMachine tsm) {
         ctx.justTookShulkerBox = false;
-        ctx.totalBoxesTakenForItem = 0;
-        ctx.totalStacksTakenForItem = 0;
 
         if (ctx.currentItemIndex >= ctx.missingItems.size()) {
             tsm.setState(State.COMPLETED);
@@ -56,17 +62,14 @@ public class ItemTransferExecutor {
         ctx.currentPosIndex = 0;
         ctx.chestRetryCount = 0;
         ctx.foundPositions.clear();
+        // 对上一件物品空手的容器，对这一件可能还有货。
+        ctx.exhaustedPositions.clear();
 
         if (ctx.currentlyGathered >= ctx.targetNeededTotal) {
             ctx.currentItemIndex++;
             tsm.setState(State.NEXT_ITEM);
             return;
         }
-
-        int stillNeeded = ctx.targetNeededTotal - ctx.currentlyGathered;
-        ctx.currentTransferPlan = ItemTransferStrategy.calculate(stillNeeded, entry.maxStackSize);
-        ctx.stacksTakenThisContainer.clear();
-        ctx.shulkerBoxesTakenThisContainer.clear();
 
         tsm.setState(State.SEARCHING);
     }
@@ -91,19 +94,19 @@ public class ItemTransferExecutor {
         AbstractContainerMenu handler = mc.player.containerMenu;
         List<Slot> slots = handler.slots;
 
-        // 计划里要整盒、或本次搜索开了整盒优先时，先拿盒子，
-        // 免得散装先把背包塞满、腾不出放盒子的空间。
-        boolean boxesFirst = ctx.wholeBoxPriority
-                || (ctx.currentTransferPlan.shulkerBoxes > 0
-                    && ctx.totalBoxesTakenForItem < ctx.currentTransferPlan.shulkerBoxes);
-
-        if (boxesFirst) {
+        // 整盒优先时先拿盒子，免得散装先把背包塞满、腾不出放盒子的空间。
+        // 没开整盒优先时散装在前，但整盒依然可作为散装耗尽后的兜底。
+        if (ctx.wholeBoxPriority) {
             if (tryTransferShulkerBoxes(mc, handler, slots, ctx)) return;
             if (tryTransferLooseItems(mc, handler, slots, ctx)) return;
         } else {
             if (tryTransferLooseItems(mc, handler, slots, ctx)) return;
             if (tryTransferShulkerBoxes(mc, handler, slots, ctx)) return;
         }
+
+        // 这次探访一无所获：记进排除表，后续搜索不再来。
+        // 不记的话，缓存里早已搬空的容器（箱子追踪刷新前仍显示有货）会被无限开关。
+        ctx.exhaustedPositions.add(ctx.currentContainerTarget);
 
         mc.player.closeContainer();
         ctx.transferCooldown = CLOSE_COOLDOWN;
@@ -121,8 +124,6 @@ public class ItemTransferExecutor {
             return;
         }
 
-        ctx.stacksTakenThisContainer.clear();
-        ctx.shulkerBoxesTakenThisContainer.clear();
         ctx.currentPosIndex++;
         ctx.adjacentContainerTargets = null;
         ctx.adjacentTryIndex = 0;
@@ -148,7 +149,7 @@ public class ItemTransferExecutor {
 
     // --- Transfer phases ---
 
-    /** 在计划的盒子额度内，搬走一个装有所需物品的整盒。 */
+    /** 缺口超过阈值时，搬走一个装有所需物品的整盒。 */
     private boolean tryTransferShulkerBoxes(Minecraft mc, AbstractContainerMenu handler,
                                             List<Slot> slots, GatherContext ctx) {
         for (Slot slot : slots) {
@@ -168,7 +169,7 @@ public class ItemTransferExecutor {
         return false;
     }
 
-    /** 在计划的组数额度内，取一组所需物品的散装。 */
+    /** 取一组所需物品的散装。 */
     private boolean tryTransferLooseItems(Minecraft mc, AbstractContainerMenu handler,
                                           List<Slot> slots, GatherContext ctx) {
         for (Slot slot : slots) {
@@ -216,48 +217,34 @@ public class ItemTransferExecutor {
         return best;
     }
 
+    /** 取一组所需物品的散装。只看实时缺口，缺口补到 0 自然停。 */
     private boolean tryTransferLoose(Minecraft mc, AbstractContainerMenu handler, Slot slot,
                                      MaterialItemEntry entry, GatherContext ctx) {
-        int needed = entry.neededCount - countInInventory(entry.item, ctx.client);
+        // 口径用 countEverywhere（含盒内持有），与满足判定一致：
+        // 拿过整盒后再进散装容器时，只补真实的剩余缺口。
+        int needed = entry.neededCount - countEverywhere(entry.item, ctx.client);
         if (needed <= 0) return false;
-
-        int taken = ctx.stacksTakenThisContainer.getOrDefault(entry.item, 0);
-        int stackSize = entry.maxStackSize > 0 ? entry.maxStackSize : 64;
-        int maxStacks = ItemTransferStrategy.ceilDiv(needed, stackSize);
-        if (taken >= maxStacks) return false;
 
         try {
             SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
-            ctx.stacksTakenThisContainer.put(entry.item, taken + 1);
-            ctx.totalStacksTakenForItem++;
             return true;
         } catch (Exception e) {
             return false;
         }
     }
 
+    /**
+     * 搬走一整盒。每次点击都按实时缺口对照阈值重判：缺口降回阈值以内就不再拿盒，
+     * 剩下的缺口交给散装补——这正是「阈值 1728、缺 1.7 盒」先拿 1 盒再改散装的来由。
+     */
     private boolean tryTransferShulker(Minecraft mc, AbstractContainerMenu handler, Slot slot,
                                        MaterialItemEntry entry, GatherContext ctx) {
         int needed = entry.neededCount - countEverywhere(entry.item, ctx.client);
-        if (needed <= 0) return false;
-
-        int planBoxes = ctx.currentTransferPlan.shulkerBoxes;
-        if (planBoxes > 0 && ctx.totalBoxesTakenForItem >= planBoxes) return false;
-
-        int taken = ctx.shulkerBoxesTakenThisContainer.getOrDefault(entry.item, 0);
-        int stackSize = entry.maxStackSize > 0 ? entry.maxStackSize : 64;
-        int shulkerCap = ItemTransferStrategy.SHULKER_SLOT_COUNT * stackSize;
-        int maxBoxes = ItemTransferStrategy.ceilDiv(needed, shulkerCap);
-
-        if (planBoxes > 0) {
-            maxBoxes = Math.min(maxBoxes, planBoxes - ctx.totalBoxesTakenForItem);
-        }
-        if (taken >= maxBoxes) return false;
+        int threshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
+        if (needed <= threshold) return false;
 
         try {
             SlotActionCompat.quickMove(mc, handler.containerId, slot.index);
-            ctx.shulkerBoxesTakenThisContainer.put(entry.item, taken + 1);
-            ctx.totalBoxesTakenForItem++;
             return true;
         } catch (Exception e) {
             return false;
@@ -277,20 +264,6 @@ public class ItemTransferExecutor {
                 count += stack.getCount();
             } else if (ItemUtil.isShulkerBox(stack)) {
                 count += ItemUtil.countInside(stack, item);
-            }
-        }
-        return count;
-    }
-
-    /** @return 物品栏里散装的 {@code item} 有多少个，不算盒子里的。 */
-    private int countInInventory(Item item, Minecraft mc) {
-        if (mc.player == null || item == null) return 0;
-        int count = 0;
-        Inventory inventory = mc.player.getInventory();
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack stack = inventory.getItem(i);
-            if (ItemUtil.is(stack, item)) {
-                count += stack.getCount();
             }
         }
         return count;

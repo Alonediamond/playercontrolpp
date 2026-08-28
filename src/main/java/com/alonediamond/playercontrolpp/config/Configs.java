@@ -167,8 +167,8 @@ public class Configs implements IConfigHandler {
          * 没有整盒才按组取散装。上限 1728 = 一个满盒的容量。
          */
         public static final ConfigInteger SHULKER_BOX_PRIORITY_THRESHOLD = new ConfigInteger(
-                "shulkerBoxPriorityThreshold", 256, 64, 1728,
-                "When a material's shortage exceeds this amount and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks. Falls back to loose stacks when the cache has no such boxes.")
+                "shulkerBoxPriorityThreshold", 864, 64, 1728,
+                "When a material's shortage exceeds this amount and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks. Falls back to loose stacks when the cache has no such boxes. Default: 864.")
                 .apply(KEY_BARITONE);
 
         public static final ConfigBoolean ENABLE_GLOBAL_IGNORE = new ConfigBoolean(

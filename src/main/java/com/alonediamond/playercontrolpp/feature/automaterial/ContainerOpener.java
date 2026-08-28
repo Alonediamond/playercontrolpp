@@ -142,6 +142,11 @@ public class ContainerOpener {
         ctx.adjacentContainerTargets = null;
         ctx.adjacentTryIndex = 0;
         ctx.openAttemptCount = 0;
+        // 这个坐标（连同试过的邻居）对本物品确认无货，记入排除表；
+        // 不记的话 SEARCHING 重建列表后还会回到它，开箱-关箱循环永不前进。
+        if (ctx.currentContainerTarget != null) {
+            ctx.exhaustedPositions.add(ctx.currentContainerTarget);
+        }
         ctx.chestRetryCount++;
         if (ctx.chestRetryCount >= MAX_CHEST_RETRIES) {
             ctx.chestRetryCount = 0;

@@ -1,16 +1,15 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
-import com.alonediamond.playercontrolpp.feature.ItemTransferStrategy;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 /**
  * 一次自动备货运行的共享可变状态，传给本包内每个模块。
@@ -37,6 +36,13 @@ public class GatherContext {
     public int chestRetryCount;
 
     /**
+     * 对当前物品已确认「拿不到东西」的容器坐标（缓存失效、已被搬空、整盒额度用尽等）。
+     * search() 重建候选列表时跳过它们，否则失效缓存会让开箱-关箱-再搜索的循环永不前进。
+     * 换物品时清空：对上一件物品空手的容器可能装着下一件物品。
+     */
+    public final Set<BlockPos> exhaustedPositions = new HashSet<>();
+
+    /**
      * 整盒优先：最近一次搜索发现缺口超过阈值、且箱子追踪缓存里有装着当前所需材料的整盒。
      * 为 true 时转移阶段先搬整盒再拿散装。每次 search() 重新判定。
      */
@@ -56,19 +62,12 @@ public class GatherContext {
     public BlockPos currentContainerTarget;
     public List<BlockPos> adjacentContainerTargets;
     public int adjacentTryIndex;
-    public ItemTransferStrategy.TransferPlan currentTransferPlan = ItemTransferStrategy.TransferPlan.NONE;
-    public final Map<Item, Integer> stacksTakenThisContainer = new HashMap<>();
-    public final Map<Item, Integer> shulkerBoxesTakenThisContainer = new HashMap<>();
 
     /**
      * 上一次成功转移的是否是一整个潜影盒。如果是，紧接着背包满了也不能触发自动存盒——
      * 那会把刚拿的盒子原样存回去。
      */
     public boolean justTookShulkerBox;
-
-    // 当前物品的累计数量，与计划比对以避免超量收集
-    public int totalBoxesTakenForItem;
-    public int totalStacksTakenForItem;
 
     /**
      * @return 当前正在收集的物品；清单走完后返回 {@code null}。
@@ -100,6 +99,7 @@ public class GatherContext {
         currentPosIndex = 0;
         chestRetryCount = 0;
         wholeBoxPriority = false;
+        exhaustedPositions.clear();
 
         lastPlayerPos = Vec3.ZERO;
         stuckTicks = 0;
@@ -113,12 +113,7 @@ public class GatherContext {
         currentContainerTarget = null;
         adjacentContainerTargets = null;
         adjacentTryIndex = 0;
-        currentTransferPlan = ItemTransferStrategy.TransferPlan.NONE;
-        stacksTakenThisContainer.clear();
-        shulkerBoxesTakenThisContainer.clear();
 
         justTookShulkerBox = false;
-        totalBoxesTakenForItem = 0;
-        totalStacksTakenForItem = 0;
     }
 }

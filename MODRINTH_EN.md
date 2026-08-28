@@ -36,8 +36,9 @@ in single-player, on a LAN world, and on a multiplayer server.
 | **Render-layer Sync** | Flips the schematic to the next layer each time a route completes a lap, so the blueprint follows you |
 
 > The options in the config screen **grow and shrink with the optional mods you have installed**.
-> With more compatible mods present, a few extra advanced options show up that are not listed here —
-> have a look for yourself.
+> Install a material-list manager or a pathing mod and a few extra advanced options appear —
+> like collecting whole boxes of building materials from chests, straight from your schematic.
+> Have a look for yourself.
 
 ---
 
@@ -45,7 +46,7 @@ in single-player, on a LAN world, and on a multiplayer server.
 
 1. Install **Fabric Loader**, **Fabric API** and **MaLiLib**, then drop this mod into `mods`.
 2. In game press **`P` + `C`** to open the config screen (Mod Menu works too, if you have it).
-3. Bind keys for the features you want on the **Hotkeys** tab — nothing is bound by default, so it
+3. Bind keys for the features you want on the **Main Features** tab — nothing is bound by default, so it
    cannot clash with your existing keys.
 
 The UI follows the MaLiLib convention (Litematica / Tweakeroo), so there is nothing new to learn.
@@ -69,6 +70,7 @@ All text is available in **English** and **简体中文**.
 | Litematica | Selection container caching, auto water fill, render-layer sync |
 | Chest Tracker | Container content caching |
 | QuickShulker | Opening shulker boxes straight from the inventory |
+| LitematList | Manage multiple schematic material lists (upload / merge / replace / ignore) and serve as an extra source for the auto-staging flow |
 | Mod Menu | Config entry from the mod list |
 
 ---
@@ -85,6 +87,8 @@ All text is available in **English** and **简体中文**.
 
 - Every automated routine stops or pauses immediately when you **change world, die, or open another
   screen**. Control is always one keypress away.
+- The material-staging routine stops with a clear message when your **inventory is full** or the
+  cache has nothing left to take — it never wanders off with your items.
 - Route and recording data is written atomically, so a crash will not leave you with a corrupt config.
 - Playback reproduces **key input, not coordinates**, so a little positional drift is normal. The mod
   tells you when it happens and offers an optional correction toggle.

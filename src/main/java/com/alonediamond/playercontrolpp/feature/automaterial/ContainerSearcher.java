@@ -62,14 +62,19 @@ public class ContainerSearcher {
             int stillNeeded = ctx.targetNeededTotal - ctx.currentlyGathered;
             int boxThreshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
             if (stillNeeded > boxThreshold) {
-                ctx.foundPositions.addAll(chestTracker.searchShulkerBoxWithItem(
-                        ctx.currentTargetItem, playerPos, effectiveRange));
+                for (BlockPos pos : chestTracker.searchShulkerBoxWithItem(
+                        ctx.currentTargetItem, playerPos, effectiveRange)) {
+                    // 排除表里的容器（已确认对本物品无货）不再入选，防止失效缓存造成死循环。
+                    if (!ctx.exhaustedPositions.contains(pos)) {
+                        ctx.foundPositions.add(pos);
+                    }
+                }
                 ctx.wholeBoxPriority = !ctx.foundPositions.isEmpty();
             }
 
             // 散装容器照常追加在整盒容器后面；已经作为整盒来源的容器不重复排。
             for (BlockPos pos : chestTracker.searchItem(ctx.currentTargetItem, playerPos, effectiveRange)) {
-                if (!ctx.foundPositions.contains(pos)) {
+                if (!ctx.foundPositions.contains(pos) && !ctx.exhaustedPositions.contains(pos)) {
                     ctx.foundPositions.add(pos);
                 }
             }

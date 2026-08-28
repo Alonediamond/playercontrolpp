@@ -109,6 +109,7 @@
 
   "playercontrolpp.message.baritone.litematlist_no_list": "[PlayerControl++] No uploaded material list in LitematList. Upload a schematic file or material list in LitematList first.",
   "playercontrolpp.message.baritone.litematlist_not_loaded": "[PlayerControl++] LitematList mod not detected; cannot follow its material list.",
+  "playercontrolpp.message.baritone.litematlist_took_over": "[PlayerControl++] LitematList has taken over the schematic material list, so the schematic's own HUD list cannot be followed. Cancel the upload/takeover in LitematList, or switch 'Material List Source' to 'Follow LitematList'.",
 
   "playercontrolpp.config.baritone.name.enableGlobalIgnore": "Enable Global Material Ignore",
   "playercontrolpp.config.baritone.pretty_name.enableGlobalIgnore": "Enable Global Material Ignore",
@@ -138,7 +139,7 @@
 
   "playercontrolpp.config.baritone.name.shulkerBoxPriorityThreshold": "Whole-Box Priority Threshold",
   "playercontrolpp.config.baritone.pretty_name.shulkerBoxPriorityThreshold": "Whole-Box Priority Threshold",
-  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "When a material's shortage exceeds this amount (64-1728) and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks; without such boxes it still takes loose stacks. Default: 256.",
+  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "When a material's shortage exceeds this amount (64-1728) and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks; without such boxes it still takes loose stacks. Default: 864.",
 
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] Inventory full — storing materials to shulker box...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] Shulker box storage complete, resuming gathering.",
