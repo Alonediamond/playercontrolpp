@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
+import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.feature.ItemTransferStrategy;
@@ -23,10 +24,6 @@ import java.util.List;
  */
 public class ItemTransferExecutor {
 
-    /**
-     * 缺口小于这个值就不值得搬整盒，改取散装。取两组：低于此数时一整盒几乎肯定超量。
-     */
-    private static final int SHULKER_WORTH_IT_THRESHOLD = 128;
     /** 两次容器点击之间的 tick 数，别超出服务端对点击频率的预期。 */
     private static final int CLICK_COOLDOWN = 4;
     /** 关闭容器后先稳定几 tick 再核对拿到了多少。 */
@@ -94,9 +91,11 @@ public class ItemTransferExecutor {
         AbstractContainerMenu handler = mc.player.containerMenu;
         List<Slot> slots = handler.slots;
 
-        // 计划里要整盒时先拿盒子，免得散装先把背包塞满、腾不出放盒子的空间。
-        boolean boxesFirst = ctx.currentTransferPlan.shulkerBoxes > 0
-                && ctx.totalBoxesTakenForItem < ctx.currentTransferPlan.shulkerBoxes;
+        // 计划里要整盒、或本次搜索开了整盒优先时，先拿盒子，
+        // 免得散装先把背包塞满、腾不出放盒子的空间。
+        boolean boxesFirst = ctx.wholeBoxPriority
+                || (ctx.currentTransferPlan.shulkerBoxes > 0
+                    && ctx.totalBoxesTakenForItem < ctx.currentTransferPlan.shulkerBoxes);
 
         if (boxesFirst) {
             if (tryTransferShulkerBoxes(mc, handler, slots, ctx)) return;
@@ -199,14 +198,15 @@ public class ItemTransferExecutor {
 
     /**
      * @return {@code shulkerBox} 里我们缺得最狠的那个缺失物品；
-     *         但只有缺口大到「搬整盒才合理」时才返回。
+     *         但只有缺口超过整盒优先阈值时才返回，低于阈值一律只取散装。
      */
     private MaterialItemEntry findBestMissingItemForShulker(ItemStack shulkerBox, GatherContext ctx) {
+        int threshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
         MaterialItemEntry best = null;
         int bestNeeded = 0;
         for (MaterialItemEntry entry : ctx.missingItems) {
             int needed = entry.neededCount - countEverywhere(entry.item, ctx.client);
-            if (needed > SHULKER_WORTH_IT_THRESHOLD
+            if (needed > threshold
                     && needed > bestNeeded
                     && ItemUtil.containsInside(shulkerBox, entry.item)) {
                 bestNeeded = needed;

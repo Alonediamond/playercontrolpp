@@ -153,6 +153,24 @@ public class Configs implements IConfigHandler {
     }
 
     public static class BaritoneSettings {
+        /**
+         * 备货读哪份材料清单。GUI 里只在装了 LitematList 时才显示这项；
+         * 模组被卸载而配置还停在 LITEMATLIST 时，由 MaterialAnalyzer 报错停机。
+         */
+        public static final ConfigOptionList MATERIAL_LIST_SOURCE = new ConfigOptionList(
+                "materialListSource", MaterialSource.LITEMATICA,
+                "Which material list the auto-gatherer reads.\nLitematica: the schematic info HUD's list, even if LitematList has taken it over.\nLitematList: the list uploaded in LitematList; items ignored there are not gathered.")
+                .apply(KEY_BARITONE);
+
+        /**
+         * 缺口超过这个数量时，箱子追踪缓存里若有装着所需材料的整盒（潜影盒）就优先搬整盒，
+         * 没有整盒才按组取散装。上限 1728 = 一个满盒的容量。
+         */
+        public static final ConfigInteger SHULKER_BOX_PRIORITY_THRESHOLD = new ConfigInteger(
+                "shulkerBoxPriorityThreshold", 256, 64, 1728,
+                "When a material's shortage exceeds this amount and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks. Falls back to loose stacks when the cache has no such boxes.")
+                .apply(KEY_BARITONE);
+
         public static final ConfigBoolean ENABLE_GLOBAL_IGNORE = new ConfigBoolean(
                 "enableGlobalIgnore", false,
                 "When enabled, items in the Global Ignore List will be skipped during auto-gathering.")
@@ -173,7 +191,9 @@ public class Configs implements IConfigHandler {
                 "Item IDs to ignore during auto-gathering. Edit via the GUI button or click to open the list editor.")
                 .apply(KEY_BARITONE);
 
+        /** 前两项属于「自动投影材料备货」，排在最前，GUI 里正好落在备货热键的下面。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
+                MATERIAL_LIST_SOURCE, SHULKER_BOX_PRIORITY_THRESHOLD,
                 ENABLE_GLOBAL_IGNORE, AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE, GLOBAL_IGNORE_LIST);
     }
 

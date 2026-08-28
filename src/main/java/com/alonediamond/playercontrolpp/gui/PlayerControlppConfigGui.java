@@ -5,6 +5,7 @@ import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import fi.dy.masa.malilib.config.IConfigBase;
 import com.alonediamond.playercontrolpp.route.RouteManager;
@@ -69,8 +70,13 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 List<IConfigBase> baritoneOptions = new ArrayList<>();
                 baritoneOptions.add(Configs.Hotkeys.BARITONE_AUTO_GATHER);
                 for (IConfigBase opt : Configs.BaritoneSettings.OPTIONS) {
-                    if (opt == Configs.BaritoneSettings.SHULKER_STORAGE_MODE) {
-                        if (!QuickShulkerIntegration.getInstance().isLoaded()) continue;
+                    if (opt == Configs.BaritoneSettings.SHULKER_STORAGE_MODE
+                            && !QuickShulkerIntegration.getInstance().isLoaded()) {
+                        continue;
+                    }
+                    if (opt == Configs.BaritoneSettings.MATERIAL_LIST_SOURCE
+                            && !LitematListIntegration.getInstance().isLoaded()) {
+                        continue;
                     }
                     baritoneOptions.add(opt);
                 }

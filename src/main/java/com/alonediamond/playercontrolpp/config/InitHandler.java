@@ -13,6 +13,7 @@ import com.alonediamond.playercontrolpp.input.KeybindCallbacks;
 import com.alonediamond.playercontrolpp.input.KeybindProvider;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.record.RecordingManager;
@@ -44,6 +45,7 @@ public class InitHandler implements IInitializationHandler {
         BaritoneIntegration.getInstance().initialize();
         ChestTrackerIntegration.getInstance().initialize();
         QuickShulkerIntegration.getInstance().initialize();
+        LitematListIntegration.getInstance().initialize();
     }
 
     /**

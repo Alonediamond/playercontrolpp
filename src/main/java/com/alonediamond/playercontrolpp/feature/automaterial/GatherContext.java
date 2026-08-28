@@ -36,6 +36,12 @@ public class GatherContext {
     public int currentPosIndex;
     public int chestRetryCount;
 
+    /**
+     * 整盒优先：最近一次搜索发现缺口超过阈值、且箱子追踪缓存里有装着当前所需材料的整盒。
+     * 为 true 时转移阶段先搬整盒再拿散装。每次 search() 重新判定。
+     */
+    public boolean wholeBoxPriority;
+
     // Baritone 寻路追踪
     public Vec3 lastPlayerPos = Vec3.ZERO;
     public int stuckTicks;
@@ -93,6 +99,7 @@ public class GatherContext {
         foundPositions.clear();
         currentPosIndex = 0;
         chestRetryCount = 0;
+        wholeBoxPriority = false;
 
         lastPlayerPos = Vec3.ZERO;
         stuckTicks = 0;

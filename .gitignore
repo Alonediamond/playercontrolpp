@@ -48,3 +48,7 @@ run/
 /容器缓存功能重构说明.md
 /最终完成报告.md
 /缓存投影选区容器-使用指南.md
+/tools/applytr.py
+/tools/checkzh.py
+/tools/comments.py
+/容器缓存性能分析.md

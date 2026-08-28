@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
+import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
@@ -53,9 +54,25 @@ public class ContainerSearcher {
             }
 
             BlockPos playerPos = ctx.client.player.blockPosition();
+
+            // 缺口超过阈值时先查缓存里有没有装着该材料的整盒；有就优先去这些容器搬整盒。
+            // 没有整盒时 wholeBoxPriority 保持 false，走原来的纯散装路线。
             ctx.foundPositions.clear();
-            ctx.foundPositions.addAll(
-                    chestTracker.searchItem(ctx.currentTargetItem, playerPos, effectiveRange));
+            ctx.wholeBoxPriority = false;
+            int stillNeeded = ctx.targetNeededTotal - ctx.currentlyGathered;
+            int boxThreshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
+            if (stillNeeded > boxThreshold) {
+                ctx.foundPositions.addAll(chestTracker.searchShulkerBoxWithItem(
+                        ctx.currentTargetItem, playerPos, effectiveRange));
+                ctx.wholeBoxPriority = !ctx.foundPositions.isEmpty();
+            }
+
+            // 散装容器照常追加在整盒容器后面；已经作为整盒来源的容器不重复排。
+            for (BlockPos pos : chestTracker.searchItem(ctx.currentTargetItem, playerPos, effectiveRange)) {
+                if (!ctx.foundPositions.contains(pos)) {
+                    ctx.foundPositions.add(pos);
+                }
+            }
 
             if (ctx.foundPositions.isEmpty()) {
                 String itemName = BuiltInRegistries.ITEM.getKey(ctx.currentTargetItem).toString();

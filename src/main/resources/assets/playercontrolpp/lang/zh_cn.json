@@ -1,6 +1,6 @@
 {
   "playercontrolpp.gui.title": "PlayerControl++ 配置",
-  "playercontrolpp.gui.tab.hotkeys": "热键",
+  "playercontrolpp.gui.tab.hotkeys": "主要功能",
   "playercontrolpp.gui.tab.route_hotkeys": "路径热键",
   "playercontrolpp.gui.tab.settings": "设置",
   "playercontrolpp.gui.tab.routes": "路径",
@@ -107,6 +107,9 @@
   "playercontrolpp.message.baritone.no_cache": "[PlayerControl++] 箱子追踪缓存未加载。",
   "playercontrolpp.message.baritone.search_error": "[PlayerControl++] 搜索物品时出错：%s",
 
+  "playercontrolpp.message.baritone.litematlist_no_list": "[PlayerControl++] LitematList 中没有已上传的材料列表，请先在 LitematList 中上传投影文件或材料清单。",
+  "playercontrolpp.message.baritone.litematlist_not_loaded": "[PlayerControl++] 未检测到 LitematList 模组，无法跟随其材料清单。",
+
   "playercontrolpp.config.baritone.name.enableGlobalIgnore": "启用全局材料忽略",
   "playercontrolpp.config.baritone.pretty_name.enableGlobalIgnore": "启用全局材料忽略",
   "playercontrolpp.config.baritone.comment.enableGlobalIgnore": "开启后，全局忽略列表中的材料将不会被自动备货系统收集。",
@@ -126,6 +129,16 @@
   "playercontrolpp.config.baritone.name.globalIgnoreList": "材料备货忽略项",
   "playercontrolpp.config.baritone.pretty_name.globalIgnoreList": "材料备货忽略项",
   "playercontrolpp.config.baritone.comment.globalIgnoreList": "自动备货时忽略的物品列表。点击打开列表编辑器。默认：minecraft:water_bucket 及所有潜影盒变种。",
+
+  "playercontrolpp.config.baritone.name.materialListSource": "备货数据来源",
+  "playercontrolpp.config.baritone.pretty_name.materialListSource": "备货数据来源",
+  "playercontrolpp.config.baritone.comment.materialListSource": "自动投影材料备货读取哪份材料清单。\n跟随投影信息HUD：读取 Litematica 的材料清单信息HUD，即使 LitematList 已接管也照常按HUD备货。\n跟随LitematList：读取 LitematList 中上传（接管）的材料清单，其中被忽略的项目不会被收集。",
+  "playercontrolpp.config.baritone.material_source.litematica.display_name": "跟随投影信息HUD",
+  "playercontrolpp.config.baritone.material_source.litematlist.display_name": "跟随LitematList清单",
+
+  "playercontrolpp.config.baritone.name.shulkerBoxPriorityThreshold": "整盒优先阈值",
+  "playercontrolpp.config.baritone.pretty_name.shulkerBoxPriorityThreshold": "整盒优先阈值",
+  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "当某种材料的缺口超过该数量（64~1728）时，若箱子追踪缓存中存有装着该材料的整盒（潜影盒），则优先搬走整盒，而不是按组取散装；缓存里没有整盒时仍按组取散装。默认：256。",
 
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] 背包已满 — 正在将材料存入潜影盒...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] 潜影盒存储完成，继续备货。",

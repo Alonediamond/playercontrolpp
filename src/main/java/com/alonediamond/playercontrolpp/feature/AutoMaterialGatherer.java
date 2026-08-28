@@ -3,6 +3,7 @@ package com.alonediamond.playercontrolpp.feature;
 import com.alonediamond.playercontrolpp.feature.automaterial.*;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.fabricmc.loader.api.FabricLoader;
@@ -17,6 +18,9 @@ import net.minecraft.client.Minecraft;
  *
  * <p>需要 Baritone、Litematica、ChestTracker 三者齐备；缺任何一个时热键会报出缺哪个，
  * 而不是按下去没反应。
+ *
+ * <p>材料清单来源可选（{@code materialListSource}）：默认跟随投影的信息HUD；
+ * 装有 LitematList 时可改为跟随它上传的材料清单，其余行为不变。
  */
 public class AutoMaterialGatherer implements ClientFeature {
     private static final AutoMaterialGatherer INSTANCE = new AutoMaterialGatherer();
@@ -39,7 +43,8 @@ public class AutoMaterialGatherer implements ClientFeature {
         BaritoneIntegration baritone = BaritoneIntegration.getInstance();
         ChestTrackerIntegration chestTracker = ChestTrackerIntegration.getInstance();
 
-        MaterialAnalyzer materialAnalyzer = new MaterialAnalyzer(litematica);
+        MaterialAnalyzer materialAnalyzer =
+                new MaterialAnalyzer(litematica, LitematListIntegration.getInstance());
         ContainerSearcher containerSearcher = new ContainerSearcher(chestTracker);
         pathingController = new BaritonePathingController(baritone);
         containerOpener = new ContainerOpener();

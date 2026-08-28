@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.integration;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
+import com.alonediamond.playercontrolpp.util.ItemUtil;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -135,6 +136,58 @@ public class ChestTrackerIntegration implements ModIntegration {
             // 箱子追踪不在，或它的内部结构变了。返回已经收集到的部分，
             // 效果退化成「这里没找到」，调用方本来就会据此换下一个物品。
             Playercontrolpp.LOGGER.debug("ChestTracker memory lookup failed for {}", targetItem, e);
+        }
+        return positions;
+    }
+
+    /**
+     * 在箱子追踪的记忆里搜「装着目标物品的整盒（潜影盒）」所在的容器坐标，按距玩家由近到远返回。
+     *
+     * <p>记忆里存的是容器打开时的物品堆快照，潜影盒的内容物随物品堆组件一起落库，
+     * 所以直接用 {@link ItemUtil#containsInside} 判断盒里有没有目标物品。
+     */
+    public List<BlockPos> searchShulkerBoxWithItem(Item targetItem, BlockPos playerPos, int effectiveRange) {
+        List<BlockPos> positions = new ArrayList<>();
+        try {
+            Object memoryBank = getMemoryBank();
+            if (memoryBank == null) return positions;
+
+            Identifier currentDim = getCurrentDimensionKey();
+            if (currentDim == null) return positions;
+
+            Optional<?> memKeyOpt = (Optional<?>) memoryBank.getClass()
+                    .getMethod("getKey", Identifier.class)
+                    .invoke(memoryBank, currentDim);
+            if (memKeyOpt.isEmpty()) return positions;
+
+            Object memoryKey = memKeyOpt.get();
+            Map<?, ?> memories = (Map<?, ?>) memoryKey.getClass()
+                    .getMethod("getMemories").invoke(memoryKey);
+
+            long rangeSq = (long) effectiveRange * effectiveRange;
+
+            for (Map.Entry<?, ?> memEntry : memories.entrySet()) {
+                BlockPos pos = (BlockPos) memEntry.getKey();
+                if (pos.distSqr(playerPos) > rangeSq) continue;
+
+                Object memory = memEntry.getValue();
+                List<?> items = (List<?>) memory.getClass().getMethod("items").invoke(memory);
+
+                for (Object itemObj : items) {
+                    ItemStack stack = (ItemStack) itemObj;
+                    if (!stack.isEmpty() && ItemUtil.isShulkerBox(stack)
+                            && ItemUtil.containsInside(stack, targetItem)) {
+                        positions.add(pos);
+                        break;
+                    }
+                }
+            }
+
+            positions.sort(Comparator.comparingDouble(p -> p.distSqr(playerPos)));
+
+        } catch (Exception e) {
+            // 与 searchItem 同样的退化策略：查不到就当缓存里没有整盒，调用方回落到散装。
+            Playercontrolpp.LOGGER.debug("ChestTracker shulker box lookup failed for {}", targetItem, e);
         }
         return positions;
     }
