@@ -192,7 +192,7 @@ public class RouteManager {
 
         // malilib 在 0.27.x（随 MC 1.21.11 发布）才给 IConfigBase 加了 dirty 追踪；
         // malilib 0.21.10 / 0.23.5 / 0.25.7 既没有这些接口方法，也没有可转交的目标。
-        //#if MC >= 12111
+        //#if MC >= 12110
         @Override public void checkIfClean() { route.getHotkey().checkIfClean(); }
         @Override public boolean isDirty() { return route.getHotkey().isDirty(); }
         @Override public void markDirty() { route.getHotkey().markDirty(); }

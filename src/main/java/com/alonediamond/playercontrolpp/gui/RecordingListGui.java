@@ -282,7 +282,7 @@ public class RecordingListGui extends Screen {
         }
     }
 
-    //#if MC >= 12111
+    //#if MC >= 12110
     @Override
     public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent click, boolean isDragging) {
         if (handleClick(click.x(), click.y(), click.button())) return true;
@@ -338,7 +338,7 @@ public class RecordingListGui extends Screen {
         return null;
     }
 
-    //#if MC >= 12111
+    //#if MC >= 12110
     @Override
     public boolean charTyped(net.minecraft.client.input.CharacterEvent input) {
         EditBox focused = focusedField();
