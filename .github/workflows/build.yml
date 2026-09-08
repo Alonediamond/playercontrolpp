@@ -22,6 +22,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 允许 rolling release 步骤往 GitHub Release 里传附件
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v6
@@ -35,6 +38,31 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' && github.ref != 'refs/heads/dev' }}
+
+      # maven.parchmentmc.org 偶发长时间不可达（曾把 CI 整个挂掉）。
+      # Parchment 数据优先取仓库内 libs/maven/（common.gradle 里优先命中），
+      # 缺失的版本在这里带重试补拉；下载成功一次后会被 setup-gradle 的缓存收编。
+      - name: Fetch missing parchment data
+        run: |
+          fetch() {
+            local mc=$1 ver=$2
+            local d="libs/maven/org/parchmentmc/data/parchment-$mc/$ver"
+            local f="$d/parchment-$mc-$ver.zip"
+            [ -s "$f" ] && return 0
+            echo "parchment-$mc/$ver missing from repo, fetching..."
+            for i in 1 2 3 4 5; do
+              curl -sfL --max-time 60 -o "$f" \
+                "https://maven.parchmentmc.org/org/parchmentmc/data/parchment-$mc/$ver/parchment-$mc-$ver.zip" \
+                && [ -s "$f" ] && return 0
+              rm -f "$f"; sleep 8
+            done
+            echo "::error::Could not fetch parchment-$mc $ver from maven.parchmentmc.org"
+            return 1
+          }
+          fetch 1.21 2024.11.17
+          fetch 1.21.4 2025.03.23
+          fetch 1.21.10 2025.10.12
+          fetch 1.21.11 2025.12.20
 
       - name: Build with gradle
         run: |
@@ -81,6 +109,24 @@ jobs:
         with:
           name: mod-jars
           path: mod-jars/*.jar
+
+      # push 触发的开发构建直接挂到一个滚动的 pre-release（tag: dev-build），
+      # 附件同名覆盖，链接永远指向最新构建。PR / 正式发布（release.yml）不走这里。
+      - name: Attach mod jars to rolling dev release
+        if: ${{ github.event_name == 'push' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-build
+          name: Dev Build (rolling)
+          body: |-
+            最新开发构建，由 push 自动生成（`v<版本>-mc<MC版本>+build.<N>`）。
+
+            - 按 Minecraft 版本下载对应 jar；正式版发布请看下方的非预发布 Release。
+            - 构建来源: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          prerelease: true
+          make_latest: false
+          files: mod-jars/*.jar
+          overwrite_files: true
 
 #      # [FEATURE] FALLENS_MAVEN
 #      - name: Publish with gradle

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 随仓库提交的最小 pom：官方 parchment data pom 无依赖，作用只是让本地 maven 仓库
+     能解析 org.parchmentmc.data:parchment-1.21.11:2025.12.20@zip（见 common.gradle 仓库注释）。 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.parchmentmc.data</groupId>
+  <artifactId>parchment-1.21.11</artifactId>
+  <version>2025.12.20</version>
+</project>

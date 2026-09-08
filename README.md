@@ -147,6 +147,8 @@ this.delegate.text(font, text, x, y, color, shadow);     // 生效分支：正�
 2. `build.gradle` 的 `preprocess` 块里 `createNode(...)` 并 `link` 到相邻节点；
 3. 建 `versions/<mc>/gradle.properties`（照抄邻近版本改 MC 版本号与依赖）；
 4. 把该版本的 malilib / ModMenu jar 放进 `libs/`，并在上一步的 properties 里填 `malilib_jar` / `modmenu_jar`；
+   若该版本配 Parchment，把对应的 parchment zip 放进 `libs/maven/org/parchmentmc/data/parchment-<mc>/<版本>/`
+   （官方 maven 偶发长时间不可达，仓库内副本优先命中；CI 的 `Fetch missing parchment data` 步骤会兜底补拉）；
 5. `./gradlew :<mc>:compileJava`，按报错逐个在 `compat/` 里补桥接；
 6. `diff -rq versions/<新>/build/preprocessed/main versions/<邻近>/build/preprocessed/main`
    核对差异是否只落在预期的兼容类上。
