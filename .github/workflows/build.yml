@@ -43,7 +43,8 @@ jobs:
 
       # maven.parchmentmc.org 偶发长时间不可达（曾把 CI 整个挂掉）。
       # Parchment 数据优先取仓库内 libs/maven/（common.gradle 里优先命中），
-      # 缺失的版本在这里带重试补拉；下载成功一次后会被 setup-gradle 的缓存收编。
+      # 缺失的版本从这里带重试补拉（官方源 + ldtteam JFrog 镜像各试一轮）；
+      # 下载成功一次后会被 setup-gradle 的缓存收编。
       - name: Fetch missing parchment data
         run: |
           fetch() {
@@ -52,16 +53,20 @@ jobs:
             local f="$d/parchment-$mc-$ver.zip"
             [ -s "$f" ] && return 0
             echo "parchment-$mc/$ver missing from repo, fetching..."
-            for i in 1 2 3 4 5; do
-              curl -sfL --max-time 60 -o "$f" \
-                "https://maven.parchmentmc.org/org/parchmentmc/data/parchment-$mc/$ver/parchment-$mc-$ver.zip" \
-                && [ -s "$f" ] && return 0
-              rm -f "$f"; sleep 8
+            local urls=(
+              "https://ldtteam.jfrog.io/artifactory/parchmentmc-public/org/parchmentmc/data/parchment-$mc/$ver/parchment-$mc-$ver.zip"
+              "https://maven.parchmentmc.org/org/parchmentmc/data/parchment-$mc/$ver/parchment-$mc-$ver.zip"
+            )
+            for round in 1 2; do
+              for u in "${urls[@]}"; do
+                curl -sfL --max-time 90 -o "$f" "$u" && [ -s "$f" ] && { echo "got $mc/$ver from $u"; return 0; }
+                rm -f "$f"; sleep 8
+              done
             done
-            echo "::error::Could not fetch parchment-$mc $ver from maven.parchmentmc.org"
+            echo "::error::Could not fetch parchment-$mc $ver from any mirror (jfrog / parchmentmc.org)"
             return 1
           }
-          fetch 1.21 2024.11.17
+          fetch 1.21 2024.11.10
           fetch 1.21.4 2025.03.23
           fetch 1.21.10 2025.10.12
           fetch 1.21.11 2025.12.20

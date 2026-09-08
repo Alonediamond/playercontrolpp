@@ -20,6 +20,12 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 > `1.21.6` 与 `1.21.8` 的预处理产物逐字节相同，malilib / ModMenu 也是同一个 jar 覆盖
 > 1.21.6–1.21.8；两个子项目只是为了各自声明 `game_versions` 与 `minecraft_dependency`。
 > Parchment 没有 1.21.6–1.21.8 的发布。
+>
+> **Parchment 的分发**：官方 maven（maven.parchmentmc.org）会长时间整体不可达。
+> 各版本用到的 parchment zip + pom 已提交在 `libs/maven/org/parchmentmc/data/`（构建优先命中），
+> JFrog 镜像 `ldtteam.jfrog.io/artifactory/parchmentmc-public` 与官方 maven 作为后续兜底，
+> CI 里另有带重试的补拉步骤。注意 `1.21.1` 用的是 **2024.11.10**（备用镜像上没有 2024.11.17，
+> Parchment 只影响参数名/注释提示，不影响编译产物），等官方源恢复后可自行升回。
 
 **主工程（mainProject）= `26.2`**：`src/main/java` 里的源码就是 26.2 版本的源码，
 其余版本由预处理器在 `versions/<mc>/build/preprocessed/` 下自动生成。**只编辑 `src/main/`。**

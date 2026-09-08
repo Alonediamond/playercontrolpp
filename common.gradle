@@ -10,11 +10,16 @@ repositories {
 		url = 'https://maven.fabricmc.net/'
 		content { includeGroupAndSubgroups('net.fabricmc') }
 	}*/
-	// Parchment 的官方 maven（maven.parchmentmc.org）在部分网络（含 GitHub Actions runner）
-	// 下连接超时。这里把随仓库提交的本地副本排在最前，命中即不再访问远端；
-	// 本地没有的版本（未来新增 MC 版本时）仍会落回官方 maven。
+	// Parchment 的官方 maven（maven.parchmentmc.org）会长时间整体不可达。三道保障按序命中：
+	// 1) 随仓库提交的本地副本（libs/maven，zip 与 pom 都在，无网络依赖）；
+	// 2) ParchmentMC 团队自己的 JFrog 镜像（部分开发者用作备用仓库）；
+	// 3) 官方 maven，仅作为前两者都没有的新版本兜底。
 	maven {
 		url = rootProject.file('libs/maven')
+		content { includeGroup('org.parchmentmc.data') }
+	}
+	maven {
+		url = 'https://ldtteam.jfrog.io/artifactory/parchmentmc-public'
 		content { includeGroup('org.parchmentmc.data') }
 	}
 	maven {

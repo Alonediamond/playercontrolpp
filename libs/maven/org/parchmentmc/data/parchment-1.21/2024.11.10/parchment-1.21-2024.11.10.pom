@@ -3,8 +3,8 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.parchmentmc.data</groupId>
-  <artifactId>parchment-1.21.4</artifactId>
-  <version>2025.03.23</version>
+  <artifactId>parchment-1.21</artifactId>
+  <version>2024.11.10</version>
   <packaging>zip</packaging>
   <name>Parchment Mappings</name>
   <description>Parameter names and javadoc mappings for Minecraft: Java Edition.</description>
@@ -29,6 +29,6 @@
     <url>https://github.com/ParchmentMC/Parchment/issues</url>
   </issueManagement>
   <properties>
-    <minecraft_version>1.21.4</minecraft_version>
+    <minecraft_version>1.21</minecraft_version>
   </properties>
 </project>
