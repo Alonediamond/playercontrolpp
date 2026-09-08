@@ -22,10 +22,10 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 > Parchment 没有 1.21.6–1.21.8 的发布。
 >
 > **Parchment 的分发**：官方 maven（maven.parchmentmc.org）会长时间整体不可达。
-> 各版本用到的 parchment zip + pom 已提交在 `libs/maven/org/parchmentmc/data/`（构建优先命中），
-> JFrog 镜像 `ldtteam.jfrog.io/artifactory/parchmentmc-public` 与官方 maven 作为后续兜底，
-> CI 里另有带重试的补拉步骤。注意 `1.21.1` 用的是 **2024.11.10**（备用镜像上没有 2024.11.17，
-> Parchment 只影响参数名/注释提示，不影响编译产物），等官方源恢复后可自行升回。
+> 各版本用到的 parchment zip + pom 已提交在 `libs/maven/org/parchmentmc/data/parchment-<mc>/<版本>/`
+> （构建优先命中，新 clone 无网络依赖），JFrog 镜像 `ldtteam.jfrog.io/artifactory/parchmentmc-public`
+> 与官方 maven 作为后续兜底，CI 里另有带重试的补拉步骤。新增版本时从镜像拉对应
+> `parchment-<minecraft_version>/<版本>/` 放入即可（注意 artifactId 与子项目 minecraft_version 一致）。
 
 **主工程（mainProject）= `26.2`**：`src/main/java` 里的源码就是 26.2 版本的源码，
 其余版本由预处理器在 `versions/<mc>/build/preprocessed/` 下自动生成。**只编辑 `src/main/`。**
