@@ -22,7 +22,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 允许 rolling release 步骤往 GitHub Release 里传附件
+    # 允许 rolling release 步骤往 GitHub Release 里传附件。
+    # 注意：本工作流被 gradle.yml / release.yml 以 reusable workflow 方式调用，
+    # 被调用方申请的权限 ⊆ 调用方授予的权限——两个调用方的对应 job 都显式授了 contents: write。
     permissions:
       contents: write
 

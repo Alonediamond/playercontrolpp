@@ -61,6 +61,9 @@ jobs:
     with:
       target_subproject: ${{ github.event.inputs.target_subproject }}
       release: true
+    # 同 gradle.yml：被调用工作流的 build job 申请了 contents: write，调用方必须显式授予
+    permissions:
+      contents: write
 
   release:
     needs:

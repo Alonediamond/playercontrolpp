@@ -15,6 +15,11 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
     secrets: inherit
+    # 被调用工作流拿到的权限不能超过调用方授予的：新仓库的 GITHUB_TOKEN 默认 contents: read，
+    # 而 build.yml 里要往滚动 dev-build Release 传附件（contents: write）。
+    # 实际只有 push 触发才有写步骤；fork PR 一律被 GitHub 强制为只读，不会被放大。
+    permissions:
+      contents: write
 #    # [FEATURE] MIXIN_AUDITOR
 #    with:
 #      mixin_audit: true
