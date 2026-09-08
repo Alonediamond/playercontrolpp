@@ -197,12 +197,17 @@ public final class SchematicSelectionContainerCacheFeature {
         cachedCount = 0;
         failedCount = 0;
         messageTimer = 0;
+        // 状态清零时同步撤掉 GUI 屏蔽；功能重启后下一 tick 会立刻续租。
+        ContainerGuiSuppressor.expire();
     }
 
     // ---- 主循环 ----
 
     private static void tick(Minecraft client) {
         if (!active || client.player == null || client.level == null) return;
+
+        // 功能活跃期间维持 GUI 屏蔽租约（每 tick 续，停止后一个租约期内自愈）。
+        ContainerGuiSuppressor.renew();
 
         // 玩家开着别的界面（非容器界面）时暂停交互，但扫描可以继续。
         boolean otherScreenOpen = ScreenCompat.getScreen(client) != null
@@ -285,8 +290,8 @@ public final class SchematicSelectionContainerCacheFeature {
     }
 
     private static boolean tickOpening(Minecraft client) {
-        boolean menuOpen = client.player.containerMenu != client.player.inventoryMenu
-                && ScreenCompat.getScreen(client) instanceof AbstractContainerScreen;
+        // 界面被 ContainerGuiSuppressor 吞掉时 Screen 恒为 null，判据只用菜单状态。
+        boolean menuOpen = client.player.containerMenu != client.player.inventoryMenu;
 
         if (menuOpen) {
             // 界面已开，但物品内容是另一个包。等到看见东西、或宽限用完再落库，

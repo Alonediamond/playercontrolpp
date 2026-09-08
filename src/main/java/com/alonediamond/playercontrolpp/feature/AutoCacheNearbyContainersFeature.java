@@ -2,10 +2,12 @@ package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -32,12 +34,15 @@ import java.util.Set;
  * <p>附近没有未缓存容器时进入 AUTO_STOP_COUNTDOWN，三秒内以较低频率继续找，
  * 所以走到下一个房间会自动接着干。
  *
- * <h3>为什么关箱和开下一个箱在同一 tick</h3>
- * 箱子追踪是挂在 {@code ScreenEvents.remove} 上的：{@code setScreen(null)} 会<b>同步</b>调用
- * {@code provider.onScreenClose()} 读走菜单内容，然后 {@code InteractionTracker.clear()}。
- * 所以「先关（落库）→ 再点下一个（建立新的交互记录）」这个顺序在同一 tick 内完全成立，
- * 不需要为了等落库而额外空转几 tick。
+ * <h3>开箱全程无 GUI，落库走直写</h3>
+ * 功能运行期间 {@link ContainerGuiSuppressor} 会吞掉 {@code setScreen}——界面从未创建，
+ * 玩家看不到任何开关箱闪烁。代价是 ChestTracker 挂在 {@code ScreenEvents.remove} 上的
+ * 「关界面落库」钩子失去了依附的 Screen，所以这里改成内容包一到位就用
+ * {@code MemoryBuilder} 直写缓存库（与投影选区缓存同一条路），然后照常关掉菜单。
+ * 判据也从「界面出现了」换成「菜单已打开」——两者的赋值都发生在服务端回包的同一时刻，
+ * 只是后者不依赖 Screen 存在。
  */
+
 public class AutoCacheNearbyContainersFeature {
 
     private enum State {
@@ -123,10 +128,15 @@ public class AutoCacheNearbyContainersFeature {
         stateTimer = 0;
         contentTimer = 0;
         autoStopCountdown = 0;
+        // 状态清零时同步撤掉 GUI 屏蔽；开着的情况下下一 tick 会立刻续租。
+        ContainerGuiSuppressor.expire();
     }
 
     public static void tick(Minecraft mc) {
         if (!enabled || mc.player == null || mc.level == null) return;
+
+        // 功能活跃期间维持 GUI 屏蔽租约（每 tick 续，停止后一个租约期内自愈）。
+        ContainerGuiSuppressor.renew();
 
         // 尊重其它界面：玩家开着非容器界面时整体暂停，不去抢他的操作。
         if (ScreenCompat.getScreen(mc) != null
@@ -168,8 +178,8 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     private static boolean tickScanning(Minecraft mc) {
-        // 还有容器界面开着就先关掉：可能是上一个容器超时之后才姗姗来迟地打开，
-        // 关掉它既让箱子追踪把它落库，也避免下一次右键落到过期的菜单上。
+        // 还有容器菜单开着就先关掉：可能是上一个容器超时之后才姗姗来迟地打开。
+        // 它没被访问标记过，直接丢弃不落库，下一轮会重新正常开一次。
         if (mc.player.containerMenu != mc.player.inventoryMenu) {
             closeGuiIfOpen(mc);
             return false;
@@ -196,16 +206,20 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     private static boolean tickOpeningContainer(Minecraft mc) {
-        if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
+        // 界面被屏蔽时 Screen 恒为 null，判据换成「菜单已打开」——菜单赋值与 setScreen
+        // 都发生在服务端回包的同一时刻（MenuScreens.fromPacket），只是前者不依赖 Screen。
+        if (mc.player.containerMenu != mc.player.inventoryMenu) {
             markVisited();
 
-            // 界面已开，但物品内容是另一个包。等到看见东西、或宽限用完再关，
-            // 否则箱子追踪会把还没同步的容器记成空的。
+            // 菜单已开，但物品内容是另一个包。等到看见东西、或宽限用完再落库，
+            // 否则会把还没同步的容器记成空的。
             if (!menuHasContent(mc) && --contentTimer > 0) {
                 return false;
             }
 
-            closeGuiIfOpen(mc); // 这一步就是落库时机，见类注释
+            // 界面被吞了，ChestTracker 的关界面钩子没有 Screen 可读——内容一到就直写缓存库。
+            saveContainerToChestTracker(mc);
+            closeGuiIfOpen(mc);
             currentTarget = null;
 
             int delay = Configs.Settings.CACHE_DELAY.getIntegerValue();
@@ -226,6 +240,16 @@ public class AutoCacheNearbyContainersFeature {
             return true; // 没消耗往返，立刻找下一个
         }
         return false;
+    }
+
+    /** 把当前目标容器直写进箱子追踪的缓存库（与投影选区缓存同一条路）。 */
+    private static boolean saveContainerToChestTracker(Minecraft mc) {
+        if (currentTarget == null) return false;
+        AbstractContainerMenu menu = mc.player.containerMenu;
+        if (menu == mc.player.inventoryMenu) return false;
+
+        return ChestTrackerIntegration.getInstance().cacheContainer(
+                mc.level, currentTarget, mc.level.getBlockState(currentTarget), menu);
     }
 
     private static boolean tickAutoStopCountdown(Minecraft mc) {

@@ -10,8 +10,6 @@ import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -32,8 +30,6 @@ import java.util.Set;
  * 拿过一整盒后重启就会双重扣减——缺口 1152 被持有 1786 直接判满，误报「备货完毕」。
  */
 public class MaterialAnalyzer {
-
-    private static final String MATERIAL_LIST_UTILS = "fi.dy.masa.litematica.materials.MaterialListUtils";
 
     private final LitematicaIntegration litematica;
     private final LitematListIntegration litematlist;
@@ -85,7 +81,7 @@ public class MaterialAnalyzer {
      *
      * @return 缺失条目；{@code null} 表示读不到清单，已经报过原因并停机。
      */
-    private List<MaterialItemEntry> readMissingMaterials(GatherContext ctx, TaskStateMachine tsm) throws Exception {
+    private List<MaterialItemEntry> readMissingMaterials(GatherContext ctx, TaskStateMachine tsm) {
         if (Configs.BaritoneSettings.MATERIAL_LIST_SOURCE.getOptionListValue() == MaterialSource.LITEMATLIST) {
             return readFromLitematList(ctx, tsm);
         }
@@ -99,7 +95,7 @@ public class MaterialAnalyzer {
      * 这条路与「跟随LitematList」也就无从区分——所以检测到接管时直接停机提示，
      * 让玩家在 LitematList 里取消接管，或把数据来源切换成跟随LitematList。
      */
-    private List<MaterialItemEntry> readFromLitematica(GatherContext ctx, TaskStateMachine tsm) throws Exception {
+    private List<MaterialItemEntry> readFromLitematica(GatherContext ctx, TaskStateMachine tsm) {
         Object materialList = litematica.getMaterialList();
         if (materialList == null) {
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.no_material_list");
@@ -118,39 +114,25 @@ public class MaterialAnalyzer {
         }
 
         // 投影只在自己的 HUD 开着时才维护原生清单。
-        Object hudRenderer = materialList.getClass().getMethod("getHudRenderer").invoke(materialList);
-        boolean hudShowing = (Boolean) hudRenderer.getClass()
-                .getMethod("getShouldRenderCustom").invoke(hudRenderer);
-        if (!hudShowing) {
+        if (!litematica.isMaterialListHudVisible()) {
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.no_hud");
             tsm.setState(State.STOPPED);
             return null;
         }
 
         Set<String> globalIgnoreSet = buildGlobalIgnoreSet();
-        Set<Object> litematicaIgnored = litematica.getIgnoredSet(materialList);
-
-        // 对着真实物品栏重新数一遍；缓存里的计数可能是过期的。
-        Object allMaterials = materialList.getClass()
-                .getMethod("getMaterialsAll").invoke(materialList);
-        Class.forName(MATERIAL_LIST_UTILS)
-                .getMethod("updateAvailableCounts", List.class, Player.class)
-                .invoke(null, allMaterials, ctx.client.player);
 
         List<MaterialItemEntry> missing = new ArrayList<>();
-        for (Object entry : (List<?>) allMaterials) {
-            if (litematicaIgnored.contains(entry)) continue;
+        for (LitematicaIntegration.MaterialEntry entry : litematica.getMaterialListEntries(ctx.client.player)) {
+            if (entry.ignored()) continue;
 
-            ItemStack stack = (ItemStack) entry.getClass().getMethod("getStack").invoke(entry);
-            String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
 
-            int countMissing = (Integer) entry.getClass().getMethod("getCountMissing").invoke(entry);
-            int countAvailable = (Integer) entry.getClass().getMethod("getCountAvailable").invoke(entry);
             // 目标量写总量 countMissing；countAvailable 只用来判断这条还缺不缺。
-            if (countAvailable < countMissing) {
-                missing.add(new MaterialItemEntry(stack.getItem(), countMissing,
-                        stack.getMaxStackSize()));
+            if (entry.countAvailable() < entry.countMissing()) {
+                missing.add(new MaterialItemEntry(entry.stack().getItem(), entry.countMissing(),
+                        entry.stack().getMaxStackSize()));
             }
         }
         return missing;

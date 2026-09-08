@@ -1,6 +1,6 @@
 # PlayerControl++ — 多版本构建工程
 
-PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构建 **7 个** Minecraft 版本的模组 jar。
+PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构建 **8 个** Minecraft 版本的模组 jar。
 
 模组功能与设计说明详见 [PlayerControl++模组详细介绍.md](PlayerControl++模组详细介绍.md)。
 
@@ -12,6 +12,7 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 | `:1.21.4`  | 1.21.4          | 21 | Mojang + Parchment | 0.23.5  | 13.0.3 |
 | `:1.21.6`  | 1.21.6 – 1.21.7 | 21 | Mojang             | 0.25.7  | 15.0.2 |
 | `:1.21.8`  | 1.21.8          | 21 | Mojang             | 0.25.7  | 15.0.2 |
+| `:1.21.10` | 1.21.10         | 21 | Mojang + Parchment | 0.26.8  | 16.0.1 |
 | `:1.21.11` | 1.21.11         | 21 | Mojang + Parchment | 0.27.12 | 17.0.0 |
 | `:26.1.2`  | 26.1 – 26.1.2   | 25 | Mojang（未混淆）    | 0.28.9  | 18.0.0-beta.1 |
 | `:26.2`    | 26.2            | 25 | Mojang（未混淆）    | 0.29.3  | 20.0.1 |
@@ -26,7 +27,7 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 ## 构建
 
 ```bash
-# 构建全部 7 个版本，并把 jar 汇总到 build/libs/
+# 构建全部 8 个版本，并把 jar 汇总到 build/libs/
 ./gradlew buildAndGather
 
 # 只构建单个版本
@@ -40,13 +41,14 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 
 ```
 build/libs/
-├── PlayerControlpp-v1.6-mc1.21.1.jar
-├── PlayerControlpp-v1.6-mc1.21.4.jar
-├── PlayerControlpp-v1.6-mc1.21.6.jar
-├── PlayerControlpp-v1.6-mc1.21.8.jar
-├── PlayerControlpp-v1.6-mc1.21.11.jar
-├── PlayerControlpp-v1.6-mc26.1.2.jar
-└── PlayerControlpp-v1.6-mc26.2.jar
+├── PlayerControlpp-v1.8-mc1.21.1.jar
+├── PlayerControlpp-v1.8-mc1.21.4.jar
+├── PlayerControlpp-v1.8-mc1.21.6.jar
+├── PlayerControlpp-v1.8-mc1.21.8.jar
+├── PlayerControlpp-v1.8-mc1.21.10.jar
+├── PlayerControlpp-v1.8-mc1.21.11.jar
+├── PlayerControlpp-v1.8-mc26.1.2.jar
+└── PlayerControlpp-v1.8-mc26.2.jar
 ```
 
 环境变量 `BUILD_RELEASE=false` 会给版本号加上 `-SNAPSHOT` / `+build.<N>` 后缀。
@@ -58,7 +60,8 @@ build/libs/
 ├── build.gradle               # 预处理器版本节点图（createNode / link）
 ├── common.gradle              # 所有子项目共用的构建逻辑
 ├── gradle.properties          # 模组元信息（mod_id / mod_version / …）
-├── libs/                      # 各版本的 malilib + ModMenu jar（已提交，克隆后可直接构建）
+├── libs/                      # malilib + ModMenu jar（根目录），可选联动的 compileOnly jar（按 <mc>/ 子目录）
+│                              # 已提交，克隆后可直接构建；运行时依赖仅 malilib + ModMenu
 ├── tools/MakeIcon.java        # 生成 assets/playercontrolpp/icon.png，可改配色/构图后重跑
 ├── versions/
 │   ├── mainProject            # 内容为 "26.2"
@@ -66,6 +69,8 @@ build/libs/
 └── src/main/
     ├── java/com/alonediamond/playercontrolpp/
     │   ├── compat/            # ★ 跨版本兼容层，见下节
+    │   ├── integration/       # ★ 可选联动 stub（默认空实现），见下节
+    │   ├── mixin/             # ★ MixinPlugin + compat/<模组>/ 直连实现，见下节
     │   ├── input/SimulatedInput.java   # ★ 模拟按键的唯一写入点
     │   ├── feature/ClientFeature.java  # ★ 功能生命周期接口 + FeatureRegistry
     │   └── …                  # 其余为与版本无关的业务代码
@@ -148,6 +153,51 @@ this.delegate.text(font, text, x, y, color, shadow);     // 生效分支：正�
 
 > malilib / ModMenu 1.21.4 之后的版本不在 masa 的 maven 上，走 Modrinth API：
 > `https://api.modrinth.com/v2/project/{malilib,modmenu}/version?loaders=["fabric"]&game_versions=["<mc>"]`。
+
+## 可选联动：mixin plugin 架构（v1.8 起）
+
+Litematica / Baritone / ChestTracker / QuickShulker / LitematList 五个可选联动**零反射**：
+
+- `integration/<X>Integration` 是 **stub**：方法体全部是默认空实现（`isLoaded()` 默认 `false`），
+  不含任何联动模组的类引用，模组缺席时照常加载、调用即降级；
+- `mixin/compat/<模组>/<X>IntegrationImpl` 是**直连实现**：`@Mixin(stub)` +
+  `@Overwrite(remap = false)` 正常写 Java 调用；
+- `mixin/PlayercontrolppMixinPlugin` 在 Mixin 配置加载期用 `FabricLoader.isModLoaded`
+  判定模组在不在（Baritone 认 `baritone` / `zbaritone` / `baritone-meteor` 三个 ID），
+  `shouldApplyMixin` 按 `.compat.<模组>.` 包段放行——模组在场才注入，缺席时 impl
+  根本不进 JVM；
+- 每个子项目编译时绑定 `libs/<mc>/` 里**该版本真实的联动模组 jar**（compileOnly，
+  不进运行时、不打包），API 漂移在编译期报错而不是运行期静默失效；
+- impl 方法体统一 `catch (Throwable)`：第三方 fork 的签名漂移抛 `NoSuchMethodError`
+  这类 Error，要与旧反射时代一样静默降级，不能炸 tick 循环。
+
+### 新增一个可选联动模组该怎么做
+
+1. **收集 compileOnly jar**：放进 `libs/<mc>/`（按 MC 版本分目录；Java 21 的 jar
+   只能给 1.21.x 子项目用，Java 25 的给 26.x），在对应 `versions/<mc>/gradle.properties`
+   里登记 `xxx_jar=<子目录>/<文件名>`。目标模组没覆盖全部 MC 版本时，借用最接近版本的
+   API jar 编译即可，运行时由插件判定（LitematList 就是这么处理的）；
+2. **common.gradle** 的 `dependencies` 块照抄现有五行加一条
+   `autoCompileOnly files(rootProject.file("libs/${project.xxx_jar}"))`；
+3. **写 stub** `integration/XxxIntegration`：单例 + 全部公共方法给默认空实现 +
+   `isLoaded()` 默认 `false`。签名里只能出现 JDK / MC / malilib 类型，**不能出现
+   目标模组的类型**（返回原始对象可以用 `Object`，如 `getMaterialList()`）；
+4. **写 impl** `mixin/compat/xxx/XxxIntegrationImpl`：`@Mixin(XxxIntegration.class)`，
+   每个要覆盖的方法 `@Overwrite(remap = false)`，方法名与签名和 stub 完全一致；
+   私有辅助方法标 `@Unique`；要访问目标模组的 protected/private 成员时，另写一个
+   `@Accessor` mixin（参考 `MaterialListBaseAccessor`）；
+5. **登记 mixins.json**：`client` 数组加相对类名（如 `compat.xxx.XxxIntegrationImpl`）；
+6. **登记 MixinPlugin**：`onLoad` 加一行判定并缓存布尔，`shouldApplyMixin` 加一条
+   包段分发，`InitHandler` 的自检清单加一行；
+7. **fabric.mod.json** 的 `suggests` 加 `"xxx": "*"`；
+8. **验证**：先用 `javap -cp <jar> <类>` 核对目标 API 在全部 8 个版本 jar 上的签名，
+   确认要不要写预处理器分支（五模组实测零漂移）；然后 `./gradlew buildAndGather`，
+   编译通过即代表 8 个版本都对该版本真实 jar 完成类型校验；最后检查产物 jar
+   （mixin 类齐全、无第三方包泄漏）并抽一个混淆版本（1.21.1）反查重映射结果。
+
+> 实机测试注意：compileOnly 不进 dev 运行时，`runClient` 环境里联动恒为关闭态；
+> 测联动功能请直接装发布 jar，或在 IDE 运行配置里手动把 lib jar 加进运行时。
+> 启动日志的 `Compat mixins to apply: ...` 一行是插件判定结果。
 
 ## 致谢
 

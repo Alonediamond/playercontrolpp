@@ -399,22 +399,18 @@ public class AutoRestockFeature implements ClientFeature {
      */
     private boolean readMaterialList(Minecraft mc) {
         try {
-            Object materialList = litematica.getMaterialList();
-            if (materialList == null) return false;
+            if (litematica.getMaterialList() == null) return false;
 
-            Object allMaterials = materialList.getClass()
-                    .getMethod("getMaterialsAll").invoke(materialList);
-            if (!(allMaterials instanceof List<?> allList) || allList.isEmpty()) return false;
+            List<LitematicaIntegration.MaterialEntry> entries = litematica.getMaterialListEntries(mc.player);
+            if (entries.isEmpty()) return false;
 
-            Set<Object> ignored = litematica.getIgnoredSet(materialList);
             int stacks = Math.max(1, Configs.Restocks.RESTOCK_STACKS_PER_ITEM.getIntegerValue());
 
-            for (Object entry : allList) {
-                if (ignored.contains(entry)) continue;
+            for (LitematicaIntegration.MaterialEntry entry : entries) {
+                if (entry.ignored()) continue;
 
-                ItemStack stack = (ItemStack) entry.getClass().getMethod("getStack").invoke(entry);
-                int countMissing = (Integer) entry.getClass()
-                        .getMethod("getCountMissing").invoke(entry);
+                ItemStack stack = entry.stack();
+                int countMissing = entry.countMissing();
                 if (stack.isEmpty() || countMissing <= 0) continue;
 
                 Item item = stack.getItem();

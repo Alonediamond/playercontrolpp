@@ -42,6 +42,7 @@
     "baritone": "*",
     "litematica": "*",
     "chesttracker": "*",
-    "quickshulker": "*"
+    "quickshulker": "*",
+    "litematlist": "*"
   }
 }

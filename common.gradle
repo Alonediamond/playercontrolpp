@@ -59,6 +59,15 @@ dependencies {
 
 	// Optional: ModMenu, only used by gui/ModMenuIntegration (an optional entrypoint).
 	autoImplementation files(rootProject.file("libs/${project.modmenu_jar}"))
+
+	// 可选联动模组：只进编译期 classpath（类型检查 + 联动层的直连调用），
+	// 不进运行时、不打包。运行时的启用与否由 MixinPlugin 在类变换期判定。
+	// 各版本 jar 按目录放在 libs/<mc>/ 下，文件名随子项目 properties 走。
+	autoCompileOnly files(rootProject.file("libs/${project.litematica_jar}"))
+	autoCompileOnly files(rootProject.file("libs/${project.baritone_jar}"))
+	autoCompileOnly files(rootProject.file("libs/${project.chesttracker_jar}"))
+	autoCompileOnly files(rootProject.file("libs/${project.quickshulker_jar}"))
+	autoCompileOnly files(rootProject.file("libs/${project.litematlist_jar}"))
 }
 
 String MIXIN_CONFIG_PATH = 'playercontrolpp.mixins.json'

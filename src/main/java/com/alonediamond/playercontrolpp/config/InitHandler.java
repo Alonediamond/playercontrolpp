@@ -16,6 +16,7 @@ import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.mixin.PlayercontrolppMixinPlugin;
 import com.alonediamond.playercontrolpp.record.RecordingManager;
 import com.alonediamond.playercontrolpp.route.RouteFlowRuntime;
 import com.alonediamond.playercontrolpp.route.RouteManager;
@@ -40,12 +41,27 @@ public class InitHandler implements IInitializationHandler {
         RouteManager.getInstance().refreshKeybinds();
         RecordingManager.getInstance().loadRecordings();
 
-        // 可选联动：每个只记录对应模组在不在。
-        LitematicaIntegration.getInstance().initialize();
-        BaritoneIntegration.getInstance().initialize();
-        ChestTrackerIntegration.getInstance().initialize();
-        QuickShulkerIntegration.getInstance().initialize();
-        LitematListIntegration.getInstance().initialize();
+        // 可选联动的启用由 MixinPlugin 在类变换期决定（装了才注入直连实现，stub 默认关闭）。
+        // 这里只需自检：插件判定模组在场时，对应 stub 必然已被覆写成 isLoaded()=true；
+        // 若还是 false，说明 mixin 注入没生效，趁启动喊出来，而不是等功能静默失效。
+        checkCompatMixins("litematica",
+                PlayercontrolppMixinPlugin.isLitematicaLoaded(), LitematicaIntegration.getInstance().isLoaded());
+        checkCompatMixins("baritone",
+                PlayercontrolppMixinPlugin.isBaritoneLoaded(), BaritoneIntegration.getInstance().isLoaded());
+        checkCompatMixins("chesttracker",
+                PlayercontrolppMixinPlugin.isChestTrackerLoaded(), ChestTrackerIntegration.getInstance().isLoaded());
+        checkCompatMixins("quickshulker",
+                PlayercontrolppMixinPlugin.isQuickShulkerLoaded(), QuickShulkerIntegration.getInstance().isLoaded());
+        checkCompatMixins("litematlist",
+                PlayercontrolppMixinPlugin.isLitematListLoaded(), LitematListIntegration.getInstance().isLoaded());
+    }
+
+    private static void checkCompatMixins(String modId, boolean modPresent, boolean mixinApplied) {
+        if (modPresent && !mixinApplied) {
+            Playercontrolpp.LOGGER.warn(
+                    "Optional mod {} is present but its compat mixin did not apply; "
+                            + "the related features will stay disabled", modId);
+        }
     }
 
     /**

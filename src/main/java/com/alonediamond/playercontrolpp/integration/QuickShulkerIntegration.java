@@ -3,16 +3,16 @@ package com.alonediamond.playercontrolpp.integration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * QuickShulker 联动，全部走反射，模组保持可选。
+ * QuickShulker 联动的默认实现（stub）。真正的方法体在
+ * {@code mixin/compat/quickshulker/QuickShulkerIntegrationImpl} 里，机制同 {@link LitematicaIntegration}。
  * 调 QuickShulker 自己的 {@code OpenShulkerPacket.sendOpenPacket(int)} 直接在物品栏里开盒。
  */
-public class QuickShulkerIntegration implements ModIntegration {
+public class QuickShulkerIntegration {
 
     /**
      * {@code InventoryMenu} 界面空间里快捷栏的第一个槽位。原版有
@@ -25,19 +25,13 @@ public class QuickShulkerIntegration implements ModIntegration {
     public static final int MENU_OFFHAND_SLOT = 45;
 
     private static final QuickShulkerIntegration INSTANCE = new QuickShulkerIntegration();
-    private boolean loaded;
 
     private QuickShulkerIntegration() {}
 
     public static QuickShulkerIntegration getInstance() { return INSTANCE; }
 
-    @Override
-    public boolean isLoaded() { return loaded; }
-
-    @Override
-    public void initialize() {
-        loaded = FabricLoader.getInstance().isModLoaded("quickshulker");
-    }
+    /** Mixin 注入成功时覆写为 {@code true}；未注入即联动未生效。 */
+    public boolean isLoaded() { return false; }
 
     /**
      * 把 {@link Inventory} 索引换算成 QuickShulker 要的 {@code InventoryMenu} 界面槽位。
@@ -80,26 +74,12 @@ public class QuickShulkerIntegration implements ModIntegration {
      *
      * @param menuSlot {@code InventoryMenu} 界面空间的槽位索引，从物品栏索引换算请用
      *                 {@link #menuSlotForInventorySlot(int)}
-     * @return 仅在 QuickShulker 未加载或反射失败时返回 false
+     * @return 仅在 QuickShulker 未加载或调用失败时返回 false
      */
-    public boolean openShulkerBox(int menuSlot) {
-        if (!loaded) return false;
-
-        try {
-            // OpenShulkerPacket.sendOpenPacket(menuSlot)
-            Class<?> packetClass = Class.forName(
-                    "net.kyrptonaught.quickshulker.network.OpenShulkerPacket");
-            packetClass.getMethod("sendOpenPacket", int.class).invoke(null, menuSlot);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
+    public boolean openShulkerBox(int menuSlot) { return false; }
 
     /**
      * @return 现在传物品栏空间的槽位索引会不会被正确解析，也就是当前打开的容器是否为玩家自己的物品栏菜单。
      */
-    public boolean canOpenFromInventory(Minecraft mc) {
-        return loaded && mc.player != null && mc.player.containerMenu == mc.player.inventoryMenu;
-    }
+    public boolean canOpenFromInventory(Minecraft mc) { return false; }
 }

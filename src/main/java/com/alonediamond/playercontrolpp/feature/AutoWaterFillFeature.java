@@ -28,7 +28,6 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
-import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,10 +87,6 @@ public class AutoWaterFillFeature {
     private static final Map<BlockPos, Integer> recentlyAttempted = new HashMap<>();
     private static final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
-    /** {@code schematicWorld.getBlockState(BlockPos)} 的缓存句柄。 */
-    private static Method schematicGetBlockStateMethod;
-    private static Object lastSchematicWorld;
-
     /** 注册进 {@link FeatureRegistry}，见 {@code InitHandler}。 */
     public static final ClientFeature FEATURE = new ClientFeature() {
         @Override public void onClientTick(Minecraft mc) { tick(mc); }
@@ -139,8 +134,6 @@ public class AutoWaterFillFeature {
         shulkerAttempts = 0;
         currentTarget = null;
         recentlyAttempted.clear();
-        schematicGetBlockStateMethod = null;
-        lastSchematicWorld = null;
     }
 
     public static void tick(Minecraft mc) {
@@ -374,7 +367,8 @@ public class AutoWaterFillFeature {
             abandonTarget();
             return;
         }
-        if (!schematicWantsWaterAt(mc, currentTarget, worldState)) {
+        BlockGetter schematicWorld = LitematicaIntegration.getInstance().getSchematicWorld();
+        if (schematicWorld != null && !schematicWantsWaterAt(schematicWorld, currentTarget, worldState)) {
             abandonTarget();
             return;
         }
@@ -501,38 +495,16 @@ public class AutoWaterFillFeature {
     }
 
     private static BlockGetter schematicWorldOrNull() {
-        Object schematicWorld = LitematicaIntegration.getInstance().getSchematicWorld();
-        return schematicWorld instanceof BlockGetter view ? view : null;
+        return LitematicaIntegration.getInstance().getSchematicWorld();
     }
 
     /**
      * 点击前再跟投影核对一次：{@code pos} 确实该含水，且世界里那个方块就是投影期望的方块。
      * 必须重查——扫描结果到这时可能已经过期几 tick。
      */
-    private static boolean schematicWantsWaterAt(Minecraft mc, BlockPos pos, BlockState worldState) {
-        Object schematicWorld = LitematicaIntegration.getInstance().getSchematicWorld();
-        if (schematicWorld == null) return true; // 没有投影能反驳，就按扫描结果办
-
-        if (schematicWorld != lastSchematicWorld || schematicGetBlockStateMethod == null) {
-            lastSchematicWorld = schematicWorld;
-            try {
-                schematicGetBlockStateMethod = schematicWorld.getClass()
-                        .getMethod("getBlockState", BlockPos.class);
-            } catch (NoSuchMethodException e) {
-                schematicGetBlockStateMethod = null;
-            }
-        }
-        if (schematicGetBlockStateMethod == null) return true;
-
-        try {
-            Object stateObj = schematicGetBlockStateMethod.invoke(schematicWorld, pos);
-            if (stateObj instanceof BlockState schemState) {
-                return worldState.getBlock() == schemState.getBlock() && isWaterlogged(schemState);
-            }
-        } catch (Exception ignored) {
-            // Litematica 内部结构变了：往下走，相信扫描结果。
-        }
-        return true;
+    private static boolean schematicWantsWaterAt(BlockGetter schematicWorld, BlockPos pos, BlockState worldState) {
+        BlockState schemState = schematicWorld.getBlockState(pos);
+        return worldState.getBlock() == schemState.getBlock() && isWaterlogged(schemState);
     }
 
     // ---- 重试冷却记账 ----
