@@ -13,7 +13,8 @@
     "compat.baritone.BaritoneIntegrationImpl",
     "compat.chesttracker.ChestTrackerIntegrationImpl",
     "compat.quickshulker.QuickShulkerIntegrationImpl",
-    "compat.litematlist.LitematListIntegrationImpl"
+    "compat.litematlist.LitematListIntegrationImpl",
+    "compat.litematlist.RawMaterialScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

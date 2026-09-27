@@ -3,6 +3,8 @@ package com.alonediamond.playercontrolpp.util;
 import com.alonediamond.playercontrolpp.compat.ContainerContentsCompat;
 
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -64,5 +66,43 @@ public final class ItemUtil {
             if (is(inner, item)) return true;
         }
         return false;
+    }
+
+    /**
+     * @return 玩家持有多少个 {@code item}：36 格主物品栏里的散装，加上其中潜影盒内的持有量。
+     *
+     * <p>这是备货全流程统一的"持有"口径——满足判定、缺口重判、原材料预留额度都用它，
+     * 三处口径不一致就会出现"已经拿到了却还在拿"或"其实够用却判定缺料"。
+     */
+    public static int countEverywhere(Player player, Item item) {
+        if (player == null || item == null) return 0;
+        Inventory inventory = player.getInventory();
+        int count = 0;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (is(stack, item)) {
+                count += stack.getCount();
+            } else if (isShulkerBox(stack)) {
+                count += countInside(stack, item);
+            }
+        }
+        return count;
+    }
+
+    /**
+     * @return 玩家物品栏里<b>散装</b>持有多少个 {@code item}（不含潜影盒内的）。
+     *         合成消耗的是散装物品，所以合成前要按这个口径再查一遍。
+     */
+    public static int countLoose(Player player, Item item) {
+        if (player == null || item == null) return 0;
+        Inventory inventory = player.getInventory();
+        int count = 0;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (is(stack, item)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
     }
 }

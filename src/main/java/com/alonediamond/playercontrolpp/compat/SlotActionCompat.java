@@ -39,6 +39,22 @@ public final class SlotActionCompat {
     }
 
     /**
+     * 右键点 {@code slotIndex}：拿起半堆 / 放下一个。
+     *
+     * <p>手动摆料时用它把"正好一个"材料放进合成格——先左键抓起整堆，再右键逐个点数放下去。
+     *
+     * @param containerId 当前打开菜单的 {@code containerId}
+     * @param slotIndex   槽位索引，<em>界面空间</em>
+     */
+    public static void pickupRight(Minecraft mc, int containerId, int slotIndex) {
+        //#if MC >= 260000
+        mc.gameMode.handleContainerInput(containerId, slotIndex, 1, ContainerInput.PICKUP, mc.player);
+        //#else
+        //$$ mc.gameMode.handleInventoryMouseClick(containerId, slotIndex, 1, ClickType.PICKUP, mc.player);
+        //#endif
+    }
+
+    /**
      * Shift + 左键点 {@code slotIndex}，整堆移到另一侧物品栏。
      *
      * @param containerId 当前打开菜单的 {@code containerId}

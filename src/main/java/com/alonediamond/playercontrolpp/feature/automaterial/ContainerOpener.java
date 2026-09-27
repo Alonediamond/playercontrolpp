@@ -1,15 +1,18 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
+import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
+import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
@@ -33,6 +36,8 @@ public class ContainerOpener {
     private static final int OPEN_WAIT_TICKS = 10;
     /** 右键回退路径用的较短等待，它反应更快。 */
     private static final int FALLBACK_WAIT_TICKS = 6;
+    /** 归还杂盒时，点完"塞回容器"到关闭界面之间的 tick 数。 */
+    private static final int MIXED_BOX_RETURN_CLOSE_TICKS = 6;
 
     /** 打开 {@code target} 处的容器。OPENING_CONTAINER 转换的入口。 */
     public void openContainerAt(BlockPos target, GatherContext ctx) {
@@ -102,6 +107,12 @@ public class ContainerOpener {
         // 点击已经有了结果（成或不成），两种情况都不再按住右键。
         releaseKeys();
 
+        // 需求1：这一趟开的容器只是用来把杂盒塞回去的。
+        if (ctx.mixedBoxReturnSlot >= 0) {
+            handleMixedBoxReturn(ctx, tsm);
+            return;
+        }
+
         if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>) {
             if (containerHasAnyMissingItem(ctx)) {
                 tsm.setState(State.TRANSFERRING_ITEM);
@@ -123,10 +134,54 @@ public class ContainerOpener {
         }
     }
 
+    /**
+     * 归还杂盒：容器打开后把盒子 quickMove 回容器，再由状态机在冷却结束后关界面。
+     *
+     * <p>归还失败（界面迟迟不开）不算错误：盒子在背包里、材料也已经到手，
+     * 提示一声继续备货即可，不走"相邻容器重试"那套。
+     */
+    private void handleMixedBoxReturn(GatherContext ctx, TaskStateMachine tsm) {
+        Minecraft mc = ctx.client;
+        if (mc.player == null) return;
+
+        if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>) {
+            int boxSlot = ctx.mixedBoxReturnSlot;
+            if (boxSlot >= 0 && boxSlot < Inventory.INVENTORY_SIZE
+                    && ItemUtil.isShulkerBox(mc.player.getInventory().getItem(boxSlot))) {
+                int menuSlot = PlayerUtil.menuSlotOf(mc.player.containerMenu,
+                        mc.player.getInventory(), boxSlot);
+                if (menuSlot >= 0) {
+                    SlotActionCompat.quickMove(mc, mc.player.containerMenu.containerId, menuSlot);
+                }
+            }
+            // 交给状态机等一拍再关：点击与关闭是两个包，不能同 tick 连发。
+            ctx.mixedBoxReturnClosing = true;
+            ctx.transferCooldown = MIXED_BOX_RETURN_CLOSE_TICKS;
+            ctx.openAttemptCount = 0;
+            return;
+        }
+
+        ctx.openAttemptCount++;
+        if (ctx.openAttemptCount < MAX_OPEN_ATTEMPTS) {
+            openContainerWithRetry(ctx.currentContainerTarget, false, ctx.openAttemptCount, ctx);
+            return;
+        }
+
+        MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_return_failed");
+        ctx.extractionBoxSlots.remove(ctx.mixedBoxReturnSlot);
+        tsm.clearMixedBoxReturn();
+        ctx.transferCooldown = 8;
+        ctx.openAttemptCount = 0;
+        tsm.continueAfterExtraction();
+    }
+
     /** 当前目标打不开、或打开了但没有有用的东西时调用。 */
     public void retryAdjacentOrFail(GatherContext ctx, TaskStateMachine tsm,
                                      BaritonePathingController pathing) {
         if (ctx.adjacentContainerTargets == null) {
+            // 记住原目标：接下来 openContainerAt() 会把 currentContainerTarget 换成每一个邻居，
+            // 全部试完之后要排除的是这个原目标，不是最后那个邻居。
+            ctx.adjacentOriginTarget = ctx.currentContainerTarget;
             ctx.adjacentContainerTargets = getAdjacentContainerTargets(ctx.currentContainerTarget);
             ctx.adjacentTryIndex = 0;
         }
@@ -139,20 +194,24 @@ public class ContainerOpener {
             return;
         }
 
+        BlockPos origin = ctx.adjacentOriginTarget != null
+                ? ctx.adjacentOriginTarget
+                : ctx.currentContainerTarget;
         ctx.adjacentContainerTargets = null;
         ctx.adjacentTryIndex = 0;
+        ctx.adjacentOriginTarget = null;
         ctx.openAttemptCount = 0;
-        // 这个坐标（连同试过的邻居）对本物品确认无货，记入排除表；
+        // 原坐标（连同试过的邻居）对本物品确认无货，记入排除表；
         // 不记的话 SEARCHING 重建列表后还会回到它，开箱-关箱循环永不前进。
-        if (ctx.currentContainerTarget != null) {
-            ctx.exhaustedPositions.add(ctx.currentContainerTarget);
+        if (origin != null) {
+            ctx.exhaustedPositions.add(origin);
         }
         ctx.chestRetryCount++;
         if (ctx.chestRetryCount >= MAX_CHEST_RETRIES) {
             ctx.chestRetryCount = 0;
             ctx.currentPosIndex++;
             if (ctx.currentPosIndex >= ctx.foundPositions.size()) {
-                tsm.skipCurrentItem();
+                tsm.onCurrentTargetUnavailable();
             } else {
                 navigateToNextContainer(ctx.foundPositions.get(ctx.currentPosIndex), ctx, tsm, pathing);
             }
@@ -217,23 +276,16 @@ public class ContainerOpener {
     private boolean containerHasAnyMissingItem(GatherContext ctx) {
         if (ctx.client.player == null || ctx.client.player.containerMenu == null) return false;
         List<Slot> slots = ctx.client.player.containerMenu.slots;
+        // 走 wantedEntries()：原材料追溯派出去的子材料不在缺失清单上，但同样要能开箱取到，
+        // 否则这个容器会被判成"没有需要的东西"而走六邻回退，永远拿不到里面的子材料。
         for (Slot slot : slots) {
             if (slot.container == ctx.client.player.getInventory()) continue;
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
-            for (MaterialItemEntry entry : ctx.missingItems) {
+            for (MaterialItemEntry entry : ctx.wantedEntries()) {
                 if (ItemUtil.is(stack, entry.item)) return true;
             }
-            if (ItemUtil.isShulkerBox(stack) && shulkerBoxContainsAnyMissingItem(stack, ctx)) return true;
-        }
-        return false;
-    }
-
-    public boolean shulkerBoxContainsAnyMissingItem(ItemStack shulkerBox, GatherContext ctx) {
-        for (ItemStack inner : ItemUtil.contentsOf(shulkerBox)) {
-            for (MaterialItemEntry entry : ctx.missingItems) {
-                if (ItemUtil.is(inner, entry.item)) return true;
-            }
+            if (ItemUtil.isShulkerBox(stack) && ctx.boxContainsWantedItem(stack)) return true;
         }
         return false;
     }

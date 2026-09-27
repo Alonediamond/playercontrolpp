@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.mixin.compat.baritone;
 
+import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 
 import baritone.api.BaritoneAPI;
@@ -124,6 +125,41 @@ public abstract class BaritoneIntegrationImpl {
             return Boolean.TRUE.equals(BaritoneAPI.getSettings().allowInventory.value);
         } catch (Throwable e) {
             return false;
+        }
+    }
+
+    /** 与 {@code #mine <quantity> <block>} 同一条路径：Baritone 自己搜索、走过去、换工具。 */
+    @Overwrite(remap = false)
+    public void mine(String blockId, int quantity) {
+        try {
+            primaryBaritone().getMineProcess().mineByName(quantity, blockId);
+        } catch (Throwable e) {
+            Playercontrolpp.LOGGER.debug("Unable to start Baritone mining for {}", blockId, e);
+        }
+    }
+
+    @Overwrite(remap = false)
+    public boolean isMining() {
+        try {
+            return primaryBaritone().getMineProcess().isActive();
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    /**
+     * 只取消挖掘进程。
+     *
+     * <p>不用 {@code cancelEverything()}：那条路会给所有进程发 {@code onLostControl()}，
+     * 万一玩家同时在用别的东西（例如建造）会被一起打断。停止备货时的整体取消另走
+     * {@link #cancelPathing()}。
+     */
+    @Overwrite(remap = false)
+    public void cancelMining() {
+        try {
+            primaryBaritone().getMineProcess().cancel();
+        } catch (Throwable e) {
+            // 进程本来就不在，或 fork 漂移；两种都不需要处理。
         }
     }
 }

@@ -78,6 +78,12 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                             && !LitematListIntegration.getInstance().isLoaded()) {
                         continue;
                     }
+                    // 原材料溯源用的是 LitematList 的配方树，它不在时这两项没有意义。
+                    if ((opt == Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE
+                            || opt == Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH)
+                            && !LitematListIntegration.getInstance().isLoaded()) {
+                        continue;
+                    }
                     baritoneOptions.add(opt);
                 }
                 baritoneOptions.add(Configs.Hotkeys.MARK_CONTAINER);

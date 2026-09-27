@@ -171,6 +171,36 @@ public class Configs implements IConfigHandler {
                 "When a material's shortage exceeds this amount and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks. Falls back to loose stacks when the cache has no such boxes. Default: 864.")
                 .apply(KEY_BARITONE);
 
+        /**
+         * v1.9：备货途中识别箱子追踪缓存里的潜影盒（杂盒）。
+         *
+         * <p>散装场景（缺口未超过整盒阈值）下，缓存里找不到散装库存、却存在"装着该材料"的潜影盒时，
+         * 把盒子取出来、开盒取走盒内所有缺失材料，再把盒子还回原容器。
+         * 关闭时维持 v1.8 行为（直接跳过该材料）。
+         */
+        public static final ConfigBoolean RECOGNIZE_MIXED_SHULKER_BOX = new ConfigBoolean(
+                "recognizeMixedShulkerBox", false,
+                "When a material's shortage is below the whole-box threshold and ChestTracker has no loose stock of it, look for shulker boxes containing it in cached containers: take the box out, open it, take out every missing material inside, then put the box back. Off: such materials are simply skipped, as before.")
+                .apply(KEY_BARITONE);
+
+        /**
+         * v1.9：缓存里没有的材料要不要追溯原材料并合成。只在装了 LitematList 时显示；
+         * 启用前提是备货数据来源选了「跟随LitematList清单」且那边已上传清单。
+         */
+        public static final ConfigOptionList RAW_MATERIAL_CRAFT_MODE = new ConfigOptionList(
+                "rawMaterialCraftMode", RawMaterialMode.DISABLED,
+                "Whether to trace and craft missing materials from their raw materials when ChestTracker has none.\nDisabled: skip the material, as before.\nCache Only: gather the raw materials from cached containers.\nWorld Search: also let Baritone mine/find them in the world.\nRequires LitematList as the material list source, with a list uploaded there.")
+                .apply(KEY_BARITONE);
+
+        /**
+         * v1.9：原材料溯源层数。<b>-1 = 跟随 LitematList 原材料界面上的层数设置</b>（观察不到时用它的默认值 5），
+         * 0-10 = 用本模组指定的层数。层数上限由 LitematList 自己限制在 0-10。
+         */
+        public static final ConfigInteger RAW_MATERIAL_MAX_DEPTH = new ConfigInteger(
+                "rawMaterialMaxDepth", -1, -1, 10,
+                "How many recipe layers to trace when decomposing a missing material into raw materials. -1 = follow the layer count set on LitematList's raw material screen (its default is 5); 0-10 = use this value instead.")
+                .apply(KEY_BARITONE);
+
         public static final ConfigBoolean ENABLE_GLOBAL_IGNORE = new ConfigBoolean(
                 "enableGlobalIgnore", false,
                 "When enabled, items in the Global Ignore List will be skipped during auto-gathering.")
@@ -193,7 +223,8 @@ public class Configs implements IConfigHandler {
 
         /** 前两项属于「自动投影材料备货」，排在最前，GUI 里正好落在备货热键的下面。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                MATERIAL_LIST_SOURCE, SHULKER_BOX_PRIORITY_THRESHOLD,
+                MATERIAL_LIST_SOURCE, SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
+                RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH,
                 ENABLE_GLOBAL_IGNORE, AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE, GLOBAL_IGNORE_LIST);
     }
 

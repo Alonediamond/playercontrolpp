@@ -119,6 +119,7 @@ java -cp /tmp/icon MakeIcon src/main/resources/assets/playercontrolpp/icon.png
 | `InventoryCompat` | `Inventory.selected` 字段 → `getSelectedSlot()` / `setSelectedSlot()` | 1.21.5 |
 | `InputCompat` | `Input.jumping` / `shiftKeyDown` 字段 → `input.keyPresses` (`PlayerInput` record) | 1.21.2 |
 | `MaLiLibCompat` | malilib `JsonUtils` 移包 + `getConfigDirectory()` 返回类型 | 1.21.11 (malilib 0.27) |
+| `RegistryCompat` | `Registry.get(id)` 从"返回对象（可能为 null）"改为 `Optional<Holder.Reference<T>>` | 1.21.2 |
 
 兼容层没有覆盖、也不需要覆盖的一处：`Inventory.SELECTION_SIZE`（快捷栏大小）
 从 1.21.4 起才存在，1.21.1 没有，所以用自有常量 `PlayerUtil.HOTBAR_SIZE`；
@@ -178,6 +179,18 @@ Litematica / Baritone / ChestTracker / QuickShulker / LitematList 五个可选�
   不进运行时、不打包），API 漂移在编译期报错而不是运行期静默失效；
 - impl 方法体统一 `catch (Throwable)`：第三方 fork 的签名漂移抛 `NoSuchMethodError`
   这类 Error，要与旧反射时代一样静默降级，不能炸 tick 循环。
+
+另有一类 mixin 不覆盖我们的 stub，而是**观察第三方自己的类**：LitematList 的"原材料显示层数"
+是它 GUI 的私有字段、没有 getter 也没有配置项，`compat.litematlist.RawMaterialScreenMixin`
+用 `@Shadow` + `@Inject(method = "loadOrAnalyze", require = 0)` 在它每次重建配方树时抄一份出来。
+这类注入刻意写 `require = 0`：将来第三方改了私有方法名，最坏结果是观察不到、退回本模组
+自己的配置，而不是让玩家的游戏崩在类变换阶段。字段名与方法名在 1.7.2 的四个 jar 上逐版本核对过。
+
+> **LitematList 的版本覆盖**：1.7.2 发布了 1.21.1 / 1.21.4 / 1.21.8 / 1.21.10 / 1.21.11 /
+> 26.1.2 / 26.2 七个构建，各自放在 `libs/<mc>/` 下。**1.21.6 没有对应构建**，借用
+> `libs/1.21.8/litematlist-1.7.2.jar` 编译（`modCompileOnly` 会做 intermediary → named
+> 重映射；该版本的预处理产物与 1.21.8 逐字节相同）。其余七个版本都对着各自真实的 jar
+> 做类型校验，运行时也真的能加载 LitematList。
 
 ### 新增一个可选联动模组该怎么做
 

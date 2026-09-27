@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
+import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
@@ -83,7 +84,7 @@ public class BaritonePathingController {
                 tsm.setState(State.OPENING_CONTAINER);
                 opener.openContainerAt(ctx.foundPositions.get(ctx.currentPosIndex), ctx);
             } else {
-                tsm.skipCurrentItem();
+                tsm.onCurrentTargetUnavailable();
             }
             return;
         }
@@ -94,12 +95,6 @@ public class BaritonePathingController {
     }
 
     private boolean isInventoryFull(Minecraft mc) {
-        if (mc.player == null) return true;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (mc.player.getInventory().getItem(i).isEmpty()) {
-                return false;
-            }
-        }
-        return true;
+        return PlayerUtil.isInventoryFull(mc.player);
     }
 }

@@ -33,19 +33,24 @@ public class ContainerSearcher {
             }
 
             // 范围设为无限会让箱子追踪把整个记忆库走一遍；宁可拒绝，也不要卡死客户端。
+            //
+            // 用 searchRange：箱子追踪自己的搜索用的就是这个设置。早先取两者较小值，
+            // 会出现"箱子追踪界面能高亮出这个容器、本模组却报找不到"的落差
+            // （itemListRange 管的是它的物品列表，通常配得比搜索范围大）。
+            // searchRange 不可用时才退回 itemListRange。
             int searchRange = chestTracker.getSearchRange();
             int listRange = chestTracker.getListRange();
-            if (searchRange == Integer.MAX_VALUE || listRange == Integer.MAX_VALUE) {
-                MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.range_infinite");
-                tsm.setState(State.STOPPED);
-                return;
-            }
-            if (searchRange < 0 || listRange < 0) {
+            if (searchRange < 0 && listRange < 0) {
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.no_cache");
                 tsm.setState(State.STOPPED);
                 return;
             }
-            int effectiveRange = Math.min(searchRange, listRange);
+            int effectiveRange = searchRange >= 0 ? searchRange : listRange;
+            if (effectiveRange == Integer.MAX_VALUE) {
+                MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.range_infinite");
+                tsm.setState(State.STOPPED);
+                return;
+            }
 
             Identifier currentDim = chestTracker.getCurrentDimensionKey();
             if (currentDim == null) {
@@ -59,6 +64,7 @@ public class ContainerSearcher {
             // 没有整盒时 wholeBoxPriority 保持 false，走原来的纯散装路线。
             ctx.foundPositions.clear();
             ctx.wholeBoxPriority = false;
+            ctx.mixedBoxMode = false;
             int stillNeeded = ctx.targetNeededTotal - ctx.currentlyGathered;
             int boxThreshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
             if (stillNeeded > boxThreshold) {
@@ -79,11 +85,27 @@ public class ContainerSearcher {
                 }
             }
 
+            // 缺口没超过整盒阈值时，材料常常整盒躺在容器里——散装搜索一个都搜不到，
+            // 而 searchItem() 只认散装物品堆，不会因为"盒里有"而返回这个容器。
+            // 所以这里再按"装着该材料的潜影盒"查一遍，命中就转成"取盒→开盒取物→归还"。
+            if (ctx.foundPositions.isEmpty()
+                    && stillNeeded <= boxThreshold
+                    && Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue()) {
+                for (BlockPos pos : chestTracker.searchShulkerBoxWithItem(
+                        ctx.currentTargetItem, playerPos, effectiveRange)) {
+                    if (!ctx.exhaustedPositions.contains(pos)) {
+                        ctx.foundPositions.add(pos);
+                    }
+                }
+                ctx.mixedBoxMode = !ctx.foundPositions.isEmpty();
+            }
+
             if (ctx.foundPositions.isEmpty()) {
                 String itemName = BuiltInRegistries.ITEM.getKey(ctx.currentTargetItem).toString();
                 MessageUtil.sendActionBar(ctx.client,
                         "playercontrolpp.message.baritone.item_missing", itemName);
-                tsm.skipCurrentItem();
+                // 顶层物品：这里可能会转入"追溯原材料并合成"，而不是直接跳过。
+                tsm.onCurrentTargetUnavailable();
                 return;
             }
 
@@ -91,13 +113,14 @@ public class ContainerSearcher {
             ctx.chestRetryCount = 0;
             ctx.adjacentContainerTargets = null;
             ctx.adjacentTryIndex = 0;
+            ctx.adjacentOriginTarget = null;
             navigateToContainer(ctx.foundPositions.get(0), ctx, tsm, opener, pathing);
 
         } catch (Exception e) {
             Playercontrolpp.LOGGER.warn("ChestTracker search failed for {}", ctx.currentTargetItem, e);
             MessageUtil.sendActionBar(ctx.client,
                     "playercontrolpp.message.baritone.search_error", String.valueOf(e));
-            tsm.skipCurrentItem();
+            tsm.onCurrentTargetUnavailable();
         }
     }
 
@@ -114,12 +137,6 @@ public class ContainerSearcher {
     }
 
     private boolean isInventoryFull(Minecraft mc) {
-        if (mc.player == null) return true;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (mc.player.getInventory().getItem(i).isEmpty()) {
-                return false;
-            }
-        }
-        return true;
+        return PlayerUtil.isInventoryFull(mc.player);
     }
 }

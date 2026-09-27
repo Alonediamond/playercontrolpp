@@ -21,32 +21,57 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Map;
+
 /**
- * 自动备货途中把已收集的建筑材料存进潜影盒，腾出背包空间。
+ * 潜影盒的存取执行器，同时服务两个方向：
  *
- * <pre>
- * FINDING_SHULKER -&gt; FINDING_POSITION -&gt; SWITCHING_SHULKER -&gt; PLACING
- *                 -&gt; OPENING -&gt; TRANSFERRING -&gt; CLOSING -&gt; MINING -&gt; WAITING_PICKUP -&gt; DONE
- * </pre>
+ * <ul>
+ *   <li>{@link Operation#STORE}（自动存盒）：背包满时把已收集的建筑材料存进潜影盒，腾出空间。
+ *   <pre>
+ *   FINDING_SHULKER -&gt; FINDING_POSITION -&gt; SWITCHING_SHULKER -&gt; PLACING
+ *                   -&gt; OPENING -&gt; TRANSFERRING -&gt; CLOSING -&gt; MINING -&gt; WAITING_PICKUP -&gt; DONE
+ *   </pre></li>
+ *   <li>{@link Operation#EXTRACT}（开盒取物）：把指定盒子里的材料取出来。用于"识别箱子追踪杂盒"
+ *       和"合成前把材料从背包内的盒子里取出来"。
+ *   <pre>
+ *   CLOSE_CHEST -&gt; FINDING_POSITION -&gt; SWITCHING_SHULKER -&gt; PLACING
+ *               -&gt; OPENING -&gt; TRANSFERRING -&gt; CLOSING -&gt; MINING -&gt; WAITING_PICKUP -&gt; DONE
+ *   </pre>
+ *   取完不自己归还盒子：把"待归还的盒子槽位 + 目标容器"交给主状态机，由它借用现成的
+ *   开容器机制塞回去（见 {@code ContainerOpener.checkOpenResult}）。</li>
+ * </ul>
  *
  * <p>装了 QuickShulker 且在配置里选了它时，中间一段整体跳过：盒子就地打开
- * （FINDING_SHULKER -&gt; QUICK_OPEN -&gt; TRANSFERRING -&gt; CLOSING -&gt; DONE），完全不用放置和挖掘。
+ * （QUICK_OPEN -&gt; TRANSFERRING -&gt; CLOSING -&gt; DONE），完全不用放置和挖掘。
  */
-public class ShulkerBoxStorage {
+public class ShulkerBoxAccess {
+
+    /** 本次访问潜影盒是往里存还是往外取。 */
+    public enum Operation { STORE, EXTRACT }
 
     public enum StorageState {
-        IDLE, FINDING_SHULKER, FINDING_POSITION, SWITCHING_SHULKER,
+        IDLE, TAKE_BOX, FINDING_SHULKER, CLOSE_CHEST, FINDING_POSITION, SWITCHING_SHULKER,
         PLACING, OPENING, QUICK_OPEN, TRANSFERRING, CLOSING,
         MINING, WAITING_PICKUP, DONE
     }
 
     public enum StorageResult {
-        ACTIVE, DONE, FAILED
+        ACTIVE,
+        /** 本周期正常结束；EXTRACT 方向可能还留着"待归还的盒子"，见 {@code ctx.mixedBoxReturnSlot}。 */
+        DONE,
+        /** EXTRACT 方向专有：这次取物做不成（没位置放盒子 / 打不开 / 盒内没有要的东西），跳过当前物品即可。 */
+        ABORTED,
+        /** EXTRACT 方向专有：背包满了，交给主状态机走"背包已满"流程。 */
+        INVENTORY_FULL,
+        /** 存盒流程失败，整轮备货停止。 */
+        FAILED
     }
 
     /** 潜影盒界面里盒子自己的槽位：索引 0..26。 */
@@ -72,6 +97,8 @@ public class ShulkerBoxStorage {
     private static final int MAX_MINING_TICKS = 100;
     /** 等挖下来的盒子被捡起的 tick 数。 */
     private static final int MAX_PICKUP_WAIT_TICKS = 100;
+    /** 从容器里 quickMove 一个盒子之后，等物品栏同步过来的 tick 数。 */
+    private static final int TAKE_BOX_WAIT_TICKS = 5;
 
     private StorageState state = StorageState.IDLE;
     private boolean active;
@@ -96,6 +123,25 @@ public class ShulkerBoxStorage {
     private int transferIndex;
     private int prevSelectedSlot;
 
+    // ---- 取物方向（EXTRACT）专有状态 ----
+
+    private Operation operation = Operation.STORE;
+    /**
+     * EXTRACT：要取的物品及"希望散装持有到多少个"；为空表示需求1 的开盒取物
+     * （按缺失清单/追溯目标的实时缺口，含盒内持有但不含正在开的这个盒子）。
+     */
+    private final java.util.Map<Item, Integer> extractTargets = new java.util.HashMap<>();
+    /** EXTRACT：盒子是从哪个容器拿出来的；{@code null} = 不用归还（从自己背包里取料）。 */
+    private BlockPos returnTarget;
+    /** STORE：这一趟只是"顺手存一下"，失败不该停掉整轮备货。 */
+    private boolean optionalCycle;
+    /** 放置盒子之前物品栏里已有的盒子槽位，用来在挖回后认出"我们刚放下去的那个"。 */
+    private final java.util.Set<Integer> boxesBeforePlace = new java.util.HashSet<>();
+    /** EXTRACT：要从打开的容器里取出的盒子所在菜单槽位。 */
+    private int takeBoxMenuSlot = -1;
+    /** TAKE_BOX 阶段的等待计时。 */
+    private int takeBoxTicks;
+
     public boolean isActive() { return active; }
 
     public static boolean isEnabled() {
@@ -109,10 +155,74 @@ public class ShulkerBoxStorage {
                 && QuickShulkerIntegration.getInstance().isLoaded();
     }
 
+    /**
+     * 开始「从打开的容器里取杂盒 → 开盒取物」的周期。
+     *
+     * <p>调用时容器界面必须还开着：{@code containerBoxMenuSlot} 是那个盒子的菜单槽位。
+     * 取盒、找盒子落点、关容器、开盒、取物、挖回，全部由本周期自己完成；
+     * 归还盒子留给主状态机（见类注释）。
+     *
+     * @return 是否成功进入周期
+     */
+    public boolean startContainerBoxTake(GatherContext ctx, int containerBoxMenuSlot, BlockPos sourceContainer) {
+        if (containerBoxMenuSlot < 0) return false;
+        if (!beginCycle(ctx, Operation.EXTRACT)) return false;
+        takeBoxMenuSlot = containerBoxMenuSlot;
+        returnTarget = sourceContainer;
+        state = StorageState.TAKE_BOX;
+        return true;
+    }
+
+    /** 进入「自动存盒」周期（背包满时的必须动作：失败就停下整轮备货）。 */
     public boolean startStorage(GatherContext ctx) {
+        return startStorage(ctx, false);
+    }
+
+    /**
+     * 进入「自动存盒」周期。
+     *
+     * @param optional true = 只是顺手把散落的材料收起来（例如原材料合成失败之后）：
+     *                 找不到可用盒子就悄悄跳过，不当作失败、更不会停掉整轮备货
+     */
+    public boolean startStorage(GatherContext ctx, boolean optional) {
+        if (!beginCycle(ctx, Operation.STORE)) return false;
+        this.optionalCycle = optional;
+        state = StorageState.IDLE;
+        if (!optional) {
+            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.shulker_store_start");
+        }
+        return true;
+    }
+
+    /**
+     * 进入「开盒取物」周期：盒子已经在玩家物品栏的 {@code boxInventorySlot} 里。
+     *
+     * @param boxInventorySlot 盒子的物品栏槽位
+     * @param sourceContainer  盒子是从哪个容器拿出来的；{@code null} = 不用归还
+     * @param targets          只取这些物品，值是"希望散装持有到多少个"；传空表示
+     *                         "缺失清单（含追溯目标）上所有还缺的物品"
+     */
+    public boolean startExtraction(GatherContext ctx, int boxInventorySlot,
+                                   BlockPos sourceContainer, Map<Item, Integer> targets) {
+        if (boxInventorySlot < 0 || boxInventorySlot >= Inventory.INVENTORY_SIZE) return false;
+        if (!beginCycle(ctx, Operation.EXTRACT)) return false;
+
+        shulkerSlotIndex = boxInventorySlot;
+        returnTarget = sourceContainer;
+        extractTargets.clear();
+        if (targets != null) extractTargets.putAll(targets);
+
+        // 起始状态：容器界面还开着，先关掉才能开盒（QuickShulker 要 InventoryMenu，
+        // 放置模式要腾出手来放方块）。
+        state = StorageState.CLOSE_CHEST;
+        return true;
+    }
+
+    private boolean beginCycle(GatherContext ctx, Operation op) {
         Minecraft mc = ctx.client;
         if (mc.player == null) return false;
 
+        operation = op;
         state = StorageState.IDLE;
         active = true;
         terminalResult = StorageResult.ACTIVE;
@@ -128,10 +238,14 @@ public class ShulkerBoxStorage {
         transferIndex = 0;
         prevSelectedSlot = InventoryCompat.getSelectedSlot(mc.player.getInventory());
         anyItemsTransferred = false;
+        returnTarget = null;
+        optionalCycle = false;
+        extractTargets.clear();
+        boxesBeforePlace.clear();
+        takeBoxMenuSlot = -1;
+        takeBoxTicks = 0;
         // knownFullSlots 刻意不清：上个周期满的盒子现在还是满的。
         useQuickShulkerMode = isQuickShulkerModeEnabled();
-
-        MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_start");
         return true;
     }
 
@@ -144,20 +258,24 @@ public class ShulkerBoxStorage {
         if (mc.player.isDeadOrDying()) { abort(mc); return StorageResult.FAILED; }
 
         switch (state) {
-            case IDLE -> state = StorageState.FINDING_SHULKER;
+            case IDLE -> state = operation == Operation.EXTRACT
+                    ? StorageState.CLOSE_CHEST
+                    : StorageState.FINDING_SHULKER;
+            case TAKE_BOX -> doTakeBox(mc, ctx);
             case FINDING_SHULKER -> doFindShulker(mc, ctx);
+            case CLOSE_CHEST -> doCloseChest(mc);
             case FINDING_POSITION -> doFindPosition(mc);
             case SWITCHING_SHULKER -> doSwitchToShulker(mc);
             case PLACING -> doPlace(mc);
             case OPENING -> doOpen(mc);
             case QUICK_OPEN -> doQuickOpen(mc);
             case TRANSFERRING -> doTransfer(mc, ctx);
-            case CLOSING -> doClose(mc);
+            case CLOSING -> doClose(mc, ctx);
             case MINING -> doMine(mc);
-            case WAITING_PICKUP -> { return doWaitPickup(mc); }
+            case WAITING_PICKUP -> { return doWaitPickup(mc, ctx); }
             case DONE -> {
                 active = false;
-                return StorageResult.DONE;
+                return terminalResult;
             }
         }
 
@@ -172,13 +290,24 @@ public class ShulkerBoxStorage {
     private void doFindShulker(Minecraft mc, GatherContext ctx) {
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             if (knownFullSlots.contains(i)) continue;
+            // 本次为"开盒取物"搬出来的杂盒不许被当成存储盒，否则刚取出来的材料又被装回去。
+            if (ctx.extractionBoxSlots.contains(i)) continue;
             ItemStack stack = mc.player.getInventory().getItem(i);
             if (!ItemUtil.isShulkerBox(stack)) continue;
             // 不能把材料存进我们正要收集的那种盒子里。
             if (isOnMissingList(stack, ctx)) continue;
+            // 盒内装着缺失材料的（杂盒），留着待会儿开盒取物，也别拿来装东西：
+            // 混在一起之后，取物流程就得先把我们刚存进去的材料再拿出来一次。
+            if (ctx.boxContainsWantedItem(stack)) continue;
             // 「满没满」按打开后的界面判断，不看物品 NBT——NBT 可能是过期的。
             shulkerSlotIndex = i;
             state = useQuickShulkerMode ? StorageState.QUICK_OPEN : StorageState.FINDING_POSITION;
+            return;
+        }
+        if (optionalCycle) {
+            // 顺手存一下没盒子可用：材料留在背包里继续备货，不当作失败。
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_skipped");
+            abortWith(mc, StorageResult.ABORTED);
             return;
         }
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_box");
@@ -201,6 +330,11 @@ public class ShulkerBoxStorage {
             retryCount++;
             if (retryCount < MAX_QUICK_OPEN_RETRIES) {
                 cooldown = 3;
+                return;
+            }
+            if (operation == Operation.EXTRACT) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_open_failed");
+                abortWith(mc, StorageResult.ABORTED);
                 return;
             }
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_open_failed");
@@ -262,6 +396,12 @@ public class ShulkerBoxStorage {
 
         retryCount++;
         if (retryCount >= MAX_POSITION_RETRIES) {
+            if (operation == Operation.EXTRACT) {
+                // 放不下盒子就跳过这个物品：盒子还在背包里，需要的东西也还在盒子里，不会丢。
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_no_position");
+                abortWith(mc, StorageResult.ABORTED);
+                return;
+            }
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_position");
             fail(mc);
             return;
@@ -329,6 +469,8 @@ public class ShulkerBoxStorage {
 
         SimulatedInput.release(mc.options.keyUse, this);
         retryCount = 0;
+        // 盒子已经离开物品栏了，此刻记下的槽位就是"除它以外"的盒子。
+        rememberExistingBoxes(mc);
         cooldown = 3;
         state = StorageState.OPENING;
     }
@@ -361,7 +503,97 @@ public class ShulkerBoxStorage {
         transferIndex = 0;
     }
 
+    /**
+     * 取物方向：把盒子里"还需要"的材料一组一组挪进背包。
+     *
+     * <p>每 tick 只点一次，点完等一个短冷却；扫到没有可取的就把界面关掉。
+     * 取哪些物品由 {@link #extractTargets} 决定：为空时按缺失清单 + 实时缺口判断
+     * （需求1：同一盒里的多种缺失材料一次全取，缺口补齐的那一种自动停手）。
+     */
+    private void doExtract(Minecraft mc, GatherContext ctx) {
+        if (placedPos != null) {
+            faceToward(mc, Vec3.atCenterOf(placedPos));
+        }
+
+        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
+            openVerifyTicks++;
+            if (openVerifyTicks > OPEN_VERIFY_LIMIT) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_open_failed");
+                abortWith(mc, StorageResult.ABORTED);
+            }
+            return;
+        }
+        openVerifyTicks = 0;
+        SimulatedInput.release(mc.options.keyUse, this);
+
+        AbstractContainerMenu handler = mc.player.containerMenu;
+
+        // 背包满了就先收手：盒子界面关掉之后，主状态机会走"背包已满"（存盒/提示停机）。
+        if (PlayerUtil.isInventoryFull(mc.player)) {
+            mc.player.closeContainer();
+            abortWith(mc, StorageResult.INVENTORY_FULL);
+            return;
+        }
+
+        for (int i = 0; i < BOX_SLOT_COUNT; i++) {
+            Slot slot = handler.getSlot(i);
+            if (slot == null) continue;
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty() || !isWantedExtract(mc, stack, ctx)) continue;
+
+            try {
+                SlotActionCompat.quickMove(mc, handler.containerId, i);
+                anyItemsTransferred = true;
+                cooldown = 2;
+            } catch (Exception e) {
+                // 这一格没收成，下一 tick 再看；连续失败也不会卡死，因为总会有扫完的一刻。
+            }
+            return;
+        }
+
+        // 盒子里没有还需要的东西了。
+        if (!anyItemsTransferred) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_empty");
+        }
+        state = StorageState.CLOSING;
+        cooldown = 3;
+    }
+
+    /** @return 这一堆物品是不是这次还要取出来的。 */
+    private boolean isWantedExtract(Minecraft mc, ItemStack stack, GatherContext ctx) {
+        Item item = stack.getItem();
+
+        // 合成前取料：合成要的是散装材料，所以按散装数量判断够没够。
+        if (!extractTargets.isEmpty()) {
+            Integer desired = extractTargets.get(item);
+            return desired != null && ItemUtil.countLoose(mc.player, item) < desired;
+        }
+
+        // 需求1：按"含盒内持有、但不含正在开的这个盒子"算还缺多少。
+        // 盒子此刻已经拿在手里了，countEverywhere 会把它算成已有——不把它减掉的话，
+        // 永远判定"不缺"，一个物品都取不出来。
+        int haveOutside = ItemUtil.countEverywhere(mc.player, item) - countInsideCurrentBox(mc, item);
+        for (MaterialItemEntry entry : ctx.wantedEntries()) {
+            if (entry.item == item) {
+                return haveOutside < entry.neededCount;
+            }
+        }
+        return false;
+    }
+
+    /** @return 正在打开的这个盒子里有多少个 {@code item}（模拟模式下盒子在世界里，返回 0）。 */
+    private int countInsideCurrentBox(Minecraft mc, Item item) {
+        if (shulkerSlotIndex < 0 || shulkerSlotIndex >= Inventory.INVENTORY_SIZE) return 0;
+        ItemStack box = mc.player.getInventory().getItem(shulkerSlotIndex);
+        return ItemUtil.isShulkerBox(box) ? ItemUtil.countInside(box, item) : 0;
+    }
+
     private void doTransfer(Minecraft mc, GatherContext ctx) {
+        if (operation == Operation.EXTRACT) {
+            doExtract(mc, ctx);
+            return;
+        }
+
         if (placedPos != null) {
             faceToward(mc, Vec3.atCenterOf(placedPos));
         }
@@ -425,7 +657,7 @@ public class ShulkerBoxStorage {
         cooldown = 3;
     }
 
-    private void doClose(Minecraft mc) {
+    private void doClose(Minecraft mc, GatherContext ctx) {
         if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
             mc.player.closeContainer();
         }
@@ -433,6 +665,9 @@ public class ShulkerBoxStorage {
         if (useQuickShulkerMode) {
             // 什么都没放下去，也就没有东西可挖、可捡。
             InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
+            if (operation == Operation.EXTRACT) {
+                finishExtraction(mc, ctx, shulkerSlotIndex);
+            }
             terminalResult = StorageResult.DONE;
             state = StorageState.DONE;
             return;
@@ -482,17 +717,24 @@ public class ShulkerBoxStorage {
         }
     }
 
-    private StorageResult doWaitPickup(Minecraft mc) {
+    private StorageResult doWaitPickup(Minecraft mc, GatherContext ctx) {
         waitTicks++;
 
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (ItemUtil.isShulkerBox(mc.player.getInventory().getItem(i))) {
+            if (!ItemUtil.isShulkerBox(mc.player.getInventory().getItem(i))) continue;
+            // 取物方向必须认出"我们刚放下去的那个"：把玩家自己的盒子误当成它归还，
+            // 等于把人家攒的材料连盒送回去。
+            if (operation == Operation.EXTRACT && boxesBeforePlace.contains(i)) continue;
+
+            if (operation == Operation.EXTRACT) {
+                finishExtraction(mc, ctx, i);
+            } else {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_done");
-                releaseKeys();
-                active = false;
-                state = StorageState.DONE;
-                return StorageResult.DONE;
             }
+            releaseKeys();
+            active = false;
+            state = StorageState.DONE;
+            return StorageResult.DONE;
         }
 
         if (waitTicks > MAX_PICKUP_WAIT_TICKS) {
@@ -568,6 +810,92 @@ public class ShulkerBoxStorage {
         abort(mc);
     }
 
+    /**
+     * 中止当前周期并指定上报结果。
+     *
+     * <p>取物方向失败大多只意味着"这个物品这次拿不到"，用 {@link StorageResult#ABORTED} 让主状态机
+     * 跳过当前物品继续跑；只有存盒方向才用 {@link StorageResult#FAILED} 整轮停下。
+     */
+    private void abortWith(Minecraft mc, StorageResult result) {
+        terminalResult = result;
+        abort(mc);
+    }
+
+    /**
+     * 记下此刻物品栏里所有潜影盒的槽位。
+     *
+     * <p>用来在"放置→挖回"之后认出我们刚放下去的那个盒子：放下去之后它不在物品栏里，
+     * 所以要在放置成功之后、挖回来之前记这一份。
+     */
+    private void rememberExistingBoxes(Minecraft mc) {
+        boxesBeforePlace.clear();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (ItemUtil.isShulkerBox(mc.player.getInventory().getItem(i))) {
+                boxesBeforePlace.add(i);
+            }
+        }
+    }
+
+    /**
+     * 从还开着的容器里把目标盒子搬进背包，并认出它落在哪个物品栏槽位。
+     *
+     * <p>先记下"搬之前物品栏里都有哪些盒子"，等 quickMove 的往返结果到了再找多出来的那一个；
+     * 找不到就说明没搬进来（背包满 / 槽位被同步打乱），直接跳过当前物品。
+     */
+    private void doTakeBox(Minecraft mc, GatherContext ctx) {
+        if (takeBoxTicks == 0) {
+            rememberExistingBoxes(mc);
+            try {
+                SlotActionCompat.quickMove(mc, mc.player.containerMenu.containerId, takeBoxMenuSlot);
+            } catch (Exception e) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_take_failed");
+                abortWith(mc, StorageResult.ABORTED);
+                return;
+            }
+        }
+
+        takeBoxTicks++;
+        if (takeBoxTicks < TAKE_BOX_WAIT_TICKS) {
+            cooldown = 1;
+            return;
+        }
+
+        takeBoxTicks = 0;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (boxesBeforePlace.contains(i)) continue;
+            if (!ItemUtil.isShulkerBox(mc.player.getInventory().getItem(i))) continue;
+            shulkerSlotIndex = i;
+            ctx.extractionBoxSlots.add(i);
+            state = StorageState.CLOSE_CHEST;
+            return;
+        }
+
+        MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_take_failed");
+        abortWith(mc, StorageResult.ABORTED);
+    }
+
+    /**
+     * EXTRACT 的起始阶段：关掉还开着的容器界面，等客户端菜单回到玩家自己的物品栏。
+     *
+     * <p>两件事都要求先关界面：QuickShulker 是按 {@code InventoryMenu} 的槽位索引解析的，
+     * 放置模式则需要腾出手来放方块。
+     */
+    private void doCloseChest(Minecraft mc) {
+        if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
+            mc.player.closeContainer();
+            cooldown = 3;
+            return;
+        }
+        if (mc.player.containerMenu != mc.player.inventoryMenu) {
+            // 界面没了但菜单还没换回来，再等一 tick。
+            cooldown = 1;
+            return;
+        }
+
+        retryCount = 0;
+        state = useQuickShulkerMode ? StorageState.QUICK_OPEN : StorageState.FINDING_POSITION;
+    }
+
     public void cancel(Minecraft mc) { abort(mc); }
 
     /** 自动备货重新开始时调用，清掉跨周期保留的状态。 */
@@ -575,11 +903,32 @@ public class ShulkerBoxStorage {
         knownFullSlots.clear();
     }
 
-    private boolean isOnMissingList(ItemStack stack, GatherContext ctx) {
-        for (MaterialItemEntry entry : ctx.missingItems) {
-            if (ItemUtil.is(stack, entry.item)) return true;
+    /**
+     * 取物周期收尾：记下盒子现在在哪个物品栏槽位、要不要归还，然后交给主状态机。
+     *
+     * <p>盒子槽位记进 {@code ctx.extractionBoxSlots}，让自动存盒别再挑中它；
+     * 归还成功时主状态机会把它从这个集合里摘掉。
+     */
+    private void finishExtraction(Minecraft mc, GatherContext ctx, int boxSlot) {
+        if (boxSlot < 0) return;
+        ctx.extractionBoxSlots.add(boxSlot);
+        if (returnTarget != null) {
+            ctx.mixedBoxReturnSlot = boxSlot;
+            ctx.mixedBoxReturnTarget = returnTarget;
         }
-        return false;
+        if (anyItemsTransferred) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_done");
+        }
+    }
+
+    /**
+     * @return 这个物品是不是本次采集要的东西（缺失清单，或原材料追溯正在追的子材料）。
+     *         存盒时用它排除"不能拿来当收纳盒"的东西，同时也决定哪些材料值得存。
+     */
+    private boolean isOnMissingList(ItemStack stack, GatherContext ctx) {
+        Item item = stack.getItem();
+        // 追溯碰过的材料也算：合成失败时它们会留在背包里，自动存盒该把它们收走。
+        return ctx.isWantedNow(item) || ctx.extraStorableItems.contains(item);
     }
 
     /** @return 打开的盒子里是否还有完全空的格，也就是能不能接新的物品类型。 */

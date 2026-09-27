@@ -14,7 +14,8 @@ import net.minecraft.client.Minecraft;
  *
  * <p>实际工作转交给 {@code GatherContext}、{@code TaskStateMachine} 以及围绕它们的专职模块
  * （{@code MaterialAnalyzer}、{@code ContainerSearcher}、{@code BaritonePathingController}、
- * {@code ContainerOpener}、{@code ItemTransferExecutor}、{@code ShulkerBoxStorage}）。
+ * {@code ContainerOpener}、{@code ItemTransferExecutor}、{@code ShulkerBoxAccess}、
+ * {@code RawMaterialTask}）。
  *
  * <p>需要 Baritone、Litematica、ChestTracker 三者齐备；缺任何一个时热键会报出缺哪个，
  * 而不是按下去没反应。
@@ -34,7 +35,8 @@ public class AutoMaterialGatherer implements ClientFeature {
     private final TaskStateMachine stateMachine;
     private final BaritonePathingController pathingController;
     private final ContainerOpener containerOpener;
-    private final ShulkerBoxStorage shulkerStorage;
+    private final ShulkerBoxAccess shulkerAccess;
+    private final RawMaterialTask rawMaterialTask;
 
     private AutoMaterialGatherer() {
         ctx = new GatherContext();
@@ -48,11 +50,12 @@ public class AutoMaterialGatherer implements ClientFeature {
         ContainerSearcher containerSearcher = new ContainerSearcher(chestTracker);
         pathingController = new BaritonePathingController(baritone);
         containerOpener = new ContainerOpener();
-        ItemTransferExecutor transferExecutor = new ItemTransferExecutor();
-        shulkerStorage = new ShulkerBoxStorage();
+        shulkerAccess = new ShulkerBoxAccess();
+        rawMaterialTask = new RawMaterialTask(shulkerAccess);
+        ItemTransferExecutor transferExecutor = new ItemTransferExecutor(shulkerAccess);
 
         stateMachine = new TaskStateMachine(ctx, materialAnalyzer, containerSearcher,
-                pathingController, containerOpener, transferExecutor, shulkerStorage);
+                pathingController, containerOpener, transferExecutor, shulkerAccess, rawMaterialTask);
     }
 
     public static AutoMaterialGatherer getInstance() { return INSTANCE; }
@@ -83,7 +86,8 @@ public class AutoMaterialGatherer implements ClientFeature {
         pathingController.cancelPathing();
         containerOpener.closeAnyContainer(ctx.client);
 
-        shulkerStorage.resetKnownFullSlots();
+        shulkerAccess.resetKnownFullSlots();
+        stateMachine.resetRunState();
         ctx.active = true;
         ctx.reset();
 
@@ -94,6 +98,9 @@ public class AutoMaterialGatherer implements ClientFeature {
     public void stop() {
         pathingController.cancelPathing();
         containerOpener.closeAnyContainer(ctx.client);
+        // 追溯任务可能正开着合成界面、或让 Baritone 挖着矿；取盒子状态机也可能正开着盒子界面。
+        rawMaterialTask.cancel(ctx.client);
+        shulkerAccess.cancel(ctx.client);
         ctx.active = false;
         ctx.state = State.STOPPED;
         MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.stopped");

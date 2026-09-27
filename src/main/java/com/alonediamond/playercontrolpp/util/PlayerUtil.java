@@ -2,7 +2,10 @@ package com.alonediamond.playercontrolpp.util;
 
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
 
 /**
  * 各扫描类功能共用的玩家查询。
@@ -38,5 +41,43 @@ public final class PlayerUtil {
     public static double blockReachSq(Player player) {
         double reach = blockReach(player);
         return reach * reach;
+    }
+
+    /**
+     * @return 36 格主物品栏是否一个空格都没有。
+     *
+     * <p>只看主物品栏，不看装备栏与副手——备货能用的就只有这 36 格。
+     * 原先 {@code ContainerSearcher}、{@code MaterialAnalyzer}、{@code ItemTransferExecutor}、
+     * {@code BaritonePathingController} 各有一份完全相同的实现，统一到这里。
+     */
+    /**
+     * 把物品栏索引换算成"当前打开的这个菜单"里的槽位号。
+     *
+     * <p>不能用 {@code QuickShulkerIntegration.menuSlotForInventorySlot()}：那是
+     * {@code InventoryMenu} 专用的编号（快捷栏 36-44）。工作台菜单的快捷栏在 37-45、
+     * 切石机在 29-37，各菜单都不一样。这里直接按"槽位属于玩家物品栏且容器序号相同"来找，
+     * 对任何菜单都成立。
+     *
+     * @param inventoryIndex 物品栏空间的槽位，0-35
+     * @return 菜单空间的槽位号；这个菜单里没有这一格时返回 -1
+     */
+    public static int menuSlotOf(AbstractContainerMenu menu, Inventory inventory, int inventoryIndex) {
+        if (menu == null || inventory == null) return -1;
+        for (Slot slot : menu.slots) {
+            if (slot.container == inventory && slot.getContainerSlot() == inventoryIndex) {
+                return slot.index;
+            }
+        }
+        return -1;
+    }
+
+    public static boolean isInventoryFull(Player player) {
+        if (player == null) return true;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (player.getInventory().getItem(i).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 }

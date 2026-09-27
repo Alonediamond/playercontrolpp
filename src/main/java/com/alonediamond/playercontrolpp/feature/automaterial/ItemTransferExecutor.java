@@ -32,6 +32,13 @@ import java.util.List;
  */
 public class ItemTransferExecutor {
 
+    /** 需求1 的"开盒取物"子状态机：散装一无所获而容器里有杂盒时交给它。 */
+    private final ShulkerBoxAccess shulkerAccess;
+
+    public ItemTransferExecutor(ShulkerBoxAccess shulkerAccess) {
+        this.shulkerAccess = shulkerAccess;
+    }
+
     /** 两次容器点击之间的 tick 数，别超出服务端对点击频率的预期。 */
     private static final int CLICK_COOLDOWN = 4;
     /** 关闭容器后先稳定几 tick 再核对拿到了多少。 */
@@ -66,8 +73,7 @@ public class ItemTransferExecutor {
         ctx.exhaustedPositions.clear();
 
         if (ctx.currentlyGathered >= ctx.targetNeededTotal) {
-            ctx.currentItemIndex++;
-            tsm.setState(State.NEXT_ITEM);
+            tsm.onCurrentTargetSatisfied();
             return;
         }
 
@@ -104,6 +110,17 @@ public class ItemTransferExecutor {
             if (tryTransferShulkerBoxes(mc, handler, slots, ctx)) return;
         }
 
+        // 需求1：散装和整盒都没拿到东西时，看看容器里有没有"装着所需材料的杂盒"，
+        // 有就把盒子取出来、开盒取走盒内所有缺失材料，再把盒子还回去。
+        //
+        // 判据用配置项而不是 ctx.mixedBoxMode：盒子也可能是通过"六邻回退"打开的那个容器里的
+        // （搜索只按缓存坐标找，双箱另一半、瞄偏一格都会走到邻居那条路），
+        // 只看 mixedBoxMode 会把这种盒子判成"这箱子没货"而错过。
+        if ((ctx.mixedBoxMode || Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue())
+                && tryStartMixedBoxExtraction(mc, slots, ctx)) {
+            return;
+        }
+
         // 这次探访一无所获：记进排除表，后续搜索不再来。
         // 不记的话，缓存里早已搬空的容器（箱子追踪刷新前仍显示有货）会被无限开关。
         ctx.exhaustedPositions.add(ctx.currentContainerTarget);
@@ -119,8 +136,7 @@ public class ItemTransferExecutor {
         ctx.currentlyGathered = countEverywhere(ctx.currentTargetItem, ctx.client);
 
         if (ctx.currentlyGathered >= ctx.targetNeededTotal) {
-            ctx.currentItemIndex++;
-            tsm.setState(State.NEXT_ITEM);
+            tsm.onCurrentTargetSatisfied();
             return;
         }
 
@@ -169,6 +185,23 @@ public class ItemTransferExecutor {
         return false;
     }
 
+    /**
+     * 需求1：把容器里"装着缺失清单物品"的潜影盒交给开盒取物子状态机。
+     *
+     * @return true = 已经交出去了，本轮转移到此为止
+     */
+    private boolean tryStartMixedBoxExtraction(Minecraft mc, List<Slot> slots, GatherContext ctx) {
+        for (Slot slot : slots) {
+            if (slot.container == mc.player.getInventory()) continue;
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty() || !ItemUtil.isShulkerBox(stack)) continue;
+            if (!ctx.boxContainsWantedItem(stack)) continue;
+
+            return shulkerAccess.startContainerBoxTake(ctx, slot.index, ctx.currentContainerTarget);
+        }
+        return false;
+    }
+
     /** 取一组所需物品的散装。 */
     private boolean tryTransferLooseItems(Minecraft mc, AbstractContainerMenu handler,
                                           List<Slot> slots, GatherContext ctx) {
@@ -188,8 +221,14 @@ public class ItemTransferExecutor {
         return false;
     }
 
+    /**
+     * @return 这一堆物品对应的采集条目。
+     *
+     * <p>遍历 {@link GatherContext#wantedEntries()} 而不是缺失清单：原材料追溯派出去的子材料
+     * 不在清单上，但一样要从容器里取出来。
+     */
     private MaterialItemEntry findMatchingMissingItem(ItemStack stack, GatherContext ctx) {
-        for (MaterialItemEntry entry : ctx.missingItems) {
+        for (MaterialItemEntry entry : ctx.wantedEntries()) {
             if (ItemUtil.is(stack, entry.item)) {
                 return entry;
             }
@@ -205,7 +244,8 @@ public class ItemTransferExecutor {
         int threshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
         MaterialItemEntry best = null;
         int bestNeeded = 0;
-        for (MaterialItemEntry entry : ctx.missingItems) {
+        // 同样走 wantedEntries()：追溯中的子材料也要能整盒搬。
+        for (MaterialItemEntry entry : ctx.wantedEntries()) {
             int needed = entry.neededCount - countEverywhere(entry.item, ctx.client);
             if (needed > threshold
                     && needed > bestNeeded
@@ -253,29 +293,12 @@ public class ItemTransferExecutor {
 
     // --- Counting ---
 
-    /** @return 玩家持有多少个 {@code item}，散装加潜影盒内的一起算。 */
+    /** @return 玩家持有多少个 {@code item}，散装加潜影盒内的一起算（统一口径，见 ItemUtil）。 */
     private int countEverywhere(Item item, Minecraft mc) {
-        if (mc.player == null || item == null) return 0;
-        int count = 0;
-        Inventory inventory = mc.player.getInventory();
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack stack = inventory.getItem(i);
-            if (ItemUtil.is(stack, item)) {
-                count += stack.getCount();
-            } else if (ItemUtil.isShulkerBox(stack)) {
-                count += ItemUtil.countInside(stack, item);
-            }
-        }
-        return count;
+        return ItemUtil.countEverywhere(mc.player, item);
     }
 
     private boolean isInventoryFull(Minecraft mc) {
-        if (mc.player == null) return true;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (mc.player.getInventory().getItem(i).isEmpty()) {
-                return false;
-            }
-        }
-        return true;
+        return PlayerUtil.isInventoryFull(mc.player);
     }
 }

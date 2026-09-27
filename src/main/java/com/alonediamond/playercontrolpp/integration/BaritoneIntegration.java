@@ -40,4 +40,21 @@ public class BaritoneIntegration {
 
     /** @return Baritone 的 {@code allowInventory} 设置值，默认 {@code false}。 */
     public boolean allowsInventory() { return false; }
+
+    /**
+     * 让 Baritone 搜索并挖掘指定方块，等价于 {@code #mine}。
+     *
+     * <p>Baritone 自己负责找方块、走过去、换合适的工具；挖够 {@code quantity} 个掉落物、
+     * 或者无路可走 / 已无已知位置时会自行结束，用 {@link #isMining()} 观察即可。
+     *
+     * @param blockId  方块注册名，如 {@code minecraft:iron_ore}
+     * @param quantity 想要多少个掉落物；0 表示不限
+     */
+    public void mine(String blockId, int quantity) {}
+
+    /** @return Baritone 的挖掘进程当前是否活动。 */
+    public boolean isMining() { return false; }
+
+    /** 取消正在进行的挖掘（不影响其它进程）。 */
+    public void cancelMining() {}
 }
