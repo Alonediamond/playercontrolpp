@@ -125,7 +125,7 @@ java -cp /tmp/icon MakeIcon src/main/resources/assets/playercontrolpp/icon.png
 从 1.21.4 起才存在，1.21.1 没有，所以用自有常量 `PlayerUtil.HOTBAR_SIZE`；
 `Inventory.INVENTORY_SIZE` 所有版本都有，直接用官方常量。
 
-另外三处差异直接写在业务代码里（因为要拆分方法签名，无法藏进工具类）：
+另外四处差异直接写在业务代码里（因为要拆分方法签名或整块逻辑，无法藏进工具类）：
 
 - `RouteListGui` / `RecordingListGui`：`render`/`renderBackground` ↔ `extractRenderState`/`extractBackground`，
   以及 `mouseClicked` / `charTyped` / `keyPressed` 的参数从散装基本类型变成了
@@ -134,6 +134,11 @@ java -cp /tmp/icon MakeIcon src/main/resources/assets/playercontrolpp/icon.png
 - `PlayerControlppConfigGui`：同上，逻辑抽成 `renderOverlay()`。
 - `RouteManager.RouteHotkey`：malilib 0.27 才给 `IConfigBase` 加了
   `isDirty`/`markDirty`/`markClean`/`checkIfClean` 四个方法。
+- `CraftingController`（备货的自动合成）：1.21.2 起才有配方展示 API
+  （`RecipeDisplayEntry` / `ContextMap` / `handlePlaceRecipe(int, RecipeDisplayId, boolean)`），
+  1.21.1 只有旧的 `RecipeHolder` + `CraftingRecipe.getIngredients()` +
+  `handlePlaceRecipe(int, RecipeHolder, boolean)`。两者按 `//#if MC >= 12102` 分成两支，
+  外层逻辑共用版本中立的 `RecipePlan`（"每个合成格能放哪些物品"）。
 
 ### 预处理器语法速查
 

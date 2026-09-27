@@ -6,6 +6,7 @@ import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.CraftingMenu;
@@ -14,11 +15,14 @@ import net.minecraft.world.inventory.StonecutterMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.StonecutterRecipe;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 //#if MC >= 12102
-import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.util.context.ContextMap;
 import net.minecraft.world.item.crafting.SelectableRecipe;
 import net.minecraft.world.item.crafting.display.RecipeDisplay;
@@ -27,6 +31,10 @@ import net.minecraft.world.item.crafting.display.ShapedCraftingRecipeDisplay;
 import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
 import net.minecraft.world.item.crafting.display.SlotDisplay;
 import net.minecraft.world.item.crafting.display.SlotDisplayContext;
+//#else
+//$$ import net.minecraft.world.item.crafting.CraftingRecipe;
+//$$ import net.minecraft.world.item.crafting.Ingredient;
+//$$ import net.minecraft.world.item.crafting.ShapedRecipe;
 //#endif
 
 /**
@@ -42,13 +50,14 @@ import net.minecraft.world.item.crafting.display.SlotDisplayContext;
  *       从物品栏摆进格子，最省事。ItemScroller 用的就是这条路。</li>
  *   <li><b>摆料包没生效就自己点</b>：服务端会因为"配方没在服务端解锁 / 判定材料不齐"
  *       只回一个 ghost 配方，格子始终是空的。这时照 EasierCrafting 的做法，
- *       自己把每个合成格需要的材料从物品栏 shift/点击搬进格子——这条路不依赖服务端的配方书。</li>
+ *       自己把每个合成格需要的材料从物品栏搬进格子——这条路不依赖服务端的配方书。</li>
  * </ol>
  *
- * <p>摆料是否成功一律以<b>产物槽里出现东西</b>为准（格子有没有料只是中间状态）。
- * 失败原因会打一条 {@code [craft]} 日志，方便实机排查。
+ * <p>两条路都只依赖"每个合成格能放哪些物品"这一份信息，所以配方对象被统一收进
+ * {@link RecipePlan}：新版本（1.21.2+）从配方书的 {@code RecipeDisplayEntry} 取图案，
+ * 1.21.1 没有配方展示 API，改用旧的 {@code RecipeHolder + getIngredients()}。
  *
- * <p>本类只负责"打开→摆料→取产物→关闭"这一小段，生命周期由 {@code RawMaterialTask} 驱动。
+ * <p>失败原因会打一条 {@code [craft]} 日志，方便实机排查。
  */
 public class CraftingController {
 
@@ -60,16 +69,14 @@ public class CraftingController {
         INVENTORY_FULL
     }
 
-//#if MC >= 12102
-
     /** 用哪种工作站。 */
     private enum Station { CRAFTING_TABLE, STONECUTTER }
 
     /** 摆料方式：先试服务端的包，不行就自己点。 */
     private enum PlaceMode { PACKET, MANUAL }
 
-    // 工作台菜单：0 = 产物，1..9 = 3×3 合成格。
-    // 原版这几个常量是 private 的，跨版本自己定义（理由同 ItemTransferStrategy.SHULKER_SLOT_COUNT）。
+    // 工作台菜单：0 = 产物，1..9 = 3×3 合成格。原版常量是 private 的，跨版本自己定义
+    // （理由同 ItemTransferStrategy.SHULKER_SLOT_COUNT）。
     private static final int CRAFT_RESULT_SLOT = 0;
     private static final int CRAFT_GRID_START = 1;
     private static final int CRAFT_GRID_WIDTH = 3;
@@ -90,6 +97,30 @@ public class CraftingController {
     /** 一轮摆料取空之后，最多再重新摆几次。 */
     private static final int MAX_REPLACE_ATTEMPTS = 6;
 
+    /**
+     * 一次合成用的配方计划：把各版本的配方类型统一成"每个合成格能放哪些物品"。
+     *
+     * <p>摆料逻辑（手动点击与"能做几套"的计算）只认这份数据，因此与 MC 版本无关。
+     */
+    private static final class RecipePlan {
+        /** 版本相关的配方句柄：1.21.2+ 是 {@code RecipeDisplayEntry}，1.21.1 是 {@code RecipeHolder}。 */
+        final Object handle;
+        /** 每个合成格可接受的物品；空列表 = 图案空位。 */
+        final List<List<ItemStack>> grid;
+        /** shaped 图案宽度；shapeless / 未知按 3 处理（位置不影响匹配）。 */
+        final int width;
+
+        RecipePlan(Object handle, List<List<ItemStack>> grid, int width) {
+            this.handle = handle;
+            this.grid = grid;
+            this.width = Math.max(1, width);
+        }
+
+        int slotCount() { return this.grid.size(); }
+
+        boolean isEmptySlot(int index) { return this.grid.get(index).isEmpty(); }
+    }
+
     private final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
     private enum Stage { IDLE, OPEN, PREPARE, TAKE, CLOSE }
@@ -106,8 +137,8 @@ public class CraftingController {
     private Station station = Station.CRAFTING_TABLE;
     /** 工作站的物品栏槽位。 */
     private int stationSlot = -1;
-    private RecipeDisplayEntry craftingRecipe;
-    private ContextMap contextMap;
+    /** 工作台用的配方；切石机为 {@code null}。 */
+    private RecipePlan recipe;
     private boolean openSent;
     private int replaceAttempts;
 
@@ -120,10 +151,6 @@ public class CraftingController {
     private boolean gridCleared;
     /** 这一轮手动摆料是否已经把材料摆进格子。 */
     private boolean manualPlaced;
-    /** 手动摆料用的图案（shaped 含空位占位，shapeless 就是材料表）。 */
-    private List<SlotDisplay> placeDisplays = List.of();
-    /** 图案宽度：shaped 用它的宽度，shapeless 按一行三个铺开。 */
-    private int placeWidth = CRAFT_GRID_WIDTH;
     /** 服务端摆料包还值不值得试。一旦被证伪，本次合成就一直走手动摆料。 */
     private boolean packetUsable = true;
 
@@ -144,7 +171,6 @@ public class CraftingController {
         this.item = item;
         this.targetCount = targetCount;
         this.stonecutterInput = stonecutterInput;
-        this.contextMap = SlotDisplayContext.fromLevel(mc.level);
 
         // 配方类型不支持的（熔炼 / 锻造）直接说做不了：调用方会保留已收集的子材料。
         if (recipeType != null && !isSupportedRecipe(recipeType)) return false;
@@ -238,7 +264,7 @@ public class CraftingController {
             fail(mc, "QuickShulker refused to open the workstation (menuSlot=" + menuSlot + ")");
             return;
         }
-        log(mc, "opened " + this.station + " for " + this.item + " (inventory slot " + this.stationSlot
+        log("opened " + this.station + " for " + this.item + " (inventory slot " + this.stationSlot
                 + " -> menu slot " + menuSlot + ")");
         this.openSent = true;
         this.waitTicks = 0;
@@ -269,7 +295,7 @@ public class CraftingController {
             if (!this.placeSent) {
                 this.placeSent = true;
                 this.placeTicks = 0;
-                mc.gameMode.handlePlaceRecipe(menu.containerId, this.craftingRecipe.id(), true);
+                sendPlacePacket(mc, menu);
                 this.cooldown = ACTION_COOLDOWN;
                 return;
             }
@@ -282,7 +308,7 @@ public class CraftingController {
             if (this.placeTicks > PLACE_PACKET_WAIT_TICKS) {
                 // 摆料包没有生效（服务端认为配方未解锁、或判定材料不齐），只回了 ghost 配方。
                 // 改自己点击摆料——这条路不依赖服务端的配方书。
-                log(mc, "place packet had no effect, switching to manual placement");
+                log("place packet had no effect, switching to manual placement (" + this.item + ")");
                 this.packetUsable = false;
                 resetPlacement();
                 this.cooldown = ACTION_COOLDOWN;
@@ -296,10 +322,10 @@ public class CraftingController {
     }
 
     /**
-     * 自己点击摆料（参考 EasierCrafting）：先清空格子，再一格一格把材料搬进去，最后等服务端算出产物。
+     * 自己点击摆料（参考 EasierCrafting）：先清空格子，再按"这次能做几套"给每格精确分配材料，
+     * 最后等服务端算出产物。
      *
-     * <p>一 tick 只做一次点击，让每次槽位变更都有时间同步回来；这样即使中途被打断，
-     * 也不会在客户端和服务端之间留下"手上一半物品"的中间态。
+     * <p>一 tick 只做一次点击，让每次槽位变更都有时间同步回来。
      */
     private void manualPlace(Minecraft mc, AbstractContainerMenu menu) {
         this.placeTicks++;
@@ -327,16 +353,17 @@ public class CraftingController {
         // 关键在于"每格放几个"：材料数量要按这次能做多少套来分，不能把整堆都丢进第一格——
         // 那样后面的格子就没材料可摆了（EasierCrafting 的 getMaxCraftable 就是这个意思）。
         if (!this.manualPlaced) {
+            if (this.recipe == null) { fail(mc, "no recipe plan"); return; }
             int perSlot = craftsPerPlacement(mc);
             if (perSlot <= 0) {
                 fail(mc, "not enough ingredients for a single craft (grid=" + gridSummary(menu) + ")");
                 return;
             }
-            for (int index = 0; index < this.placeDisplays.size(); index++) {
-                SlotDisplay display = this.placeDisplays.get(index);
-                if (display.resolveForStacks(this.contextMap).isEmpty()) continue;   // shaped 图案的空位
-                if (!fillGridSlot(mc, menu, gridSlotFor(index), display, perSlot)) {
-                    fail(mc, "ingredient missing for grid slot " + gridSlotFor(index)
+            for (int index = 0; index < this.recipe.slotCount(); index++) {
+                if (this.recipe.isEmptySlot(index)) continue;   // shaped 图案的空位
+                int gridSlot = gridSlotFor(index);
+                if (!fillGridSlot(mc, menu, gridSlot, this.recipe.grid.get(index), perSlot)) {
+                    fail(mc, "ingredient missing for grid slot " + gridSlot
                             + " (grid=" + gridSummary(menu) + ")");
                     return;
                 }
@@ -382,7 +409,7 @@ public class CraftingController {
         }
 
         if (!this.placeSent) {
-            int index = findStonecutterIndex(menu, this.item);
+            int index = findStonecutterIndex(mc, menu, this.item);
             if (index < 0) {
                 // 可见配方表是客户端按输入物品算的，可能比输入格的内容晚一 tick 才出来。
                 this.placeTicks++;
@@ -410,85 +437,6 @@ public class CraftingController {
             fail(mc, "no stonecutter result (input=" + !inputSlot.getItem().isEmpty() + ")");
             return;
         }
-        this.cooldown = 1;
-    }
-
-    /**
-     * @return 这一次摆料每格该放几个，也就是"按现有材料最多能做几套"，同时不超过目标数量与 64。
-     *         0 = 材料连一套都不够。
-     */
-    private int craftsPerPlacement(Minecraft mc) {
-        java.util.Map<Item, Integer> perCraft = new java.util.LinkedHashMap<>();
-        for (SlotDisplay display : this.placeDisplays) {
-            List<ItemStack> candidates = display.resolveForStacks(this.contextMap);
-            if (candidates.isEmpty()) continue;   // 图案空位
-            Item chosen = null;
-            for (ItemStack candidate : candidates) {
-                if (ItemUtil.countLoose(mc.player, candidate.getItem()) > 0) {
-                    chosen = candidate.getItem();
-                    break;
-                }
-            }
-            if (chosen == null) return 0;         // 有一种材料一个都没有
-            perCraft.merge(chosen, 1, Integer::sum);
-        }
-        if (perCraft.isEmpty()) return 0;
-
-        int crafts = 64;
-        for (java.util.Map.Entry<Item, Integer> entry : perCraft.entrySet()) {
-            crafts = Math.min(crafts, ItemUtil.countLoose(mc.player, entry.getKey()) / entry.getValue());
-        }
-        int remaining = this.targetCount - ItemUtil.countEverywhere(mc.player, this.item);
-        return Math.max(0, Math.min(crafts, remaining));
-    }
-
-    /** 往一个合成格里凑够 {@code amount} 个材料（不够就从下一个物品栏槽位接着拿）。 */
-    private boolean fillGridSlot(Minecraft mc, AbstractContainerMenu menu, int gridSlot,
-                                 SlotDisplay display, int amount) {
-        List<ItemStack> candidates = display.resolveForStacks(this.contextMap);
-        int remaining = amount;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE && remaining > 0; i++) {
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (stack.isEmpty() || !matchesAny(stack, candidates)) continue;
-            int menuSlot = PlayerUtil.menuSlotOf(menu, mc.player.getInventory(), i);
-            if (menuSlot < 0) continue;
-            int take = Math.min(remaining, stack.getCount());
-            transfer(mc, menu, menuSlot, gridSlot, take);
-            remaining -= take;
-        }
-        return remaining <= 0;
-    }
-
-    /** @return 这一堆物品是不是 {@code candidates} 里的任意一种（配方材料常写成标签）。 */
-    private static boolean matchesAny(ItemStack stack, List<ItemStack> candidates) {
-        for (ItemStack candidate : candidates) {
-            if (ItemUtil.is(stack, candidate.getItem())) return true;
-        }
-        return false;
-    }
-
-    /**
-     * 从 {@code from} 往 {@code to} 精确搬 {@code amount} 个（参考 EasierCrafting 的 transfer）。
-     *
-     * <p>整堆够就一次"拿起→放下"；不够整堆的用"拿起整堆 → 右键逐个放 → 剩下的放回原槽"。
-     * 这些点击在同一 tick 内按顺序发出，客户端的预测会让后续几步读到已经变化的槽位。
-     */
-    private void transfer(Minecraft mc, AbstractContainerMenu menu, int from, int to, int amount) {
-        ItemStack fromContent = menu.getSlot(from).getItem();
-        if (fromContent.isEmpty() || amount <= 0) return;
-
-        if (amount >= fromContent.getCount()) {
-            SlotActionCompat.pickup(mc, menu.containerId, from);
-            SlotActionCompat.pickup(mc, menu.containerId, to);
-            this.cooldown = 1;
-            return;
-        }
-
-        SlotActionCompat.pickup(mc, menu.containerId, from);                 // 拿起整堆
-        for (int i = 0; i < amount; i++) {
-            SlotActionCompat.pickupRight(mc, menu.containerId, to);          // 右键放 1 个
-        }
-        SlotActionCompat.pickup(mc, menu.containerId, from);                 // 剩下的放回去
         this.cooldown = 1;
     }
 
@@ -548,7 +496,7 @@ public class CraftingController {
         finish(Result.FAILED);
     }
 
-    private static void log(Minecraft mc, String message) {
+    private static void log(String message) {
         Playercontrolpp.LOGGER.info("[craft] {}", message);
     }
 
@@ -586,16 +534,15 @@ public class CraftingController {
             if (this.stonecutterInput == null || findInInventory(mc, this.stonecutterInput) < 0) return false;
             this.station = Station.STONECUTTER;
             this.stationSlot = slot;
+            this.recipe = null;
             return true;
         }
 
-        RecipeDisplayEntry recipe = findCraftingRecipe(mc, this.item);
-        if (recipe == null) return false;
+        RecipePlan plan = findCraftingRecipe(mc, this.item);
+        if (plan == null) return false;
         this.station = Station.CRAFTING_TABLE;
         this.stationSlot = slot;
-        this.craftingRecipe = recipe;
-        this.placeDisplays = craftingLayout(recipe);
-        this.placeWidth = craftingWidth(recipe);
+        this.recipe = plan;
         return true;
     }
 
@@ -608,34 +555,101 @@ public class CraftingController {
         return -1;
     }
 
+    /**
+     * @return 这一次摆料每格该放几个，也就是"按现有材料最多能做几套"，同时不超过目标数量与 64。
+     *         0 = 材料连一套都不够。
+     */
+    private int craftsPerPlacement(Minecraft mc) {
+        Map<Item, Integer> perCraft = new java.util.LinkedHashMap<>();
+        for (List<ItemStack> candidates : this.recipe.grid) {
+            if (candidates.isEmpty()) continue;   // 图案空位
+            Item chosen = null;
+            for (ItemStack candidate : candidates) {
+                if (ItemUtil.countLoose(mc.player, candidate.getItem()) > 0) {
+                    chosen = candidate.getItem();
+                    break;
+                }
+            }
+            if (chosen == null) return 0;         // 有一种材料一个都没有
+            perCraft.merge(chosen, 1, Integer::sum);
+        }
+        if (perCraft.isEmpty()) return 0;
+
+        int crafts = 64;
+        for (Map.Entry<Item, Integer> entry : perCraft.entrySet()) {
+            crafts = Math.min(crafts, ItemUtil.countLoose(mc.player, entry.getKey()) / entry.getValue());
+        }
+        int remaining = this.targetCount - ItemUtil.countEverywhere(mc.player, this.item);
+        return Math.max(0, Math.min(crafts, remaining));
+    }
+
+    /** 往一个合成格里凑够 {@code amount} 个材料（不够就从下一个物品栏槽位接着拿）。 */
+    private boolean fillGridSlot(Minecraft mc, AbstractContainerMenu menu, int gridSlot,
+                                 List<ItemStack> candidates, int amount) {
+        int remaining = amount;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE && remaining > 0; i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
+            if (stack.isEmpty() || !matchesAny(stack, candidates)) continue;
+            int menuSlot = PlayerUtil.menuSlotOf(menu, mc.player.getInventory(), i);
+            if (menuSlot < 0) continue;
+            int take = Math.min(remaining, stack.getCount());
+            transfer(mc, menu, menuSlot, gridSlot, take);
+            remaining -= take;
+        }
+        return remaining <= 0;
+    }
+
+    /** @return 这一堆物品是不是 {@code candidates} 里的任意一种（配方材料常写成标签）。 */
+    private static boolean matchesAny(ItemStack stack, List<ItemStack> candidates) {
+        for (ItemStack candidate : candidates) {
+            if (ItemUtil.is(stack, candidate.getItem())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 从 {@code from} 往 {@code to} 精确搬 {@code amount} 个（参考 EasierCrafting 的 transfer）。
+     *
+     * <p>整堆够就一次"拿起→放下"；不够整堆的用"拿起整堆 → 右键逐个放 → 剩下的放回原槽"。
+     * 这些点击在同一 tick 内按顺序发出，客户端的预测会让后续几步读到已经变化的槽位。
+     */
+    private void transfer(Minecraft mc, AbstractContainerMenu menu, int from, int to, int amount) {
+        ItemStack fromContent = menu.getSlot(from).getItem();
+        if (fromContent.isEmpty() || amount <= 0) return;
+
+        if (amount >= fromContent.getCount()) {
+            SlotActionCompat.pickup(mc, menu.containerId, from);
+            SlotActionCompat.pickup(mc, menu.containerId, to);
+            this.cooldown = 1;
+            return;
+        }
+
+        SlotActionCompat.pickup(mc, menu.containerId, from);                 // 拿起整堆
+        for (int i = 0; i < amount; i++) {
+            SlotActionCompat.pickupRight(mc, menu.containerId, to);          // 右键放 1 个
+        }
+        SlotActionCompat.pickup(mc, menu.containerId, from);                 // 剩下的放回去
+        this.cooldown = 1;
+    }
+
     /** 图案里第 {@code index} 项对应的合成格。shaped 按图案宽度整行排，shapeless 顺着铺。 */
     private int gridSlotFor(int index) {
-        int width = Math.max(1, this.placeWidth);
+        int width = this.recipe == null ? CRAFT_GRID_WIDTH : this.recipe.width;
         int slot = (index / width) * CRAFT_GRID_WIDTH + (index % width);
         return CRAFT_GRID_START + Math.min(Math.max(slot, 0), CRAFT_GRID_SLOTS - 1);
-    }
-
-    private static List<SlotDisplay> craftingLayout(RecipeDisplayEntry entry) {
-        RecipeDisplay display = entry.display();
-        if (display instanceof ShapedCraftingRecipeDisplay shaped) return shaped.ingredients();
-        if (display instanceof ShapelessCraftingRecipeDisplay shapeless) return shapeless.ingredients();
-        return List.of();
-    }
-
-    private static int craftingWidth(RecipeDisplayEntry entry) {
-        RecipeDisplay display = entry.display();
-        if (display instanceof ShapedCraftingRecipeDisplay shaped) return Math.max(1, shaped.width());
-        // shapeless 没有图案，位置不影响配方匹配，顺着 3 个一行铺开即可。
-        return CRAFT_GRID_WIDTH;
     }
 
     /**
      * 在客户端配方书里找"能在工作台做出 {@code item}"的那一条。
      *
-     * <p>只认 shaped / shapeless，避免把熔炉、切石机的展示条目当成工作台配方。
+     * <p>1.21.2+ 用配方展示条目（{@code RecipeDisplayEntry}）；1.21.1 没有那套 API，
+     * 改用旧的 {@code RecipeHolder + CraftingRecipe.getIngredients()}。两者都只认
+     * shaped / shapeless，避免把熔炉、切石机的条目当成工作台配方。
      */
-    private RecipeDisplayEntry findCraftingRecipe(Minecraft mc, Item item) {
+    private RecipePlan findCraftingRecipe(Minecraft mc, Item item) {
         try {
+            //#if MC >= 12102
+            ContextMap contextMap = SlotDisplayContext.fromLevel(mc.level);
             for (RecipeCollection collection : mc.player.getRecipeBook().getCollections()) {
                 for (RecipeDisplayEntry entry : collection.getRecipes()) {
                     if (entry.craftingRequirements().isEmpty()) continue;
@@ -644,31 +658,101 @@ public class CraftingController {
                             && !(display instanceof ShapelessCraftingRecipeDisplay)) {
                         continue;
                     }
-                    List<ItemStack> results = entry.resultItems(this.contextMap);
-                    if (results.isEmpty()) continue;
-                    if (ItemUtil.is(results.get(0), item)) return entry;
+                    List<ItemStack> results = entry.resultItems(contextMap);
+                    if (results.isEmpty() || !ItemUtil.is(results.get(0), item)) continue;
+                    RecipePlan plan = planFromDisplay(entry, contextMap);
+                    if (plan != null) return plan;
                 }
             }
+            //#else
+            //$$ for (RecipeCollection collection : mc.player.getRecipeBook().getCollections()) {
+            //$$     for (RecipeHolder<?> holder : collection.getRecipes()) {
+            //$$         if (!(holder.value() instanceof CraftingRecipe crafting)) continue;
+            //$$         if (!ItemUtil.is(crafting.getResultItem(mc.level.registryAccess()), item)) continue;
+            //$$         List<Ingredient> ingredients = crafting.getIngredients();
+            //$$         if (ingredients.isEmpty()) continue;
+            //$$         List<List<ItemStack>> grid = new ArrayList<>(ingredients.size());
+            //$$         for (Ingredient ingredient : ingredients) {
+            //$$             grid.add(List.of(ingredient.getItems()));
+            //$$         }
+            //$$         int width = crafting instanceof ShapedRecipe shaped ? shaped.getWidth() : CRAFT_GRID_WIDTH;
+            //$$         return new RecipePlan(holder, grid, width);
+            //$$     }
+            //$$ }
+            //#endif
         } catch (Throwable e) {
             Playercontrolpp.LOGGER.debug("Unable to look up a crafting recipe for {}", item, e);
         }
         return null;
     }
 
+    //#if MC >= 12102
+    /** 把配方展示条目转成"每个合成格能放哪些物品"。 */
+    private static RecipePlan planFromDisplay(RecipeDisplayEntry entry, ContextMap contextMap) {
+        RecipeDisplay display = entry.display();
+        List<SlotDisplay> layout;
+        int width;
+        if (display instanceof ShapedCraftingRecipeDisplay shaped) {
+            layout = shaped.ingredients();
+            width = Math.max(1, shaped.width());
+        } else if (display instanceof ShapelessCraftingRecipeDisplay shapeless) {
+            layout = shapeless.ingredients();
+            width = CRAFT_GRID_WIDTH;
+        } else {
+            return null;
+        }
+
+        List<List<ItemStack>> grid = new ArrayList<>(layout.size());
+        for (SlotDisplay slot : layout) {
+            grid.add(slot.resolveForStacks(contextMap));
+        }
+        return new RecipePlan(entry, grid, width);
+    }
+
+    /** 让服务端按配方把材料摆进格子（1.21.2+ 用配方展示 id）。 */
+    private void sendPlacePacket(Minecraft mc, AbstractContainerMenu menu) {
+        if (!(this.recipe.handle instanceof RecipeDisplayEntry entry)) return;
+        mc.gameMode.handlePlaceRecipe(menu.containerId, entry.id(), true);
+    }
+
     /** @return 切石机菜单里产出 {@code item} 的那一项的按钮索引；没有则 -1。 */
-    private int findStonecutterIndex(AbstractContainerMenu menu, Item item) {
+    private int findStonecutterIndex(Minecraft mc, AbstractContainerMenu menu, Item item) {
         if (!(menu instanceof StonecutterMenu stonecutter)) return -1;
-        List<SelectableRecipe.SingleInputEntry<net.minecraft.world.item.crafting.StonecutterRecipe>> entries =
+        ContextMap contextMap = SlotDisplayContext.fromLevel(mc.level);
+        List<SelectableRecipe.SingleInputEntry<StonecutterRecipe>> entries =
                 stonecutter.getVisibleRecipes().entries();
         for (int i = 0; i < entries.size(); i++) {
-            ItemStack option = entries.get(i).recipe().optionDisplay().resolveForFirstStack(this.contextMap);
+            ItemStack option = entries.get(i).recipe().optionDisplay().resolveForFirstStack(contextMap);
             if (ItemUtil.is(option, item)) return i;
         }
         return -1;
     }
+    //#else
+    //$$ /** 让服务端按配方把材料摆进格子（1.21.1 直接传 RecipeHolder）。 */
+    //$$ private void sendPlacePacket(Minecraft mc, AbstractContainerMenu menu) {
+    //$$     if (!(this.recipe.handle instanceof RecipeHolder<?> holder)) return;
+    //$$     mc.gameMode.handlePlaceRecipe(menu.containerId, holder, true);
+    //$$ }
+    //$$
+    //$$ /** @return 切石机菜单里产出 {@code item} 的那一项的按钮索引；没有则 -1。 */
+    //$$ private int findStonecutterIndex(Minecraft mc, AbstractContainerMenu menu, Item item) {
+    //$$     if (!(menu instanceof StonecutterMenu stonecutter)) return -1;
+    //$$     List<RecipeHolder<StonecutterRecipe>> recipes = stonecutter.getRecipes();
+    //$$     for (int i = 0; i < recipes.size(); i++) {
+    //$$         ItemStack option = recipes.get(i).value().getResultItem(mc.level.registryAccess());
+    //$$         if (ItemUtil.is(option, item)) return i;
+    //$$     }
+    //$$     return -1;
+    //$$ }
+    //#endif
 
     private static int visibleStonecutterRecipes(AbstractContainerMenu menu) {
-        return menu instanceof StonecutterMenu stonecutter ? stonecutter.getNumberOfVisibleRecipes() : -1;
+        if (!(menu instanceof StonecutterMenu stonecutter)) return -1;
+        //#if MC >= 12102
+        return stonecutter.getNumberOfVisibleRecipes();
+        //#else
+        //$$ return stonecutter.getRecipes().size();
+        //#endif
     }
 
     private static boolean isSupportedRecipe(String recipeType) {
@@ -700,18 +784,4 @@ public class CraftingController {
         }
         return sb.append(']').toString();
     }
-
-//#else
-//$$    // 1.21.1 没有配方展示 API（RecipeDisplay / ContextMap 那一套），而 LitematList 也没有
-//$$    // 该版本的构建，这个功能在那个版本上不可能被启用。这里只保留签名，让上层代码照常编译。
-//$$    public boolean isActive() { return false; }
-//$$
-//$$    public boolean start(Minecraft mc, Item item, int targetCount, String recipeType, Item stonecutterInput) {
-//$$        return false;
-//$$    }
-//$$
-//$$    public void cancel(Minecraft mc) { }
-//$$
-//$$    public Result tick(Minecraft mc) { return Result.DONE; }
-//#endif
 }

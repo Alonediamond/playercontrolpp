@@ -78,10 +78,10 @@ public class ShulkerBoxAccess {
     private static final int BOX_SLOT_COUNT = ItemTransferStrategy.SHULKER_SLOT_COUNT;
     /** 潜影盒界面里玩家背包的第一个槽位（前面 27 格是盒子的）。 */
     private static final int BOX_SCREEN_PLAYER_START = BOX_SLOT_COUNT;
-    /** 潜影盒界面里玩家背包的最后一个槽位。 */
-    private static final int BOX_SCREEN_PLAYER_END = BOX_SLOT_COUNT + Inventory.INVENTORY_SIZE - 1;
-    /** 单个存储周期内 shift 点击次数的安全上限。 */
-    private static final int MAX_TRANSFERS_PER_CYCLE = 200;
+    /** 潜影盒界面里玩家一侧的槽位数：27 格主背包 + 9 格快捷栏。 */
+    private static final int BOX_SCREEN_PLAYER_COUNT = Inventory.INVENTORY_SIZE;
+    /** 单个存储周期内最多点几下。挪不动的槽位（原版拒绝放进去的东西）不能把周期卡死。 */
+    private static final int MAX_TRANSFER_ATTEMPTS = 200;
 
     /** 找放盒位置的重试次数。 */
     private static final int MAX_POSITION_RETRIES = 3;
@@ -120,7 +120,10 @@ public class ShulkerBoxAccess {
     private BlockPos placedPos;           // 盒子放在了哪
     private BlockPos placeAgainst;        // 放置时点的那个靠山方块
     private Direction placeClickFace;     // 点的是 placeAgainst 的哪个面
-    private int transferIndex;
+    /** 存盒时扫玩家物品栏的游标（相对玩家一侧的起点），跨 tick 前进，保证快捷栏也能轮到。 */
+    private int scanCursor;
+    /** 本周期已经点了几下，见 {@link #MAX_TRANSFER_ATTEMPTS}。 */
+    private int transferAttempts;
     private int prevSelectedSlot;
 
     // ---- 取物方向（EXTRACT）专有状态 ----
@@ -235,7 +238,8 @@ public class ShulkerBoxAccess {
         placedPos = null;
         placeAgainst = null;
         placeClickFace = null;
-        transferIndex = 0;
+        scanCursor = 0;
+        transferAttempts = 0;
         prevSelectedSlot = InventoryCompat.getSelectedSlot(mc.player.getInventory());
         anyItemsTransferred = false;
         returnTarget = null;
@@ -344,7 +348,8 @@ public class ShulkerBoxAccess {
 
         retryCount = 0;
         openVerifyTicks = 0;
-        transferIndex = 0;
+        scanCursor = 0;
+        transferAttempts = 0;
         state = StorageState.TRANSFERRING;
     }
 
@@ -500,7 +505,8 @@ public class ShulkerBoxAccess {
         state = StorageState.TRANSFERRING;
         retryCount = 0;
         openVerifyTicks = 0;
-        transferIndex = 0;
+        scanCursor = 0;
+        transferAttempts = 0;
     }
 
     /**
@@ -629,23 +635,36 @@ public class ShulkerBoxAccess {
             return;
         }
 
-        // 每 tick 从界面的玩家一侧往盒子里挪一组匹配的物品。
-        for (int i = BOX_SCREEN_PLAYER_START;
-             i <= BOX_SCREEN_PLAYER_END && transferIndex < MAX_TRANSFERS_PER_CYCLE; i++) {
-            transferIndex++;
+        // 每 tick 从上次停下的地方往后扫一圈，找到一组可存的就挪走；一圈下来都没有就收工。
+        //
+        // 这里是"游标 + 一整圈"，而不是"每 tick 从头扫 + 总共扫多少格的预算"：
+        // 早先用 transferIndex 计扫过的格子数（上限 200），而每 tick 都从 27 号槽重新开始扫，
+        // 背包里的空格几下就把预算吃光，界面的 54-62 号槽（快捷栏）永远轮不到——
+        // 表现就是"背包满了却存不走快捷栏里的材料"。
+        for (int scanned = 0; scanned < BOX_SCREEN_PLAYER_COUNT; scanned++) {
+            int i = BOX_SCREEN_PLAYER_START + scanCursor;
+            scanCursor = (scanCursor + 1) % BOX_SCREEN_PLAYER_COUNT;
+
             Slot slot = handler.getSlot(i);
             if (slot == null) continue;
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
+            // 潜影盒不能放进潜影盒：原版 ShulkerBoxSlot 会拒绝，点了也白点。
+            if (ItemUtil.isShulkerBox(stack)) continue;
             if (!isOnMissingList(stack, ctx)) continue;
 
             try {
                 SlotActionCompat.quickMove(mc, handler.containerId, i);
                 anyItemsTransferred = true;
+                if (++transferAttempts > MAX_TRANSFER_ATTEMPTS) {
+                    state = StorageState.CLOSING;
+                    cooldown = 3;
+                    return;
+                }
                 cooldown = 2;
                 return;
             } catch (Exception e) {
-                // 这一格不收，试下一格。
+                // 这一格没收成，继续看下一格。
             }
         }
 
