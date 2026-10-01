@@ -1,9 +1,14 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.TaskStateMachine;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.path.BaritonePathingController;
 import com.alonediamond.playercontrolpp.input.SimulatedInput;
+import com.alonediamond.playercontrolpp.util.BlockUtil;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
@@ -241,24 +246,9 @@ public class ContainerOpener {
 
     private Direction getNearestContainerFace(BlockPos target, GatherContext ctx) {
         if (ctx.client.player == null) return Direction.UP;
-        return nearestFace(ctx.client.player.getEyePosition(), target);
+        return BlockUtil.nearestFace(ctx.client.player.getEyePosition(), target);
     }
 
-    /** @return {@code target} 上最正对 {@code eye} 的那个面。 */
-    static Direction nearestFace(Vec3 eye, BlockPos target) {
-        Vec3 center = Vec3.atCenterOf(target);
-        double dx = eye.x - center.x;
-        double dy = eye.y - center.y;
-        double dz = eye.z - center.z;
-
-        double ax = Math.abs(dx);
-        double ay = Math.abs(dy);
-        double az = Math.abs(dz);
-
-        if (ax >= ay && ax >= az) return dx > 0 ? Direction.EAST : Direction.WEST;
-        if (ay >= ax && ay >= az) return dy > 0 ? Direction.UP : Direction.DOWN;
-        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
-    }
 
     /** 目标本身加它的六个邻居——覆盖双箱和轻微瞄偏。 */
     private List<BlockPos> getAdjacentContainerTargets(BlockPos target) {

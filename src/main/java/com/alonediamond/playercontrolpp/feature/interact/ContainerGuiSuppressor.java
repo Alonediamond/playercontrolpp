@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature;
+package com.alonediamond.playercontrolpp.feature.interact;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;

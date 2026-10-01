@@ -3,7 +3,14 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerSearcher;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ItemTransferExecutor;
+import com.alonediamond.playercontrolpp.feature.automaterial.craft.RawMaterialTask;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialAnalyzer;
+import com.alonediamond.playercontrolpp.feature.automaterial.path.BaritonePathingController;
+import com.alonediamond.playercontrolpp.feature.automaterial.storage.ShulkerBoxAccess;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
@@ -45,6 +52,12 @@ public class TaskStateMachine {
     private boolean resumeNextItemAfterStorage;
     /** 这趟存盒只是"顺手收一下"：找不到盒子时跳过即可，不要停掉整轮备货。 */
     private boolean voluntaryStorage;
+    /** 启动时的"先把手上材料收进潜影盒"每次运行只做一次。 */
+    private boolean startupStorageAttempted;
+    /** "顺手存盒"已经连做了几趟（作者要求：能放完进盒就放，但要有上限，免得在几个盒子之间来回倒）。 */
+    private int voluntaryStoreCycles;
+    /** 一趟顺手存盒最多连做几轮。 */
+    private static final int MAX_VOLUNTARY_STORE_CYCLES = 6;
 
     /** 存盒后的「同步并核对」还没做完时为 true。 */
     private boolean pendingStorageDone;
@@ -81,6 +94,8 @@ public class TaskStateMachine {
         pendingTraceStorage = false;
         resumeNextItemAfterStorage = false;
         voluntaryStorage = false;
+        startupStorageAttempted = false;
+        voluntaryStoreCycles = 0;
         pendingStorageDone = false;
         storageSyncTicks = 0;
         rawMaterialTask.cancel(ctx.client);
@@ -190,6 +205,14 @@ public class TaskStateMachine {
             if (ctx.mixedBoxReturnSlot >= 0) {
                 startMixedBoxReturn();
                 return;
+            }
+
+            // 顺手存盒（启动先收一遍 / 追溯失败收尾）：背包里还有可存材料、也还找得到装得下的盒子，
+            // 就接着再存一趟。作者要求"能放完进盒就放"，而不是塞满一个盒子就收工。
+            if (voluntaryStorage && voluntaryStoreCycles < MAX_VOLUNTARY_STORE_CYCLES
+                    && shulkerAccess.hasStorableMaterials(ctx) && shulkerAccess.hasUsableBox(ctx)) {
+                voluntaryStoreCycles++;
+                if (shulkerAccess.startStorage(ctx, true)) return;
             }
 
             // 追溯失败触发的存盒：当前目标已经作废（索引早就推进过了），直接走下一个物品。
@@ -314,8 +337,32 @@ public class TaskStateMachine {
                 return;
             }
         }
-        MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.inventory_full");
+        // 分清两种"满"：真的一格不剩，还是只是到了满包阈值（还有空格，但没有可存进盒子的材料）。
+        // 后者直接说"背包已满"会让用户对着 9 个空格发懵。
+        MessageUtil.sendActionBar(ctx.client, PlayerUtil.isInventoryStrictlyFull(ctx.client.player)
+                ? "playercontrolpp.message.baritone.inventory_full"
+                : "playercontrolpp.message.baritone.inventory_threshold");
         setState(State.STOPPED);
+    }
+
+    /**
+     * 启动备货时（材料清单刚算好、还没开始搜容器）先把背包里属于投影材料的散装物品收进潜影盒。
+     *
+     * <p>不管背包满没满都收一遍——备齐的材料更该收进盒子，别白占着背包格子，后面的取料与合成
+     * 才有地方腾挪。找不到可用盒子就静默跳过，不打断备货；每次运行只做一次。
+     *
+     * @return true = 已经进入存盒周期，调用方让出这一轮
+     */
+    public boolean requestStartupStorage() {
+        if (startupStorageAttempted) return false;
+        startupStorageAttempted = true;
+        if (!ShulkerBoxAccess.isEnabled()) return false;
+        if (!shulkerAccess.hasStorableMaterials(ctx)) return false;
+        if (!shulkerAccess.startStorage(ctx, true)) return false;
+        voluntaryStorage = true;
+        voluntaryStoreCycles = 0;
+        resumeNextItemAfterStorage = true;
+        return true;
     }
 
     /**
@@ -328,6 +375,7 @@ public class TaskStateMachine {
         if (!ShulkerBoxAccess.isEnabled()) return;
         if (!shulkerAccess.hasStorableMaterials(ctx)) return;
         this.pendingTraceStorage = true;
+        this.voluntaryStoreCycles = 0;
         // 追溯以"放弃这个物品"收场时（索引早就推进过了），存完直接走下一个物品：
         // 这时的 ctx.currentTargetItem 还是刚失败的那个，拿它重判会把这个物品再搜一遍，
         // 甚至把索引多推一格。

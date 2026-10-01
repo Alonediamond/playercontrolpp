@@ -1,6 +1,6 @@
 package com.alonediamond.playercontrolpp.mixin.compat.screen;
 
-import com.alonediamond.playercontrolpp.feature.ContainerGuiSuppressor;
+import com.alonediamond.playercontrolpp.feature.interact.ContainerGuiSuppressor;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;

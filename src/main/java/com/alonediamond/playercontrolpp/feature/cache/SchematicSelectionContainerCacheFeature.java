@@ -1,10 +1,13 @@
-package com.alonediamond.playercontrolpp.feature;
+package com.alonediamond.playercontrolpp.feature.cache;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.ClientFeature;
+import com.alonediamond.playercontrolpp.feature.interact.ContainerGuiSuppressor;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.SelectionBounds;
+import com.alonediamond.playercontrolpp.util.BlockUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
@@ -549,23 +552,8 @@ public final class SchematicSelectionContainerCacheFeature {
     private static void sendOpenClick(Minecraft client, BlockPos position) {
         if (client.gameMode == null) return;
 
-        Vec3 eye = client.player.getEyePosition();
         Vec3 center = Vec3.atCenterOf(position);
-        double dx = eye.x - center.x;
-        double dy = eye.y - center.y;
-        double dz = eye.z - center.z;
-        double ax = Math.abs(dx);
-        double ay = Math.abs(dy);
-        double az = Math.abs(dz);
-
-        Direction face;
-        if (ax >= ay && ax >= az) {
-            face = dx > 0 ? Direction.EAST : Direction.WEST;
-        } else if (ay >= az) {
-            face = dy > 0 ? Direction.UP : Direction.DOWN;
-        } else {
-            face = dz > 0 ? Direction.SOUTH : Direction.NORTH;
-        }
+        Direction face = BlockUtil.nearestFace(client.player.getEyePosition(), position);
 
         Vec3 hitPos = new Vec3(
                 center.x + face.getStepX() * 0.5,

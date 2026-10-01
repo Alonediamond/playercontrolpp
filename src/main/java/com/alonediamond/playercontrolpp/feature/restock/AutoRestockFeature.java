@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.restock;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
@@ -8,6 +8,7 @@ import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.util.BlockUtil;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
@@ -560,7 +561,7 @@ public class AutoRestockFeature implements ClientFeature {
             mc.player.setYHeadRot((float) Math.toDegrees(Math.atan2(-dx, dz)));
             mc.player.setXRot((float) Math.toDegrees(-Math.atan2(dy, distH)));
 
-            Direction face = ContainerOpener.nearestFace(eye, currentContainerTarget);
+            Direction face = BlockUtil.nearestFace(eye, currentContainerTarget);
             Vec3 hitPos = new Vec3(
                     currentContainerTarget.getX() + 0.5 + face.getStepX() * 0.5,
                     currentContainerTarget.getY() + 0.5 + face.getStepY() * 0.5,

@@ -1,9 +1,14 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.path.BaritonePathingController;
+import com.alonediamond.playercontrolpp.feature.automaterial.TaskStateMachine;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.storage.ShulkerBoxAccess;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;

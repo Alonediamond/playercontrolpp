@@ -1,5 +1,6 @@
-package com.alonediamond.playercontrolpp.feature;
+package com.alonediamond.playercontrolpp.feature.movement;
 
+import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
 

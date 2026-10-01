@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.material;
 
 import net.minecraft.world.item.Item;
 

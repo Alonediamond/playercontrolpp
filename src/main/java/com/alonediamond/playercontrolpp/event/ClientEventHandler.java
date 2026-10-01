@@ -1,6 +1,6 @@
 package com.alonediamond.playercontrolpp.event;
 
-import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
+import com.alonediamond.playercontrolpp.feature.movement.AutoForwardFeature;
 import com.alonediamond.playercontrolpp.feature.FeatureRegistry;
 import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import com.alonediamond.playercontrolpp.record.InputPlayer;

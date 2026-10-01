@@ -1,15 +1,19 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.material;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.MaterialMemory;
+import com.alonediamond.playercontrolpp.feature.automaterial.TaskStateMachine;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -41,6 +45,7 @@ public class MaterialAnalyzer {
 
     public void analyze(GatherContext ctx, TaskStateMachine tsm) {
         try {
+            ctx.requiredMaterials.clear();
             List<MaterialItemEntry> missing = readMissingMaterials(ctx, tsm);
             if (missing == null) return;
 
@@ -49,6 +54,17 @@ public class MaterialAnalyzer {
 
             // 需求量最大的排前面：这些最可能需要整盒搬。
             ctx.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
+
+            // 清单上出现过的物品都记一份：存盒时"上一轮留下的原材料"就靠这份记忆认出来。
+            for (Item item : ctx.requiredMaterials) {
+                MaterialMemory.remember(item);
+            }
+
+            // 启动时先把手上的材料收进潜影盒（不管背包满没满；没盒子就静默跳过）。
+            // 放在这里而不是等 SEARCHING：后面取料、合成都要在物品栏里腾挪，
+            // 先把散落的材料归拢进盒子，格子才够用。
+            ctx.currentItemIndex = 0;
+            if (tsm.requestStartupStorage()) return;
 
             if (ctx.missingItems.isEmpty()) {
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.all_materials_ready");
@@ -129,6 +145,9 @@ public class MaterialAnalyzer {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
 
+            // 投影要的材料都记一份（含已经备齐的）：自动存盒据此把背包里的散装材料收进潜影盒。
+            ctx.requiredMaterials.add(entry.stack().getItem());
+
             // 目标量写总量 countMissing；countAvailable 只用来判断这条还缺不缺。
             if (entry.countAvailable() < entry.countMissing()) {
                 missing.add(new MaterialItemEntry(entry.stack().getItem(), entry.countMissing(),
@@ -164,6 +183,9 @@ public class MaterialAnalyzer {
         for (LitematListIntegration.MaterialEntry entry : uploaded) {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
+
+            // 上传清单里的材料都记一份（含已经备齐的）：自动存盒据此把背包里的散装材料收进潜影盒。
+            ctx.requiredMaterials.add(entry.stack().getItem());
 
             // missingCount 是 LitematList 按它自己的口径（含潜影盒内持有量）算出的缺口，
             // 这里只拿它过滤已齐的条目；目标量同样写总量 totalCount，口径与投影路径一致。

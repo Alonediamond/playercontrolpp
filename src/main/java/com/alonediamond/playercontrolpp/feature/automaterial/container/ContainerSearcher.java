@@ -1,8 +1,11 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.TaskStateMachine;
+import com.alonediamond.playercontrolpp.feature.automaterial.path.BaritonePathingController;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;

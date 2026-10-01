@@ -1,7 +1,7 @@
 package com.alonediamond.playercontrolpp.input;
 
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.route.RouteManager;
 import fi.dy.masa.malilib.hotkeys.IHotkey;
 import fi.dy.masa.malilib.hotkeys.IKeybindManager;

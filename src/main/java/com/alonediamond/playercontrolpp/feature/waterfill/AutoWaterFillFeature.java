@@ -1,9 +1,10 @@
-package com.alonediamond.playercontrolpp.feature;
+package com.alonediamond.playercontrolpp.feature.waterfill;
 
 import com.alonediamond.playercontrolpp.compat.InventoryCompat;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.PlacementBounds;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;

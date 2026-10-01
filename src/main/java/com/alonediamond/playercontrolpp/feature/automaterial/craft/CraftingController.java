@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.craft;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
@@ -76,7 +76,7 @@ public class CraftingController {
     private enum PlaceMode { PACKET, MANUAL }
 
     // 工作台菜单：0 = 产物，1..9 = 3×3 合成格。原版常量是 private 的，跨版本自己定义
-    // （理由同 ItemTransferStrategy.SHULKER_SLOT_COUNT）。
+    // （理由同 ItemUtil.SHULKER_SLOT_COUNT）。
     private static final int CRAFT_RESULT_SLOT = 0;
     private static final int CRAFT_GRID_START = 1;
     private static final int CRAFT_GRID_WIDTH = 3;
@@ -109,11 +109,14 @@ public class CraftingController {
         final List<List<ItemStack>> grid;
         /** shaped 图案宽度；shapeless / 未知按 3 处理（位置不影响匹配）。 */
         final int width;
+        /** 一次合成产出几个（木板 4、活塞 1……）；用于把"要几个产物"折成"要合成几次"。 */
+        final int outputCount;
 
-        RecipePlan(Object handle, List<List<ItemStack>> grid, int width) {
+        RecipePlan(Object handle, List<List<ItemStack>> grid, int width, int outputCount) {
             this.handle = handle;
             this.grid = grid;
             this.width = Math.max(1, width);
+            this.outputCount = Math.max(1, outputCount);
         }
 
         int slotCount() { return this.grid.size(); }
@@ -153,6 +156,14 @@ public class CraftingController {
     private boolean manualPlaced;
     /** 服务端摆料包还值不值得试。一旦被证伪，本次合成就一直走手动摆料。 */
     private boolean packetUsable = true;
+    /**
+     * 这一趟合成会话是否真的取到过产物。
+     *
+     * <p>用来区分两种"材料没了"：一次都没做成 → 真失败（调用方该去补料）；
+     * 已经做出一些 → 只是这一批的材料用完了，按正常结束收场，让调用方决定要不要再来一批。
+     * 早先一律报 FAILED，已经做出来的那一部分也跟着被当成"整帧失败"丢掉。
+     */
+    private boolean craftedAny;
 
     public boolean isActive() { return this.active; }
 
@@ -185,6 +196,7 @@ public class CraftingController {
         this.openSent = false;
         this.replaceAttempts = 0;
         this.packetUsable = true;
+        this.craftedAny = false;
         resetPlacement();
         return true;
     }
@@ -356,6 +368,13 @@ public class CraftingController {
             if (this.recipe == null) { fail(mc, "no recipe plan"); return; }
             int perSlot = craftsPerPlacement(mc);
             if (perSlot <= 0) {
+                // 材料只够做刚才那些：当作"这一批做完了"，让调用方去补料/开新一批，
+                // 而不是把已经做出来的部分一起判失败。
+                if (this.craftedAny) {
+                    log("ingredients exhausted after crafting something (" + this.item + ")");
+                    finish(Result.DONE);
+                    return;
+                }
                 fail(mc, "not enough ingredients for a single craft (grid=" + gridSummary(menu) + ")");
                 return;
             }
@@ -462,13 +481,19 @@ public class CraftingController {
         Slot resultSlot = menu.getSlot(resultIndex);
         if (resultSlot != null && resultSlot.hasItem()) {
             SlotActionCompat.quickMove(mc, menu.containerId, resultIndex);
+            this.craftedAny = true;
             this.cooldown = 2;
             return;
         }
 
-        // 格子取空了但还差数量：重新摆一次料；连续几次都没有进展就认输。
+        // 格子取空了但还差数量：重新摆一次料；连续几次都没有进展就收手。
         this.replaceAttempts++;
         if (this.replaceAttempts > MAX_REPLACE_ATTEMPTS) {
+            if (this.craftedAny) {
+                log("stopping after " + this.replaceAttempts + " placements (" + this.item + ")");
+                finish(Result.DONE);
+                return;
+            }
             fail(mc, "crafting stalled after " + this.replaceAttempts + " placements");
             return;
         }
@@ -560,7 +585,24 @@ public class CraftingController {
      *         0 = 材料连一套都不够。
      */
     private int craftsPerPlacement(Minecraft mc) {
+        Map<Item, Integer> perCraft = perCraftOrNull(mc);
+        if (perCraft == null || perCraft.isEmpty()) return 0;
+
+        int crafts = 64;
+        for (Map.Entry<Item, Integer> entry : perCraft.entrySet()) {
+            crafts = Math.min(crafts, ItemUtil.countLoose(mc.player, entry.getKey()) / entry.getValue());
+        }
+        int remaining = this.targetCount - ItemUtil.countEverywhere(mc.player, this.item);
+        return Math.max(0, Math.min(crafts, remaining));
+    }
+
+    /**
+     * @return 这个配方每合成一次要消耗的材料（按合成格数聚合，木板 3 格就是 3）；
+     *         只要有一格连一个"散装还有货"的候选都挑不出来，就返回 {@code null}。
+     */
+    private Map<Item, Integer> perCraftOrNull(Minecraft mc) {
         Map<Item, Integer> perCraft = new java.util.LinkedHashMap<>();
+        if (this.recipe == null || mc.player == null) return null;
         for (List<ItemStack> candidates : this.recipe.grid) {
             if (candidates.isEmpty()) continue;   // 图案空位
             Item chosen = null;
@@ -570,17 +612,71 @@ public class CraftingController {
                     break;
                 }
             }
-            if (chosen == null) return 0;         // 有一种材料一个都没有
+            if (chosen == null) return null;      // 有一种材料一点散装都没有
             perCraft.merge(chosen, 1, Integer::sum);
         }
-        if (perCraft.isEmpty()) return 0;
+        return perCraft;
+    }
 
-        int crafts = 64;
-        for (Map.Entry<Item, Integer> entry : perCraft.entrySet()) {
-            crafts = Math.min(crafts, ItemUtil.countLoose(mc.player, entry.getKey()) / entry.getValue());
+    /** @return 要做出 {@code items} 个产物得合成几次（按配方产出数折算）。 */
+    public int craftsNeeded(int items) {
+        int output = this.recipe == null ? 1 : this.recipe.outputCount;
+        return Math.max(1, (Math.max(1, items) + output - 1) / output);
+    }
+
+    /**
+     * 一个"现在摆不进合成格"的材料。
+     *
+     * @param item     卡住的物品
+     * @param perCraft 每合成一次要消耗几个（按合成格数算）
+     * @param boxed    true = 物品栏里没有散装，但潜影盒里有（先去开盒取料就行）
+     */
+    public record BlockedIngredient(Item item, int perCraft, boolean boxed) {}
+
+    /**
+     * 开工前的自检：按当前的配方与物品栏，列出"连一次合成都摆不出来"的材料。
+     *
+     * <p>不查这一步的后果（作者实机反馈）：材料还在盒里、或者散装量不足一次合成，
+     * 工作台照样被打开，然后摆料失败、整帧白跑——日志里只会看到一条"合成失败"。
+     * 拿到这份清单后，调用方可以先去开盒取料、或回去把料补齐，而不是硬着头皮开工作台。
+     *
+     * @return 卡住的材料（已去重）；空 = 至少能合成一次
+     */
+    public List<BlockedIngredient> blockedIngredients(Minecraft mc) {
+        List<BlockedIngredient> blocked = new ArrayList<>();
+        if (mc.player == null || this.recipe == null) return blocked;
+
+        Map<Item, Integer> perCraft = perCraftOrNull(mc);
+        if (perCraft == null) {
+            // 有格子一个散装候选都没有：把那一格卡住的材料报出来（盒里有货的优先，方便去取）
+            for (List<ItemStack> candidates : this.recipe.grid) {
+                if (candidates.isEmpty()) continue;
+                Item loose = null;
+                Item boxed = null;
+                for (ItemStack candidate : candidates) {
+                    Item item = candidate.getItem();
+                    if (ItemUtil.countLoose(mc.player, item) > 0) { loose = item; break; }
+                    if (boxed == null && ItemUtil.countEverywhere(mc.player, item) > 0) boxed = item;
+                }
+                if (loose != null) continue;
+                Item stuck = boxed != null ? boxed : candidates.get(0).getItem();
+                boolean already = false;
+                for (BlockedIngredient existing : blocked) {
+                    if (existing.item() == stuck) { already = true; break; }
+                }
+                if (!already) blocked.add(new BlockedIngredient(stuck, 1, boxed != null));
+            }
+            return blocked;
         }
-        int remaining = this.targetCount - ItemUtil.countEverywhere(mc.player, this.item);
-        return Math.max(0, Math.min(crafts, remaining));
+
+        for (Map.Entry<Item, Integer> entry : perCraft.entrySet()) {
+            int loose = ItemUtil.countLoose(mc.player, entry.getKey());
+            if (loose >= entry.getValue()) continue;
+            // 盒里有、只是没取出来 → 先去开盒；盒里也不够 → 得回去收集
+            boolean boxed = ItemUtil.countEverywhere(mc.player, entry.getKey()) >= entry.getValue();
+            blocked.add(new BlockedIngredient(entry.getKey(), entry.getValue(), boxed));
+        }
+        return blocked;
     }
 
     /** 往一个合成格里凑够 {@code amount} 个材料（不够就从下一个物品栏槽位接着拿）。 */
@@ -660,7 +756,7 @@ public class CraftingController {
                     }
                     List<ItemStack> results = entry.resultItems(contextMap);
                     if (results.isEmpty() || !ItemUtil.is(results.get(0), item)) continue;
-                    RecipePlan plan = planFromDisplay(entry, contextMap);
+                    RecipePlan plan = planFromDisplay(entry, contextMap, results.get(0).getCount());
                     if (plan != null) return plan;
                 }
             }
@@ -676,7 +772,8 @@ public class CraftingController {
             //$$             grid.add(List.of(ingredient.getItems()));
             //$$         }
             //$$         int width = crafting instanceof ShapedRecipe shaped ? shaped.getWidth() : CRAFT_GRID_WIDTH;
-            //$$         return new RecipePlan(holder, grid, width);
+            //$$         int outputCount = crafting.getResultItem(mc.level.registryAccess()).getCount();
+            //$$         return new RecipePlan(holder, grid, width, outputCount);
             //$$     }
             //$$ }
             //#endif
@@ -688,7 +785,7 @@ public class CraftingController {
 
     //#if MC >= 12102
     /** 把配方展示条目转成"每个合成格能放哪些物品"。 */
-    private static RecipePlan planFromDisplay(RecipeDisplayEntry entry, ContextMap contextMap) {
+    private static RecipePlan planFromDisplay(RecipeDisplayEntry entry, ContextMap contextMap, int outputCount) {
         RecipeDisplay display = entry.display();
         List<SlotDisplay> layout;
         int width;
@@ -706,7 +803,7 @@ public class CraftingController {
         for (SlotDisplay slot : layout) {
             grid.add(slot.resolveForStacks(contextMap));
         }
-        return new RecipePlan(entry, grid, width);
+        return new RecipePlan(entry, grid, width, outputCount);
     }
 
     /** 让服务端按配方把材料摆进格子（1.21.2+ 用配方展示 id）。 */

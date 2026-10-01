@@ -1,5 +1,7 @@
 package com.alonediamond.playercontrolpp.util;
 
+import com.alonediamond.playercontrolpp.config.Configs;
+
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Inventory;
@@ -71,12 +73,33 @@ public final class PlayerUtil {
         return -1;
     }
 
+    /**
+     * @return 36 格主物品栏是否「满」——按配置的满包阈值判定：占用格数达到阈值即算满。
+     *
+     * <p>阈值默认 27（留 9 格）：合成要从物品栏取散装材料摆进工作台，只剩一两格空位时摆不下，
+     * 所以在还剩下几格的时候就先去存盒。阈值拉到 36 就回到「一格不剩才算满」的旧行为。
+     */
     public static boolean isInventoryFull(Player player) {
         if (player == null) return true;
+        int threshold = Configs.Settings.INVENTORY_FULL_THRESHOLD.getIntegerValue();
+        int occupied = 0;
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (player.getInventory().getItem(i).isEmpty()) {
-                return false;
-            }
+            if (player.getInventory().getItem(i).isEmpty()) continue;
+            if (++occupied >= threshold) return true;
+        }
+        return false;
+    }
+
+    /**
+     * @return 36 格主物品栏是否真的一格空位都没有。
+     *
+     * <p>合成过程中不能用 {@link #isInventoryFull}：工作台的合成格里还摆着材料，这时候按阈值
+     * 收手关界面，格子里的材料会被原版丢到地上。只有一格不剩、产物确实拿不出来时才值得中止。
+     */
+    public static boolean isInventoryStrictlyFull(Player player) {
+        if (player == null) return true;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (player.getInventory().getItem(i).isEmpty()) return false;
         }
         return true;
     }

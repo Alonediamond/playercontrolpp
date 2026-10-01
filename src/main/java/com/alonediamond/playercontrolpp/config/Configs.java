@@ -147,9 +147,20 @@ public class Configs implements IConfigHandler {
                         + "anti-cheat may read it as flying.")
                 .apply(KEY_SETTINGS);
 
+        /**
+         * 备货的「满包阈值」：物品栏（含快捷栏）占用到这么多格就当背包满了，触发自动存盒。
+         *
+         * <p>默认 27 = 留 9 格空位。合成要从物品栏里取散装材料摆进工作台，空格太少就会摆不下；
+         * 上限 36 = 只有一格不剩才算满（旧行为）。
+         */
+        public static final ConfigInteger INVENTORY_FULL_THRESHOLD = new ConfigInteger(
+                "inventoryFullThreshold", 27, 9, 36,
+                "How many occupied inventory slots (main inventory + hotbar) count as a full inventory during auto-gathering. Reaching it triggers storing materials into shulker boxes, leaving room for crafting. 36 = only when nothing is free. Default: 27.")
+                .apply(KEY_SETTINGS);
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 TURN_ANGLE, CACHE_DELAY, WATER_FILL_SCAN_RADIUS, WATER_FILL_OPERATION_DELAY,
-                PLAYBACK_POSITION_CORRECTION);
+                PLAYBACK_POSITION_CORRECTION, INVENTORY_FULL_THRESHOLD);
     }
 
     public static class BaritoneSettings {
@@ -172,7 +183,7 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_BARITONE);
 
         /**
-         * v1.9：备货途中识别箱子追踪缓存里的潜影盒（杂盒）。
+         * v1.8.1：备货途中识别箱子追踪缓存里的潜影盒（杂盒）。
          *
          * <p>散装场景（缺口未超过整盒阈值）下，缓存里找不到散装库存、却存在"装着该材料"的潜影盒时，
          * 把盒子取出来、开盒取走盒内所有缺失材料，再把盒子还回原容器。
@@ -184,7 +195,7 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_BARITONE);
 
         /**
-         * v1.9：缓存里没有的材料要不要追溯原材料并合成。只在装了 LitematList 时显示；
+         * v1.8.1：缓存里没有的材料要不要追溯原材料并合成。只在装了 LitematList 时显示；
          * 启用前提是备货数据来源选了「跟随LitematList清单」且那边已上传清单。
          */
         public static final ConfigOptionList RAW_MATERIAL_CRAFT_MODE = new ConfigOptionList(
@@ -193,7 +204,7 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_BARITONE);
 
         /**
-         * v1.9：原材料溯源层数。<b>-1 = 跟随 LitematList 原材料界面上的层数设置</b>（观察不到时用它的默认值 5），
+         * v1.8.1：原材料溯源层数。<b>-1 = 跟随 LitematList 原材料界面上的层数设置</b>（观察不到时用它的默认值 5），
          * 0-10 = 用本模组指定的层数。层数上限由 LitematList 自己限制在 0-10。
          */
         public static final ConfigInteger RAW_MATERIAL_MAX_DEPTH = new ConfigInteger(

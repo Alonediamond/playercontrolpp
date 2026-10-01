@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature;
+package com.alonediamond.playercontrolpp.feature.movement;
 
 import com.alonediamond.playercontrolpp.action.RotateAction;
 import com.alonediamond.playercontrolpp.config.Configs;
