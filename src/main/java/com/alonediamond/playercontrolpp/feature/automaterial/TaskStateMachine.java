@@ -1,17 +1,31 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import com.alonediamond.playercontrolpp.compat.InputCompat;
+import com.alonediamond.playercontrolpp.compat.PlayerCompat;
+import com.alonediamond.playercontrolpp.compat.ScreenCompat;
+import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
+import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.ShulkerBoxMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 驱动自动备货的状态机：把每个状态派发给拥有它的模块，并在它们之上跑两个子状态机——
@@ -256,6 +270,13 @@ public class TaskStateMachine {
                 materialAnalyzer.analyze(ctx, this);
                 break;
 
+            case INVENTORY:
+                if (!(ctx.client.player.containerMenu instanceof ShulkerBoxMenu)) {
+                    break;
+                }
+                putItemInInventory(ctx);
+                break;
+
             case SEARCHING:
                 containerSearcher.search(ctx, this, containerOpener, pathingController);
                 break;
@@ -289,6 +310,27 @@ public class TaskStateMachine {
             default:
                 break;
         }
+    }
+
+    private void putItemInInventory(GatherContext ctx) {
+        Inventory inventory = ctx.client.player.getInventory();
+        List<Integer> indexes = new ArrayList<>();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack item = inventory.getItem(i);
+            if (ctx.neededItems.contains(item.getItem())) {
+                indexes.add(i);
+            }
+        }
+        int times = 0;
+        for (Integer index : indexes) {
+            if (times >= 27) {
+                break;
+            }
+            SlotActionCompat.quickMove(ctx.client,ctx.client.player.containerMenu.containerId,index);
+            times++;
+        }
+        ctx.client.player.closeContainer();
+        setState(State.NEXT_ITEM);
     }
 
     /**

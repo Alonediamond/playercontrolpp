@@ -29,7 +29,7 @@ public class ContainerOpener {
     /** 同一个方块尝试几次后才去试它的邻居。 */
     private static final int MAX_OPEN_ATTEMPTS = 3;
     /** 第几次尝试时先跳一下，以防视线被挡。 */
-    private static final int JUMP_ON_ATTEMPT = 2;
+    //private static final int JUMP_ON_ATTEMPT = 2;
     /** 一个容器坐标上总共试过几个不同方块后彻底放弃。 */
     private static final int MAX_CHEST_RETRIES = 3;
     /** 点击后等容器界面的 tick 数。 */
@@ -41,23 +41,23 @@ public class ContainerOpener {
 
     /** 打开 {@code target} 处的容器。OPENING_CONTAINER 转换的入口。 */
     public void openContainerAt(BlockPos target, GatherContext ctx) {
-        openContainerWithRetry(target, false, 0, ctx);
+        openContainerWithRetry(target, 0, ctx);
     }
 
     /**
      * 通过 {@code useItemOn()} 发送一个明确的 BlockHitResult 来开容器，绕过客户端射线检测，
      * 相邻的容器就抢不走这次点击。
      */
-    public void openContainerWithRetry(BlockPos target, boolean jumpBeforeClick, int attemptNumber, GatherContext ctx) {
+    public void openContainerWithRetry(BlockPos target, int attemptNumber, GatherContext ctx) {
         ctx.currentContainerTarget = target;
         ctx.openAttemptCount = attemptNumber;
 
         // 上一次尝试的回退路径按下的键现在已经过期了。
         releaseKeys();
 
-        if (jumpBeforeClick && ctx.client.player != null) {
+        /*if (jumpBeforeClick && ctx.client.player != null) {
             ctx.client.player.jumpFromGround();
-        }
+        }*/
 
         try {
             Vec3 playerEye = ctx.client.player.getEyePosition();
@@ -126,8 +126,8 @@ public class ContainerOpener {
         } else {
             ctx.openAttemptCount++;
             if (ctx.openAttemptCount < MAX_OPEN_ATTEMPTS) {
-                boolean jump = (ctx.openAttemptCount == JUMP_ON_ATTEMPT);
-                openContainerWithRetry(ctx.currentContainerTarget, jump, ctx.openAttemptCount, ctx);
+                //boolean jump = (ctx.openAttemptCount == JUMP_ON_ATTEMPT);
+                openContainerWithRetry(ctx.currentContainerTarget, ctx.openAttemptCount, ctx);
             } else {
                 retryAdjacentOrFail(ctx, tsm, pathing);
             }
@@ -163,7 +163,7 @@ public class ContainerOpener {
 
         ctx.openAttemptCount++;
         if (ctx.openAttemptCount < MAX_OPEN_ATTEMPTS) {
-            openContainerWithRetry(ctx.currentContainerTarget, false, ctx.openAttemptCount, ctx);
+            openContainerWithRetry(ctx.currentContainerTarget, ctx.openAttemptCount, ctx);
             return;
         }
 

@@ -52,7 +52,7 @@ public class RawMaterialTask {
      * 这条兜底只针对"一直在挖、背包里那个物品却始终不涨"的情况（工具不对、方块不掉该物品……），
      * 到点就放弃，免得整轮备货卡在挖掘上。期间只要数量涨过一次就重新计时。
      */
-    private static final int MINE_STALL_TICKS = 1200;
+    //private static final int MINE_STALL_TICKS = 1200;
 
     /**
      * 同一层合成前最多开几次盒子取料。
@@ -563,10 +563,10 @@ public class RawMaterialTask {
         if (have > this.mineLastCount) {
             this.mineLastCount = have;
             this.mineStallTicks = 0;
-        } else if (++this.mineStallTicks > MINE_STALL_TICKS) {
+        }/* else if (++this.mineStallTicks > MINE_STALL_TICKS) {
             this.baritone.cancelMining();
             afterGatherFailed(ctx, tsm, item, false);
-        }
+        }*/
     }
 
     // ---- 工具 ----

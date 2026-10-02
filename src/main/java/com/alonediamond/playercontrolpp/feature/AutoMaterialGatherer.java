@@ -28,7 +28,7 @@ public class AutoMaterialGatherer implements ClientFeature {
 
     public enum State {
         IDLE, ANALYZING, SEARCHING, PATHING, OPENING_CONTAINER,
-        TRANSFERRING_ITEM, VERIFYING, NEXT_ITEM, COMPLETED, FAILED, STOPPED
+        TRANSFERRING_ITEM, VERIFYING, NEXT_ITEM, COMPLETED, FAILED, INVENTORY, STOPPED
     }
 
     private final GatherContext ctx;

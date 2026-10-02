@@ -31,6 +31,7 @@ public class GatherContext {
     public Item currentTargetItem;
     public int targetNeededTotal;
     public int currentlyGathered;
+    public final Set<Item> neededItems = new HashSet<>();
 
     // 箱子搜索数据
     public final List<BlockPos> foundPositions = new ArrayList<>();
@@ -215,6 +216,7 @@ public class GatherContext {
         state = AutoMaterialGatherer.State.IDLE;
 
         missingItems.clear();
+        neededItems.clear();
         currentItemIndex = 0;
         currentTargetItem = null;
         targetNeededTotal = 0;

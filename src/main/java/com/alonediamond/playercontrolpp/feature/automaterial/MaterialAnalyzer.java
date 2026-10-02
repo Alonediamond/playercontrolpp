@@ -6,10 +6,14 @@ import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -63,6 +67,24 @@ public class MaterialAnalyzer {
             if (isInventoryFull(ctx.client)) {
                 tsm.onInventoryFull();
                 return;
+            }
+
+            if (QuickShulkerIntegration.getInstance().isLoaded()) {
+                int freeBox = -1;
+                boolean hasNeededItems = false;
+                for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+                    ItemStack item = ctx.client.player.getInventory().getItem(i);
+                    if (ItemUtil.isShulkerBox(item) && ItemUtil.contentsOf(item).isEmpty()) {
+                        freeBox = i;
+                    }else if (ctx.neededItems.contains(item.getItem())){
+                        hasNeededItems = true;
+                    }
+                }
+                if (hasNeededItems && freeBox != -1) {
+                    QuickShulkerIntegration.getInstance().openShulkerBox(freeBox);
+                    ctx.state = State.INVENTORY;
+                    return;
+                }
             }
 
             ctx.currentItemIndex = 0;
@@ -129,6 +151,8 @@ public class MaterialAnalyzer {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
 
+            ctx.neededItems.add(entry.stack().getItem());
+
             // 目标量写总量 countMissing；countAvailable 只用来判断这条还缺不缺。
             if (entry.countAvailable() < entry.countMissing()) {
                 missing.add(new MaterialItemEntry(entry.stack().getItem(), entry.countMissing(),
@@ -164,6 +188,8 @@ public class MaterialAnalyzer {
         for (LitematListIntegration.MaterialEntry entry : uploaded) {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
+
+            ctx.neededItems.add(entry.stack().getItem());
 
             // missingCount 是 LitematList 按它自己的口径（含潜影盒内持有量）算出的缺口，
             // 这里只拿它过滤已齐的条目；目标量同样写总量 totalCount，口径与投影路径一致。
