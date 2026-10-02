@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial.craft;
+package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;

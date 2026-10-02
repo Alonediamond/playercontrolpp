@@ -4,7 +4,7 @@ import com.alonediamond.playercontrolpp.compat.DrawCtx;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import fi.dy.masa.malilib.config.IConfigBase;

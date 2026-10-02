@@ -19,9 +19,6 @@ import java.util.List;
  */
 public final class ItemUtil {
 
-    /** 潜影盒的储物格数（原版固定 27 格）。 */
-    public static final int SHULKER_SLOT_COUNT = 27;
-
     private ItemUtil() {}
 
     /**
@@ -61,31 +58,6 @@ public final class ItemUtil {
             }
         }
         return count;
-    }
-
-    /**
-     * @return 这个潜影盒还有完全空的格子（任何物品都放得进去）。
-     *
-     * <p>只当预判用：真满没满以打开后的界面为准（见 {@code ShulkerBoxAccess.isShulkerBoxFull}）。
-     */
-    public static boolean shulkerBoxHasEmptySlot(ItemStack shulkerBox) {
-        return contentsOf(shulkerBox).size() < SHULKER_SLOT_COUNT;
-    }
-
-    /**
-     * @return 这个潜影盒还能不能再放下 {@code item}：有空槽，或盒内已有同类且那一堆没满。
-     *
-     * <p>27 格全被占满、但其中几堆没满的盒子仍然能装东西——早先只看"有没有空槽"，
-     * 这种盒子会被误判成满盒而不再使用（作者实测：装了一堆不同材料、各堆都不满的盒子正是这种情况）。
-     */
-    public static boolean shulkerBoxHasRoomFor(ItemStack shulkerBox, Item item) {
-        if (item == null) return false;
-        List<ItemStack> contents = contentsOf(shulkerBox);
-        if (contents.size() < SHULKER_SLOT_COUNT) return true;
-        for (ItemStack inner : contents) {
-            if (is(inner, item) && inner.getCount() < inner.getMaxStackSize()) return true;
-        }
-        return false;
     }
 
     /** @return 该潜影盒里是否至少有一个 {@code item}。 */

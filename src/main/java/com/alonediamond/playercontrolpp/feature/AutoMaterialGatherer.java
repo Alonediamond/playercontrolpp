@@ -1,13 +1,6 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature;
 
-import com.alonediamond.playercontrolpp.feature.ClientFeature;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerSearcher;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ItemTransferExecutor;
-import com.alonediamond.playercontrolpp.feature.automaterial.craft.RawMaterialTask;
-import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialAnalyzer;
-import com.alonediamond.playercontrolpp.feature.automaterial.path.BaritonePathingController;
-import com.alonediamond.playercontrolpp.feature.automaterial.storage.ShulkerBoxAccess;
+import com.alonediamond.playercontrolpp.feature.automaterial.*;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;

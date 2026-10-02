@@ -1,16 +1,13 @@
-package com.alonediamond.playercontrolpp.feature.automaterial.storage;
+package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.compat.InventoryCompat;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.StorageMode;
-import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
-import com.alonediamond.playercontrolpp.feature.automaterial.MaterialMemory;
-import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.ItemTransferStrategy;
 import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
-import com.alonediamond.playercontrolpp.util.BlockUtil;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
@@ -26,7 +23,6 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -79,7 +75,7 @@ public class ShulkerBoxAccess {
     }
 
     /** 潜影盒界面里盒子自己的槽位：索引 0..26。 */
-    private static final int BOX_SLOT_COUNT = ItemUtil.SHULKER_SLOT_COUNT;
+    private static final int BOX_SLOT_COUNT = ItemTransferStrategy.SHULKER_SLOT_COUNT;
     /** 潜影盒界面里玩家背包的第一个槽位（前面 27 格是盒子的）。 */
     private static final int BOX_SCREEN_PLAYER_START = BOX_SLOT_COUNT;
     /** 潜影盒界面里玩家一侧的槽位数：27 格主背包 + 9 格快捷栏。 */
@@ -148,19 +144,6 @@ public class ShulkerBoxAccess {
     private int takeBoxMenuSlot = -1;
     /** TAKE_BOX 阶段的等待计时。 */
     private int takeBoxTicks;
-    /**
-     * 打开后才发现这个盒子用不了（已满，或装不下背包里任何材料）、一个都没存进去。
-     *
-     * <p>它的槽位要等盒子回到背包之后按实际落点记进 {@link #knownFullSlots}，本周期内别再挑它。
-     */
-    private boolean boxUnusable;
-    /**
-     * EXTRACT 中途放弃时要上报的结果。
-     *
-     * <p>模拟模式下盒子已经放在地上了，不能一走了之：先走 CLOSING→MINING→WAITING_PICKUP
-     * 把它挖回来，再把结果交出去（见 {@link #abortWith}）。
-     */
-    private StorageResult deferredResult = StorageResult.ACTIVE;
 
     public boolean isActive() { return active; }
 
@@ -265,8 +248,6 @@ public class ShulkerBoxAccess {
         boxesBeforePlace.clear();
         takeBoxMenuSlot = -1;
         takeBoxTicks = 0;
-        boxUnusable = false;
-        deferredResult = StorageResult.ACTIVE;
         // knownFullSlots 刻意不清：上个周期满的盒子现在还是满的。
         useQuickShulkerMode = isQuickShulkerModeEnabled();
         return true;
@@ -310,30 +291,20 @@ public class ShulkerBoxAccess {
 
     // ---- Phases ----
 
-    /**
-     * 挑一个能当存料盒的潜影盒，优先级从高到低：
-     * <ol>
-     *   <li>装得下背包里的材料、盒内也没有本次要收集的材料——存进去不会和待取的材料混在一起；</li>
-     *   <li>装得下，但盒内装着本次的材料——作者确认：没装满的盒子就该接着装，
-     *       不然白占着背包格子。混装只让后面取物时多取一次，不影响正确性；</li>
-     *   <li>按内容看装不下——NBT 可能过期，放下去开一次确认，真装不下就挖回来换一个。</li>
-     * </ol>
-     *
-     * <p>"装得下"针对的是<b>背包里实际要存的那几种材料</b>，不是笼统的"还有没有空位"：
-     * 27 格占满但各堆都不满的盒子照样能装同类材料（作者实测就是这种盒子被误跳过）。
-     */
     private void doFindShulker(Minecraft mc, GatherContext ctx) {
-        java.util.Set<Item> storable = storableItems(mc, ctx);
-        int candidate = findStorageBox(mc, ctx, storable, true, false);
-        if (candidate < 0) candidate = findStorageBox(mc, ctx, storable, false, false);
-        if (candidate < 0) candidate = findStorageBox(mc, ctx, storable, false, true);
-        if (candidate >= 0) {
-            // 这个盒子里的东西也算"见过的材料"：玩家把它当材料盒用，里面装的自然就是材料。
-            // 上一轮留下的原材料往往就是靠这一条认出来的（下一轮的筛选/搬运就会带上它们）。
-            for (ItemStack inner : ItemUtil.contentsOf(mc.player.getInventory().getItem(candidate))) {
-                MaterialMemory.remember(inner.getItem());
-            }
-            shulkerSlotIndex = candidate;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (knownFullSlots.contains(i)) continue;
+            // 本次为"开盒取物"搬出来的杂盒不许被当成存储盒，否则刚取出来的材料又被装回去。
+            if (ctx.extractionBoxSlots.contains(i)) continue;
+            ItemStack stack = mc.player.getInventory().getItem(i);
+            if (!ItemUtil.isShulkerBox(stack)) continue;
+            // 不能把材料存进我们正要收集的那种盒子里。
+            if (isOnMissingList(stack, ctx)) continue;
+            // 盒内装着缺失材料的（杂盒），留着待会儿开盒取物，也别拿来装东西：
+            // 混在一起之后，取物流程就得先把我们刚存进去的材料再拿出来一次。
+            if (ctx.boxContainsWantedItem(stack)) continue;
+            // 「满没满」按打开后的界面判断，不看物品 NBT——NBT 可能是过期的。
+            shulkerSlotIndex = i;
             state = useQuickShulkerMode ? StorageState.QUICK_OPEN : StorageState.FINDING_POSITION;
             return;
         }
@@ -346,50 +317,6 @@ public class ShulkerBoxAccess {
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_box");
         terminalResult = StorageResult.FAILED;
         active = false;
-    }
-
-    /**
-     * @param storable        背包里可存的材料
-     * @param requireCanTake  true = 只挑"确实装得下其中至少一种"的盒子
-     * @param allowWithWanted true = 盒内装着本次要收集的材料也可以拿来存
-     * @return 可用的盒子所在物品栏槽位；没有则 -1
-     */
-    private int findStorageBox(Minecraft mc, GatherContext ctx, java.util.Set<Item> storable,
-                               boolean requireCanTake, boolean allowWithWanted) {
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (knownFullSlots.contains(i)) continue;
-            // 本次为"开盒取物"搬出来的杂盒不许被当成存储盒，否则刚取出来的材料又被装回去。
-            if (ctx.extractionBoxSlots.contains(i)) continue;
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (!ItemUtil.isShulkerBox(stack)) continue;
-            // 盒子本身也是备货目标时，不能拿它当收纳盒。
-            if (isStorableMaterial(stack, ctx)) continue;
-            if (!allowWithWanted && ctx.boxContainsWantedItem(stack)) continue;
-            if (requireCanTake && !canTakeAny(stack, storable)) continue;
-            return i;
-        }
-        return -1;
-    }
-
-    /** @return 这个盒子装不装得下 {@code storable} 里的至少一种材料。 */
-    private static boolean canTakeAny(ItemStack box, java.util.Set<Item> storable) {
-        if (ItemUtil.shulkerBoxHasEmptySlot(box)) return true;   // 有空槽：任何材料都放得进
-        for (Item item : storable) {
-            if (ItemUtil.shulkerBoxHasRoomFor(box, item)) return true;
-        }
-        return false;
-    }
-
-    /** @return 背包里"值得存进潜影盒"的材料种类（去重后）。 */
-    private java.util.Set<Item> storableItems(Minecraft mc, GatherContext ctx) {
-        java.util.Set<Item> items = new java.util.HashSet<>();
-        if (mc.player == null) return items;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack stack = mc.player.getInventory().getItem(i);
-            if (stack.isEmpty() || ItemUtil.isShulkerBox(stack)) continue;
-            if (isStorableMaterial(stack, ctx)) items.add(stack.getItem());
-        }
-        return items;
     }
 
     /**
@@ -608,13 +535,7 @@ public class ShulkerBoxAccess {
         AbstractContainerMenu handler = mc.player.containerMenu;
 
         // 背包满了就先收手：盒子界面关掉之后，主状态机会走"背包已满"（存盒/提示停机）。
-        //
-        // 例外：合成前"把材料从盒里取出来"这一趟（extractTargets 有明确目标）只按"真的一格不剩"判断——
-        // 它本来就是在为合成准备散装材料，按满包阈值提前收手会让合成永远等不到材料。
-        boolean full = extractTargets.isEmpty()
-                ? PlayerUtil.isInventoryFull(mc.player)
-                : PlayerUtil.isInventoryStrictlyFull(mc.player);
-        if (full) {
+        if (PlayerUtil.isInventoryFull(mc.player)) {
             mc.player.closeContainer();
             abortWith(mc, StorageResult.INVENTORY_FULL);
             return;
@@ -698,16 +619,19 @@ public class ShulkerBoxAccess {
 
         if (isShulkerBoxFull()) {
             mc.player.closeContainer();
-            // 记"已知满盒"要等盒子回到背包之后按实际落点记（见 doWaitPickup / doClose）：
-            // 放置模式下 shulkerSlotIndex 是它原来那个槽位，挖回来未必还落在那里。
-            boxUnusable = true;
+            knownFullSlots.add(shulkerSlotIndex);
             if (!anyItemsTransferred) {
-                // 一个都没存进去：说一声。照样走 CLOSING 把盒子挖回来——
-                // 早先这里直接回去挑下一个盒子，刚放下的这个就丢在世界上没人管了。
-                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_box_full");
+                // 这里塞不下了；只有还有别的盒子值得试才绕回去。
+                if (!hasCandidateShulker(mc, ctx)) {
+                    MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_no_box");
+                    fail(mc);
+                    return;
+                }
+                cooldown = 3;
+                state = StorageState.FINDING_SHULKER;
+                return;
             }
             state = StorageState.CLOSING;
-            cooldown = 3;
             return;
         }
 
@@ -727,7 +651,7 @@ public class ShulkerBoxAccess {
             if (stack.isEmpty()) continue;
             // 潜影盒不能放进潜影盒：原版 ShulkerBoxSlot 会拒绝，点了也白点。
             if (ItemUtil.isShulkerBox(stack)) continue;
-            if (!isStorableMaterial(stack, ctx)) continue;
+            if (!isOnMissingList(stack, ctx)) continue;
 
             try {
                 SlotActionCompat.quickMove(mc, handler.containerId, i);
@@ -744,11 +668,9 @@ public class ShulkerBoxAccess {
             }
         }
 
-        // 一整圈都没挪进任何材料：这个盒子对背包里现有的材料没用了（各堆都满、或放不进去），
-        // 记进 knownFullSlots 免得下个周期又在它身上开开关关。同样等盒子回到背包再按落点记。
-        if (!anyItemsTransferred) {
-            boxUnusable = true;
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_box_no_room");
+        // 一个没有空格的盒子也接不了新的物品类型。
+        if (!hasEmptySlotInShulkerBox()) {
+            knownFullSlots.add(shulkerSlotIndex);
         }
         state = StorageState.CLOSING;
         cooldown = 3;
@@ -764,9 +686,6 @@ public class ShulkerBoxAccess {
             InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
             if (operation == Operation.EXTRACT) {
                 finishExtraction(mc, ctx, shulkerSlotIndex);
-            } else if (boxUnusable && shulkerSlotIndex >= 0) {
-                // QuickShulker 模式下盒子没离开过背包，满盒就记在这个槽位上。
-                knownFullSlots.add(shulkerSlotIndex);
             }
             terminalResult = StorageResult.DONE;
             state = StorageState.DONE;
@@ -826,23 +745,15 @@ public class ShulkerBoxAccess {
             // 等于把人家攒的材料连盒送回去。
             if (operation == Operation.EXTRACT && boxesBeforePlace.contains(i)) continue;
 
-            StorageResult result = StorageResult.DONE;
             if (operation == Operation.EXTRACT) {
                 finishExtraction(mc, ctx, i);
-                result = deferredResult;
             } else {
-                // 打开后才发现是满盒（内容过期）：记下它挖回来落在哪个槽位，下次别再挑它；
-                // "已满、没存进去"的提示在上面发现的那一刻就发过了。
-                if (boxUnusable) knownFullSlots.add(i);
-                if (anyItemsTransferred) {
-                    MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_done");
-                }
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_store_done");
             }
             releaseKeys();
             active = false;
             state = StorageState.DONE;
-            terminalResult = result;
-            return result;
+            return StorageResult.DONE;
         }
 
         if (waitTicks > MAX_PICKUP_WAIT_TICKS) {
@@ -869,7 +780,7 @@ public class ShulkerBoxAccess {
     }
 
     /**
-     * @return 物品栏里是否有存储周期真能挪动的东西：非潜影盒、且是投影需要的材料。
+     * @return 物品栏里是否有存储周期真能挪动的东西：非潜影盒、且在缺失材料清单上的物品堆。
      *         开始一个周期前必须查——没有可存的东西时，一个周期会开盒、什么都不挪、关盒、报 DONE，
      *         而依然满着的背包立刻又启动下一个周期，于是无限开关同一个盒子。
      */
@@ -881,19 +792,22 @@ public class ShulkerBoxAccess {
             if (stack.isEmpty()) continue;
             // 盒子不能套盒子，所以潜影盒本身永远不算可存物品。
             if (ItemUtil.isShulkerBox(stack)) continue;
-            if (isStorableMaterial(stack, ctx)) return true;
+            if (isOnMissingList(stack, ctx)) return true;
         }
         return false;
     }
 
-    /** @return 现在找不找得到一个"装得下背包里材料"的盒子（只查询，不产生任何动作）。 */
-    public boolean hasUsableBox(GatherContext ctx) {
-        Minecraft mc = ctx.client;
+    /** @return 是否还有别的盒子值得打开，免得在已知满的盒子之间打转。 */
+    private boolean hasCandidateShulker(Minecraft mc, GatherContext ctx) {
         if (mc.player == null) return false;
-        java.util.Set<Item> storable = storableItems(mc, ctx);
-        if (storable.isEmpty()) return false;
-        // 用最宽松的一档（盒内含本次材料也接受），只看"能不能装下"。
-        return findStorageBox(mc, ctx, storable, true, true) >= 0;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (knownFullSlots.contains(i)) continue;
+            ItemStack stack = mc.player.getInventory().getItem(i);
+            if (!ItemUtil.isShulkerBox(stack)) continue;
+            if (isOnMissingList(stack, ctx)) continue;
+            return true;
+        }
+        return false;
     }
 
     /** 松开本功能按下的所有键。 */
@@ -922,26 +836,8 @@ public class ShulkerBoxAccess {
      * 跳过当前物品继续跑；只有存盒方向才用 {@link StorageResult#FAILED} 整轮停下。
      */
     private void abortWith(Minecraft mc, StorageResult result) {
-        // 模拟模式已经把盒子放在地上了：这时不能直接收工，否则盒子就丢在世界上。
-        // 先转去 CLOSING 把它挖回来，结果记进 deferredResult，捡起来之后再上报。
-        if (operation == Operation.EXTRACT && !useQuickShulkerMode && isBoxStillPlaced(mc)) {
-            releaseKeys();
-            if (mc.player != null) {
-                InventoryCompat.setSelectedSlot(mc.player.getInventory(), prevSelectedSlot);
-            }
-            deferredResult = result;
-            cooldown = 3;
-            state = StorageState.CLOSING;
-            return;
-        }
         terminalResult = result;
         abort(mc);
-    }
-
-    /** @return 我们放下的那个盒子现在还在世界上（还没挖回来）。 */
-    private boolean isBoxStillPlaced(Minecraft mc) {
-        if (placedPos == null || mc.level == null) return false;
-        return mc.level.getBlockState(placedPos).getBlock() instanceof ShulkerBoxBlock;
     }
 
     /**
@@ -1045,19 +941,24 @@ public class ShulkerBoxAccess {
     }
 
     /**
-     * @return 这堆物品值不值得存进潜影盒：本次要收集的（缺失清单 / 追溯中的子材料）、
-     *         投影材料清单上的（含已经备齐的——作者确认：备齐了更该收进盒子，别白占背包格）、
-     *         本轮追溯碰过的（合成失败时留在背包里的那些），以及
-     *         {@link MaterialMemory} 里记着的历史材料（上一轮留下、这一轮清单上又没有的原材料）。
-     *
-     * <p>同一个判定也用来排除"不能拿来当收纳盒"的潜影盒本身。
+     * @return 这个物品是不是本次采集要的东西（缺失清单，或原材料追溯正在追的子材料）。
+     *         存盒时用它排除"不能拿来当收纳盒"的东西，同时也决定哪些材料值得存。
      */
-    private boolean isStorableMaterial(ItemStack stack, GatherContext ctx) {
+    private boolean isOnMissingList(ItemStack stack, GatherContext ctx) {
         Item item = stack.getItem();
-        return ctx.isWantedNow(item)
-                || ctx.requiredMaterials.contains(item)
-                || ctx.extraStorableItems.contains(item)
-                || MaterialMemory.isKnown(item);
+        // 追溯碰过的材料也算：合成失败时它们会留在背包里，自动存盒该把它们收走。
+        return ctx.isWantedNow(item) || ctx.extraStorableItems.contains(item);
+    }
+
+    /** @return 打开的盒子里是否还有完全空的格，也就是能不能接新的物品类型。 */
+    private boolean hasEmptySlotInShulkerBox() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.player.containerMenu == null) return false;
+        for (int i = 0; i < BOX_SLOT_COUNT; i++) {
+            Slot slot = mc.player.containerMenu.getSlot(i);
+            if (slot == null || !slot.hasItem()) return true;
+        }
+        return false;
     }
 
     private boolean isShulkerBoxFull() {
@@ -1072,7 +973,7 @@ public class ShulkerBoxAccess {
     }
 
     private Direction getNearestFace(Minecraft mc, BlockPos pos) {
-        return BlockUtil.nearestFace(mc.player.getEyePosition(), pos);
+        return ContainerOpener.nearestFace(mc.player.getEyePosition(), pos);
     }
 
     private void faceToward(Minecraft mc, Vec3 target) {

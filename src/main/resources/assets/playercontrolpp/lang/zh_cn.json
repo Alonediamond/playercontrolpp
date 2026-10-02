@@ -97,7 +97,6 @@
   "playercontrolpp.message.baritone.completed": "[PlayerControl++] 备货完毕，如还有缺失材料请自行收集。",
   "playercontrolpp.message.baritone.no_hud": "[PlayerControl++] 请开启投影的材料清单信息HUD。",
   "playercontrolpp.message.baritone.inventory_full": "[PlayerControl++] 背包已满，请先清理。",
-  "playercontrolpp.message.baritone.inventory_threshold": "[PlayerControl++] 背包已达到满包阈值，且没有可存入潜影盒的材料，已停止。",
   "playercontrolpp.message.baritone.pathing_stuck": "[PlayerControl++] 寻路因某些原因被卡住，请更换位置重试。",
   "playercontrolpp.message.baritone.world_change": "[PlayerControl++] 材料备货已停止（世界切换）",
   "playercontrolpp.message.baritone.item_missing": "[PlayerControl++] 缓存中缺少 %s，请自行准备。",
@@ -128,7 +127,6 @@
   "playercontrolpp.message.baritone.raw_material_crafting": "[PlayerControl++] 正在合成 %s",
   "playercontrolpp.message.baritone.raw_material_no_workstation": "[PlayerControl++] 背包中没有可用的工作台/切石机（或未安装 QuickShulker），只收集原材料不做合成。",
   "playercontrolpp.message.baritone.raw_material_craft_failed": "[PlayerControl++] 合成 %s 失败，只收集原材料。",
-  "playercontrolpp.message.baritone.raw_material_ingredients_blocked": "[PlayerControl++] 合成 %s 的材料在物品栏里凑不出一次合成（可能都锁在打不开的潜影盒里），只收集原材料。",
   "playercontrolpp.message.baritone.raw_material_no_recipe": "[PlayerControl++] 找不到 %s 的可用配方（熔炼/锻造等暂不支持），已跳过该材料。",
   "playercontrolpp.message.baritone.raw_material_done": "[PlayerControl++] %s 已通过原材料合成补齐。",
 
@@ -180,8 +178,6 @@
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] 背包已满 — 正在将材料存入潜影盒...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] 潜影盒存储完成，继续备货。",
   "playercontrolpp.message.baritone.shulker_store_skipped": "[PlayerControl++] 背包中没有可用潜影盒，材料暂留背包。",
-  "playercontrolpp.message.baritone.shulker_box_full": "[PlayerControl++] 该潜影盒已满，没有存入材料（盒子已收回背包）。",
-  "playercontrolpp.message.baritone.shulker_box_no_room": "[PlayerControl++] 该潜影盒放不下背包里的材料，换一个盒子。",
   "playercontrolpp.message.baritone.shulker_no_box": "[PlayerControl++] 背包中未找到可用潜影盒。已停止。",
   "playercontrolpp.message.baritone.shulker_no_position": "[PlayerControl++] 未找到合法的潜影盒放置位置。已停止。",
   "playercontrolpp.message.baritone.shulker_mine_failed": "[PlayerControl++] 挖掘潜影盒失败。已停止。",
@@ -248,10 +244,6 @@
   "playercontrolpp.config.settings.name.playbackPositionCorrection": "回放位置修正",
   "playercontrolpp.config.settings.pretty_name.playbackPositionCorrection": "回放位置修正",
   "playercontrolpp.config.settings.comment.playbackPositionCorrection": "回放偏离录制路径超过 2 格时，把玩家拉回关键帧位置。\n默认关闭：回放复现的是按键输入而非坐标，产生偏移属于正常现象；直接改写客户端坐标会与服务端权威位置不一致，可能被反作弊判定为飞行。建议仅在单人世界开启。",
-
-  "playercontrolpp.config.settings.name.inventoryFullThreshold": "满包阈值",
-  "playercontrolpp.config.settings.pretty_name.inventoryFullThreshold": "满包阈值",
-  "playercontrolpp.config.settings.comment.inventoryFullThreshold": "备货时物品栏（含快捷栏）占用到多少格就算「满」，触发材料自动存入潜影盒，给后面的取料与合成留出空位。\n范围 9~36，默认 27（留 9 格）；36 = 只有一格不剩才算满。",
 
   "playercontrolpp.message.playback.drift": "[PlayerControl++] 回放已明显偏离录制路径（地形或延迟导致）。若需要自动拉回，请在设置中开启「回放位置修正」。",
   "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] 录制索引读取失败，已另存为 index.json.corrupt-N，录制文件本身未受影响。",

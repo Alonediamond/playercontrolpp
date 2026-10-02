@@ -1,6 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
-import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -27,15 +27,6 @@ public class GatherContext {
 
     // 材料清单数据
     public final List<MaterialItemEntry> missingItems = new ArrayList<>();
-
-    /**
-     * 投影材料清单上的全部物品，含已经备齐的。
-     *
-     * <p>{@link #missingItems} 只装"还缺"的；自动存盒要按这一份判断"背包里这堆值不值得收进潜影盒"
-     * ——作者确认：备齐的材料更该收进盒子，别白占着背包格子。
-     */
-    public final Set<Item> requiredMaterials = new HashSet<>();
-
     public int currentItemIndex;
     public Item currentTargetItem;
     public int targetNeededTotal;
@@ -150,7 +141,7 @@ public class GatherContext {
      *
      * <p>原材料追溯派出去的子材料不在清单上，但容器开箱判据、取物匹配、整盒判断、
      * 存盒排除全都要把它当成目标，否则容器会被判成"没有需要的东西"而被反复开关
-     * （v1.8.1 修复的实际故障）。清单为空、或当前目标就在清单上时直接返回清单本身，
+     * （v1.9 修复的实际故障）。清单为空、或当前目标就在清单上时直接返回清单本身，
      * 不额外分配。
      */
     public java.util.List<MaterialItemEntry> wantedEntries() {
@@ -224,7 +215,6 @@ public class GatherContext {
         state = AutoMaterialGatherer.State.IDLE;
 
         missingItems.clear();
-        requiredMaterials.clear();
         currentItemIndex = 0;
         currentTargetItem = null;
         targetNeededTotal = 0;

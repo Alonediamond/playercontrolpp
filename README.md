@@ -47,14 +47,14 @@ PlayerControl++ 的单一代码库多版本构建工程。一份源码同时构�
 
 ```
 build/libs/
-├── PlayerControlpp-v1.8.1-mc1.21.1.jar
-├── PlayerControlpp-v1.8.1-mc1.21.4.jar
-├── PlayerControlpp-v1.8.1-mc1.21.6.jar
-├── PlayerControlpp-v1.8.1-mc1.21.8.jar
-├── PlayerControlpp-v1.8.1-mc1.21.10.jar
-├── PlayerControlpp-v1.8.1-mc1.21.11.jar
-├── PlayerControlpp-v1.8.1-mc26.1.2.jar
-└── PlayerControlpp-v1.8.1-mc26.2.jar
+├── PlayerControlpp-v1.8-mc1.21.1.jar
+├── PlayerControlpp-v1.8-mc1.21.4.jar
+├── PlayerControlpp-v1.8-mc1.21.6.jar
+├── PlayerControlpp-v1.8-mc1.21.8.jar
+├── PlayerControlpp-v1.8-mc1.21.10.jar
+├── PlayerControlpp-v1.8-mc1.21.11.jar
+├── PlayerControlpp-v1.8-mc26.1.2.jar
+└── PlayerControlpp-v1.8-mc26.2.jar
 ```
 
 环境变量 `BUILD_RELEASE=false` 会给版本号加上 `-SNAPSHOT` / `+build.<N>` 后缀。
@@ -78,9 +78,7 @@ build/libs/
     │   ├── integration/       # ★ 可选联动 stub（默认空实现），见下节
     │   ├── mixin/             # ★ MixinPlugin + compat/<模组>/ 直连实现，见下节
     │   ├── input/SimulatedInput.java   # ★ 模拟按键的唯一写入点
-    │   ├── feature/           # 功能模块：ClientFeature/FeatureRegistry + movement/interact/cache/
-    │   │                      #   waterfill/restock 各功能包，备货在 automaterial/（再分 material/
-    │   │                      #   container/storage/craft/path 五个职责子包）
+    │   ├── feature/ClientFeature.java  # ★ 功能生命周期接口 + FeatureRegistry
     │   └── …                  # 其余为与版本无关的业务代码
     └── resources/
         ├── fabric.mod.json    # 用 ${…} 占位符，由 processResources 按版本填充

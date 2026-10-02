@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.restock;
+package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.config.Configs;
 import net.minecraft.core.BlockPos;

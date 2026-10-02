@@ -97,7 +97,6 @@
   "playercontrolpp.message.baritone.completed": "[PlayerControl++] Material gathering complete. Please collect remaining materials manually if needed.",
   "playercontrolpp.message.baritone.no_hud": "[PlayerControl++] Please enable the Material List Info HUD in Litematica first.",
   "playercontrolpp.message.baritone.inventory_full": "[PlayerControl++] Inventory is full. Please clear some space first.",
-  "playercontrolpp.message.baritone.inventory_threshold": "[PlayerControl++] Inventory reached the full threshold and has no material to store into shulker boxes. Stopped.",
   "playercontrolpp.message.baritone.pathing_stuck": "[PlayerControl++] Pathfinding stuck or failed. Please change position and try again.",
   "playercontrolpp.message.baritone.world_change": "[PlayerControl++] Material Gathering Stopped (world changed)",
   "playercontrolpp.message.baritone.item_missing": "[PlayerControl++] Item '%s' not found in cached chests. Please prepare manually.",
@@ -128,7 +127,6 @@
   "playercontrolpp.message.baritone.raw_material_crafting": "[PlayerControl++] Crafting %s",
   "playercontrolpp.message.baritone.raw_material_no_workstation": "[PlayerControl++] No crafting table/stonecutter available (or QuickShulker is missing); only gathering raw materials without crafting.",
   "playercontrolpp.message.baritone.raw_material_craft_failed": "[PlayerControl++] Failed to craft %s; only gathering raw materials.",
-  "playercontrolpp.message.baritone.raw_material_ingredients_blocked": "[PlayerControl++] The ingredients for %s cannot be laid out from the inventory (they may be locked inside shulker boxes that cannot be opened); collecting raw materials only.",
   "playercontrolpp.message.baritone.raw_material_no_recipe": "[PlayerControl++] No usable recipe for %s (smelting/smithing are not supported yet); skipping this material.",
   "playercontrolpp.message.baritone.raw_material_done": "[PlayerControl++] %s has been completed by crafting from raw materials.",
 
@@ -180,8 +178,6 @@
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] Inventory full — storing materials to shulker box...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] Shulker box storage complete, resuming gathering.",
   "playercontrolpp.message.baritone.shulker_store_skipped": "[PlayerControl++] No usable shulker box in the inventory; the materials stay in your inventory.",
-  "playercontrolpp.message.baritone.shulker_box_full": "[PlayerControl++] That shulker box is full; nothing was stored (the box was picked back up).",
-  "playercontrolpp.message.baritone.shulker_box_no_room": "[PlayerControl++] That shulker box has no room for the materials in your inventory; trying another box.",
   "playercontrolpp.message.baritone.shulker_no_box": "[PlayerControl++] No usable shulker box found in inventory. Stopped.",
   "playercontrolpp.message.baritone.shulker_no_position": "[PlayerControl++] No valid position to place shulker box. Stopped.",
   "playercontrolpp.message.baritone.shulker_mine_failed": "[PlayerControl++] Failed to mine shulker box. Stopped.",
@@ -248,10 +244,6 @@
   "playercontrolpp.config.settings.name.playbackPositionCorrection": "Playback Position Correction",
   "playercontrolpp.config.settings.pretty_name.playbackPositionCorrection": "Playback Position Correction",
   "playercontrolpp.config.settings.comment.playbackPositionCorrection": "Teleport the player back onto the recorded path when playback drifts more than 2 blocks.\nOFF by default: playback reproduces input, not positions, so some drift is normal. Correcting it rewrites the client position, which disagrees with the server and may look like flying to anti-cheat. Recommended for single-player only.",
-
-  "playercontrolpp.config.settings.name.inventoryFullThreshold": "Inventory Full Threshold",
-  "playercontrolpp.config.settings.pretty_name.inventoryFullThreshold": "Inventory Full Threshold",
-  "playercontrolpp.config.settings.comment.inventoryFullThreshold": "How many occupied inventory slots (main inventory + hotbar) count as a full inventory during auto-gathering. Reaching it stores materials into shulker boxes, leaving room for fetching ingredients and crafting.\nRange 9-36, default 27 (keeps 9 slots free); 36 = only when nothing is free.",
 
   "playercontrolpp.message.playback.drift": "[PlayerControl++] Playback has drifted well off the recorded path (terrain or latency). Enable Playback Position Correction in settings if you want it snapped back.",
   "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] The recording index could not be read and has been set aside as index.json.corrupt-N. The recording files themselves are untouched.",

@@ -1,11 +1,8 @@
-package com.alonediamond.playercontrolpp.feature.cache;
+package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.feature.ClientFeature;
-import com.alonediamond.playercontrolpp.feature.interact.ContainerGuiSuppressor;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
-import com.alonediamond.playercontrolpp.util.BlockUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
@@ -365,7 +362,7 @@ public class AutoCacheNearbyContainersFeature {
     private static void openContainer(Minecraft mc, BlockPos target) {
         if (mc.player == null || mc.gameMode == null) return;
 
-        Direction face = BlockUtil.nearestFace(mc.player.getEyePosition(), target);
+        Direction face = getNearestFace(mc.player.getEyePosition(), target);
         Vec3 hitPos = new Vec3(
                 target.getX() + 0.5 + face.getStepX() * 0.5,
                 target.getY() + 0.5 + face.getStepY() * 0.5,
@@ -376,6 +373,20 @@ public class AutoCacheNearbyContainersFeature {
         mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
     }
 
+    private static Direction getNearestFace(Vec3 playerEye, BlockPos target) {
+        Vec3 center = Vec3.atCenterOf(target);
+        double dx = playerEye.x - center.x;
+        double dy = playerEye.y - center.y;
+        double dz = playerEye.z - center.z;
+
+        double ax = Math.abs(dx);
+        double ay = Math.abs(dy);
+        double az = Math.abs(dz);
+
+        if (ax >= ay && ax >= az) return dx > 0 ? Direction.EAST : Direction.WEST;
+        if (ay >= ax && ay >= az) return dy > 0 ? Direction.UP : Direction.DOWN;
+        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
+    }
 
     private static void closeGuiIfOpen(Minecraft mc) {
         if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
