@@ -99,7 +99,15 @@ if (mcVersion >= 260000) {
 JavaVersion MIXIN_COMPATIBILITY_LEVEL = JAVA_COMPATIBILITY
 
 loom {
-	def commonVmArgs = ['-Dmixin.debug.export=true', '-Dmixin.debug.countInjections=true']
+	// 切勿加 '-Dmixin.debug.countInjections=true'（= Mixin 的 MixinEnvironment.Option.DEBUG_INJECTORS）。
+	// 它会把 @Redirect/@Inject 的"期望命中数(expect)"校验变成硬性报错：
+	//   InvalidInjectionException: ... expected 1 invocation(s) but 0 succeeded. Scanned 0 target(s).
+	// 而 Baritone 等第三方模组里存在刻意可选的注入器，例如 Baritone 的
+	// @Redirect(method="aiStep", at=@At(value="INVOKE", target="Lnet/minecraft/client/player/LocalPlayer;mayFly()Z"))
+	// onMayFlyNeoforge 只针对 NeoForge，在 Fabric 上永远 0 命中，正常环境靠
+	// @Group(name="mayFly", min=1, max=1)（成员 requiredCallbackCount=0）容忍；
+	// 一旦开启该 debug 选项，游戏会在应用 Baritone 的 Mixin 时直接崩溃。
+	def commonVmArgs = ['-Dmixin.debug.export=true']
 	runConfigs.configureEach {
 		// to make sure it generates all "Minecraft Client (:subproject_name)" applications
 		ideConfigGenerated = true

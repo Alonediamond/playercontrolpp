@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.InputCompat;
 import com.alonediamond.playercontrolpp.compat.PlayerCompat;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
@@ -8,14 +9,17 @@ import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -313,23 +317,24 @@ public class TaskStateMachine {
     }
 
     private void putItemInInventory(GatherContext ctx) {
-        Inventory inventory = ctx.client.player.getInventory();
-        List<Integer> indexes = new ArrayList<>();
+        LocalPlayer player = ctx.client.player;
+        Inventory inventory = player.getInventory();
+        List<Slot> indexes = new ArrayList<>();
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             ItemStack item = inventory.getItem(i);
             if (ctx.neededItems.contains(item.getItem())) {
-                indexes.add(i);
+                indexes.add(player.inventoryMenu.getSlot(i));
             }
         }
         int times = 0;
-        for (Integer index : indexes) {
+        for (Slot slot : indexes) {
             if (times >= 27) {
                 break;
             }
-            SlotActionCompat.quickMove(ctx.client,ctx.client.player.containerMenu.containerId,index);
+            SlotActionCompat.quickMove(ctx.client, player.containerMenu.containerId, slot.index);
             times++;
         }
-        ctx.client.player.closeContainer();
+        player.closeContainer();
         setState(State.NEXT_ITEM);
     }
 
