@@ -3,17 +3,14 @@ package com.alonediamond.playercontrolpp.feature.automaterial.material;
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
-import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
-import com.alonediamond.playercontrolpp.feature.automaterial.MaterialMemory;
-import com.alonediamond.playercontrolpp.feature.automaterial.TaskStateMachine;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.item.Item;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -43,32 +40,20 @@ public class MaterialAnalyzer {
         this.litematlist = litematlist;
     }
 
-    public void analyze(GatherContext ctx, TaskStateMachine tsm) {
+    public void analyze(AutoMaterialGatherer amg) {
         try {
-            ctx.requiredMaterials.clear();
-            List<MaterialItemEntry> missing = readMissingMaterials(ctx, tsm);
+            List<MaterialItemEntry> missing = readMissingMaterials(amg);
             if (missing == null) return;
 
-            ctx.missingItems.clear();
-            ctx.missingItems.addAll(missing);
+            amg.missingItems.clear();
+            amg.missingItems.addAll(missing);
 
             // 需求量最大的排前面：这些最可能需要整盒搬。
-            ctx.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
+            amg.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
 
-            // 清单上出现过的物品都记一份：存盒时"上一轮留下的原材料"就靠这份记忆认出来。
-            for (Item item : ctx.requiredMaterials) {
-                MaterialMemory.remember(item);
-            }
-
-            // 启动时先把手上的材料收进潜影盒（不管背包满没满；没盒子就静默跳过）。
-            // 放在这里而不是等 SEARCHING：后面取料、合成都要在物品栏里腾挪，
-            // 先把散落的材料归拢进盒子，格子才够用。
-            ctx.currentItemIndex = 0;
-            if (tsm.requestStartupStorage()) return;
-
-            if (ctx.missingItems.isEmpty()) {
-                MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.all_materials_ready");
-                tsm.setState(State.COMPLETED);
+            if (amg.missingItems.isEmpty()) {
+                MessageUtil.sendActionBar(amg.mc, "playercontrolpp.message.baritone.all_materials_ready");
+                amg.setState(State.COMPLETED);
                 return;
             }
 
@@ -76,19 +61,22 @@ public class MaterialAnalyzer {
             // 来决定要不要启动存盒的，而在这行之前清单还是空的——那会让存盒开个盒子、什么都不存、
             // 然后死循环。这个顺序还让「背包满但材料已齐」的情况在上面报 COMPLETED，
             // 而不是以「背包已满」停下。
-            if (isInventoryFull(ctx.client)) {
-                tsm.onInventoryFull();
+            if (isInventoryFull(amg.mc)) {
+                //amg.onInventoryFull();
+                amg.setState(State.FAILED);
                 return;
             }
 
-            ctx.currentItemIndex = 0;
-            tsm.setState(State.NEXT_ITEM);
+            //ctx.currentItemIndex = 0;
+            amg.processingItems.clear();
+            amg.processingItems.offer(amg.missingItems.getFirst().item);
+            amg.setState(State.SEARCHING);
 
         } catch (Exception e) {
             Playercontrolpp.LOGGER.warn("Failed to analyse the material list", e);
-            MessageUtil.sendActionBar(ctx.client,
+            MessageUtil.sendActionBar(amg.mc,
                     "playercontrolpp.message.baritone.analyze_error", String.valueOf(e));
-            tsm.setState(State.STOPPED);
+            amg.setState(State.STOPPED);
         }
     }
 
@@ -97,11 +85,11 @@ public class MaterialAnalyzer {
      *
      * @return 缺失条目；{@code null} 表示读不到清单，已经报过原因并停机。
      */
-    private List<MaterialItemEntry> readMissingMaterials(GatherContext ctx, TaskStateMachine tsm) {
+    private List<MaterialItemEntry> readMissingMaterials(AutoMaterialGatherer amg) {
         if (Configs.BaritoneSettings.MATERIAL_LIST_SOURCE.getOptionListValue() == MaterialSource.LITEMATLIST) {
-            return readFromLitematList(ctx, tsm);
+            return readFromLitematList(amg);
         }
-        return readFromLitematica(ctx, tsm);
+        return readFromLitematica(amg);
     }
 
     /**
@@ -111,11 +99,11 @@ public class MaterialAnalyzer {
      * 这条路与「跟随LitematList」也就无从区分——所以检测到接管时直接停机提示，
      * 让玩家在 LitematList 里取消接管，或把数据来源切换成跟随LitematList。
      */
-    private List<MaterialItemEntry> readFromLitematica(GatherContext ctx, TaskStateMachine tsm) {
+    private List<MaterialItemEntry> readFromLitematica(AutoMaterialGatherer amg) {
         Object materialList = litematica.getMaterialList();
         if (materialList == null) {
-            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.no_material_list");
-            tsm.setState(State.STOPPED);
+            MessageUtil.sendActionBar(amg.mc, "playercontrolpp.message.baritone.no_material_list");
+            amg.setState(State.STOPPED);
             return null;
         }
 
@@ -123,30 +111,27 @@ public class MaterialAnalyzer {
         // 投影自身的清单已被接管、无从读取。继续跑只会拿着接管数据冒充「跟随投影」，
         // 所以按玩家「跟随投影」的意图直接停机提示。
         if (!materialList.getClass().getName().startsWith("fi.dy.masa.litematica.")) {
-            MessageUtil.sendActionBar(ctx.client,
+            MessageUtil.sendActionBar(amg.mc,
                     "playercontrolpp.message.baritone.litematlist_took_over");
-            tsm.setState(State.STOPPED);
+            amg.setState(State.STOPPED);
             return null;
         }
 
         // 投影只在自己的 HUD 开着时才维护原生清单。
         if (!litematica.isMaterialListHudVisible()) {
-            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.no_hud");
-            tsm.setState(State.STOPPED);
+            MessageUtil.sendActionBar(amg.mc, "playercontrolpp.message.baritone.no_hud");
+            amg.setState(State.STOPPED);
             return null;
         }
 
         Set<String> globalIgnoreSet = buildGlobalIgnoreSet();
 
         List<MaterialItemEntry> missing = new ArrayList<>();
-        for (LitematicaIntegration.MaterialEntry entry : litematica.getMaterialListEntries(ctx.client.player)) {
+        for (LitematicaIntegration.MaterialEntry entry : litematica.getMaterialListEntries(amg.mc.player)) {
             if (entry.ignored()) continue;
 
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
-
-            // 投影要的材料都记一份（含已经备齐的）：自动存盒据此把背包里的散装材料收进潜影盒。
-            ctx.requiredMaterials.add(entry.stack().getItem());
 
             // 目标量写总量 countMissing；countAvailable 只用来判断这条还缺不缺。
             if (entry.countAvailable() < entry.countMissing()) {
@@ -161,20 +146,20 @@ public class MaterialAnalyzer {
      * 跟随 LitematList：读它上传区域的清单。API 返回前已经完成了替换、忽略与项目聚合，
      * 所以 LitematList 里被忽略的项目天然不会出现在结果里。
      */
-    private List<MaterialItemEntry> readFromLitematList(GatherContext ctx, TaskStateMachine tsm) {
+    private List<MaterialItemEntry> readFromLitematList(AutoMaterialGatherer amg) {
         if (!litematlist.isLoaded()) {
             // 配置还停在 LITEMATLIST 但模组不在（多半是装完配置后把它卸了）。
-            MessageUtil.sendActionBar(ctx.client,
+            MessageUtil.sendActionBar(amg.mc,
                     "playercontrolpp.message.baritone.litematlist_not_loaded");
-            tsm.setState(State.STOPPED);
+            amg.setState(State.STOPPED);
             return null;
         }
 
         List<LitematListIntegration.MaterialEntry> uploaded = litematlist.getMaterialEntries();
         if (uploaded.isEmpty()) {
-            MessageUtil.sendActionBar(ctx.client,
+            MessageUtil.sendActionBar(amg.mc,
                     "playercontrolpp.message.baritone.litematlist_no_list");
-            tsm.setState(State.STOPPED);
+            amg.setState(State.STOPPED);
             return null;
         }
 
@@ -183,9 +168,6 @@ public class MaterialAnalyzer {
         for (LitematListIntegration.MaterialEntry entry : uploaded) {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
-
-            // 上传清单里的材料都记一份（含已经备齐的）：自动存盒据此把背包里的散装材料收进潜影盒。
-            ctx.requiredMaterials.add(entry.stack().getItem());
 
             // missingCount 是 LitematList 按它自己的口径（含潜影盒内持有量）算出的缺口，
             // 这里只拿它过滤已齐的条目；目标量同样写总量 totalCount，口径与投影路径一致。
