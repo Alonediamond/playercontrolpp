@@ -318,20 +318,26 @@ public class TaskStateMachine {
 
     private void putItemInInventory(GatherContext ctx) {
         LocalPlayer player = ctx.client.player;
-        Inventory inventory = player.getInventory();
+        //Inventory inventory = player.getInventory();
         List<Slot> indexes = new ArrayList<>();
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+        for (Slot slot : player.containerMenu.slots) {
+            ItemStack item = slot.getItem();
+            if (ctx.neededItems.contains(item.getItem())) {
+                indexes.add(slot);
+            }
+        }
+        /*for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             ItemStack item = inventory.getItem(i);
             if (ctx.neededItems.contains(item.getItem())) {
                 indexes.add(player.inventoryMenu.getSlot(i));
             }
-        }
+        }*/
         int times = 0;
         for (Slot slot : indexes) {
             if (times >= 27) {
                 break;
             }
-            SlotActionCompat.quickMove(ctx.client, player.containerMenu.containerId, slot.index);
+            SlotActionCompat.quickMove(ctx.client, player.containerMenu.containerId, slot.index/* + 27*/);
             times++;
         }
         player.closeContainer();

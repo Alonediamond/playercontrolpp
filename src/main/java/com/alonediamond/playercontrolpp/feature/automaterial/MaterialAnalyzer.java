@@ -72,10 +72,15 @@ public class MaterialAnalyzer {
             if (QuickShulkerIntegration.getInstance().isLoaded()) {
                 int freeBox = -1;
                 boolean hasNeededItems = false;
+                boolean hasBox = false;
                 for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+                    if (hasNeededItems && freeBox != -1) {
+                        break;
+                    }
                     ItemStack item = ctx.client.player.getInventory().getItem(i);
-                    if (ItemUtil.isShulkerBox(item) && ItemUtil.contentsOf(item).isEmpty()) {
+                    if (ItemUtil.isShulkerBox(item) && ItemUtil.contentsOf(item).isEmpty() && !hasBox) {
                         freeBox = i;
+                        hasBox = true;
                     }else if (ctx.neededItems.contains(item.getItem())){
                         hasNeededItems = true;
                     }
