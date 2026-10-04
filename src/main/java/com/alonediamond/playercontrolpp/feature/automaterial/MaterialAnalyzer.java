@@ -60,16 +60,7 @@ public class MaterialAnalyzer {
                 return;
             }
 
-            // 必须等缺失清单建好之后才检查：onInventoryFull() 是靠「身上有没有缺失清单里的材料」
-            // 来决定要不要启动存盒的，而在这行之前清单还是空的——那会让存盒开个盒子、什么都不存、
-            // 然后死循环。这个顺序还让「背包满但材料已齐」的情况在上面报 COMPLETED，
-            // 而不是以「背包已满」停下。
-            if (isInventoryFull(ctx.client)) {
-                tsm.onInventoryFull();
-                return;
-            }
-
-            if (QuickShulkerIntegration.getInstance().isLoaded()) {
+            if (QuickShulkerIntegration.getInstance().isLoaded() && Configs.BaritoneSettings.AUTO_STORE_TO_SHULKER.getBooleanValue()) {
                 int freeBox = -1;
                 boolean hasNeededItems = false;
                 boolean hasBox = false;
@@ -90,6 +81,15 @@ public class MaterialAnalyzer {
                     ctx.state = State.INVENTORY;
                     return;
                 }
+            }
+
+            // 必须等缺失清单建好之后才检查：onInventoryFull() 是靠「身上有没有缺失清单里的材料」
+            // 来决定要不要启动存盒的，而在这行之前清单还是空的——那会让存盒开个盒子、什么都不存、
+            // 然后死循环。这个顺序还让「背包满但材料已齐」的情况在上面报 COMPLETED，
+            // 而不是以「背包已满」停下。
+            if (isInventoryFull(ctx.client)) {
+                tsm.onInventoryFull();
+                return;
             }
 
             ctx.currentItemIndex = 0;

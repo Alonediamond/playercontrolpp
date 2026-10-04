@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.RegistryCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
@@ -17,10 +18,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * 「材料备货追溯原材料并合成」的执行器。
@@ -46,15 +44,6 @@ public class RawMaterialTask {
     private static final int DEFAULT_DEPTH = 5;
 
     /**
-     * 挖矿时"长时间一无所获"的兜底 tick 数。
-     *
-     * <p>作者确认过不需要超时：Baritone 挖够、无路可走、已无已知位置都会自己收工。
-     * 这条兜底只针对"一直在挖、背包里那个物品却始终不涨"的情况（工具不对、方块不掉该物品……），
-     * 到点就放弃，免得整轮备货卡在挖掘上。期间只要数量涨过一次就重新计时。
-     */
-    //private static final int MINE_STALL_TICKS = 1200;
-
-    /**
      * 同一层合成前最多开几次盒子取料。
      *
      * <p>子材料可能各自被自动存盒（背包满时），原则上每个都值得取一次；
@@ -62,22 +51,37 @@ public class RawMaterialTask {
      */
     private static final int MAX_UNPACKS_PER_FRAME = 4;
 
-    /** 计划里的一帧：把 {@code item} 从它的子材料做出 {@code need} 个。 */
+    /**
+     * 计划里的一帧：把 {@code item} 从它的子材料做出 {@code need} 个。
+     *
+     * <p>{@code need} 恒不超过物品的堆叠上限：一帧就是"一批"。顶层物品的缺口按堆叠上限
+     * 切成若干批（整组在前、余数在后）；往下分解出来的子材料同样切段。同一批分解出来的
+     * 若干分帧共用一个 {@code parent}，只有最后一段的 {@code advanceParent} 为 true——
+     * 它最后弹出，由它把父帧的 {@code nextChild} 往前推一格，父帧才不会把"一个子材料"
+     * 数成好几次。
+     */
     private static final class Frame {
         final Item item;
         final RawNode node;
+        /** 这一批要做多少个，恒 ≤ 物品堆叠上限。 */
         final int need;
-        /** 顶层物品：它的目标是"补上清单缺口"，而不是"额外做出 need 个供上层消耗"。 */
-        final boolean root;
+        /** 绝对终点：持有量到它就收工（顶层＝清单需求总量；子材料＝清单预留量＋这一批要消耗的量）。 */
+        final int targetTotal;
+        /** null = 顶层物品的批次；非 null = 从父帧某个子材料分解出来的。 */
+        final Frame parent;
+        /** 弹出时是否推进父帧：同一个子材料切成多段时，只有最后一段负责推进。 */
+        final boolean advanceParent;
         int nextChild;
         /** 为这一帧开过几次盒子取料。每个子材料最多各一次，且总数有上限，避免来回开关盒子。 */
         int unpackAttempts;
 
-        Frame(Item item, RawNode node, int need, boolean root) {
+        Frame(Item item, RawNode node, int need, int targetTotal, Frame parent, boolean advanceParent) {
             this.item = item;
             this.node = node;
             this.need = need;
-            this.root = root;
+            this.targetTotal = targetTotal;
+            this.parent = parent;
+            this.advanceParent = advanceParent;
         }
     }
 
@@ -172,7 +176,12 @@ public class RawMaterialTask {
             return true;
         }
 
-        this.frames.push(new Frame(item, root, need, true));
+        int total = absoluteTarget(ctx, item, need, true);     // 顶层：清单需求总量（≥ gap）
+        // 一组一组地做：把缺口按堆叠上限切成若干批（整组在前、余数在后）压进计划栈。
+        // 这样一次只为"一组"备料——需要 10 组活塞时，不会把几十组原材料一次塞进背包，
+        // 更不会因为背包放不下而卡死在"取不出来"上。
+        int batches = pushBatches(item, root, need, total, null);
+        log("trace {} need={} target={} batches={}", name(item), need, total, batches);
         this.stage = Stage.GATHER;
         MessageUtil.sendActionBar(ctx.client,
                 "playercontrolpp.message.baritone.raw_material_start", name(item));
@@ -258,6 +267,13 @@ public class RawMaterialTask {
             return;
         }
 
+        // 这一批的目标已经达到（别的帧顺手做了出来、或玩家自己补上了）：直接收工。
+        // 否则会拿着已经满足的数量再开一次工作台，白摆一次料。
+        if (ItemUtil.countEverywhere(ctx.client.player, frame.item) >= frame.targetTotal) {
+            popFrame(ctx, tsm);
+            return;
+        }
+
         List<RawNode> children = frame.node.children();
         while (frame.nextChild < children.size()) {
             RawNode childNode = children.get(frame.nextChild);
@@ -311,8 +327,13 @@ public class RawMaterialTask {
     private void startCraft(GatherContext ctx, TaskStateMachine tsm, Frame frame) {
         remember(ctx, frame.item);
         Item input = firstChildItem(frame.node);
-        int target = absoluteTarget(ctx, frame.item, frame.need, frame.root);
-
+        int held = ItemUtil.countEverywhere(ctx.client.player, frame.item);
+        if (held >= frame.targetTotal) {           // 收集/取料这一圈里已经凑够了，别再开站
+            popFrame(ctx, tsm);
+            return;
+        }
+        // 只做"这一批"：到 held + need 就收手；targetTotal 是绝对终点（含清单预留量），封顶。
+        int target = Math.min(frame.targetTotal, held + frame.need);
         // 合成消耗的是散装材料。子材料有可能在背包满时被自动存进了潜影盒，
         // 这时候先开盒把它们取出来，否则服务端摆料会因为"物品栏里没有"而失败。
         BoxedIngredient boxed = findBoxedIngredient(ctx, frame);
@@ -418,14 +439,39 @@ public class RawMaterialTask {
         return false;
     }
 
-    private void popFrame(GatherContext ctx, TaskStateMachine tsm) {
-        this.frames.poll();
-        if (this.frames.isEmpty()) {
-            finish(ctx, tsm);
-            return;
+    /**
+     * 把 {@code need} 个物品按它的堆叠上限切成若干批压进计划栈，一批 ≤ 一组。
+     *
+     * <p>先切段、再从后往前压：第一段最后压入、位于栈顶最先执行，最后一段最后弹出。
+     * 同一批分解出来的若干分帧共用一个 {@code parent}，只由最后一段
+     * （{@code advanceParent = true}）负责推进父帧的游标。
+     *
+     * @param targetTotal 这些帧共同的绝对终点（顶层＝清单需求总量；子材料＝预留量＋要消耗的量）
+     * @param parent      null = 顶层物品的批次；非 null = 某个帧的子材料向下分解
+     * @return 切出来的批次数（供日志用）
+     */
+    private int pushBatches(Item item, RawNode node, int need, int targetTotal, Frame parent) {
+        int maxStack = Math.max(1, item.getDefaultMaxStackSize());
+        int count = (Math.max(1, need) + maxStack - 1) / maxStack;
+        int[] chunks = new int[count];
+        int remaining = Math.max(1, need);
+        for (int i = 0; i < count; i++) {
+            chunks[i] = Math.min(maxStack, remaining);
+            remaining -= chunks[i];
         }
-        Frame parent = this.frames.peek();
-        if (parent != null) parent.nextChild++;
+        for (int i = count - 1; i >= 0; i--) {
+            this.frames.push(new Frame(item, node, chunks[i], targetTotal, parent,
+                    parent != null && i == count - 1));
+        }
+        return count;
+    }
+
+    private void popFrame(GatherContext ctx, TaskStateMachine tsm) {
+        Frame done = this.frames.poll();
+        if (this.frames.isEmpty()) { finish(ctx, tsm); return; }
+        // 只有父子关系（分解出来的子材料）才推进父帧游标，顶层批次之间互不相干；
+        // 一个子材料切成多段时，只有最后一段负责推进——前面几段弹完，父帧要原地等。
+        if (done != null && done.advanceParent && done.parent != null) done.parent.nextChild++;
         this.stage = Stage.GATHER;
     }
 
@@ -506,7 +552,17 @@ public class RawMaterialTask {
             return;
         }
         if (node != null && !node.children().isEmpty() && isSupportedRecipe(node.recipeType())) {
-            this.frames.push(new Frame(item, node, this.dispatchedNeed, false));
+            Frame parent = this.frames.peek();      // 正在等的那个帧（它的子材料失败了）
+            if (parent == null) {
+                // 计划栈空着却还有采集在跑，只能是状态错乱：按拿不到收场，别把帧悬在那儿。
+                failChain(ctx, tsm, item);
+                return;
+            }
+            // 子材料也一组一组地做：这一批要的量同样按堆叠上限切段，每段自己凑料、自己合成，
+            // 最后一段弹出时才把父帧的这个子材料算作到手。
+            int batches = pushBatches(item, node, this.dispatchedNeed,
+                    absoluteTarget(ctx, item, this.dispatchedNeed, false), parent);
+            log("descend {} need={} batches={}", name(item), this.dispatchedNeed, batches);
             this.stage = Stage.GATHER;
             return;
         }
@@ -567,6 +623,14 @@ public class RawMaterialTask {
             this.baritone.cancelMining();
             afterGatherFailed(ctx, tsm, item, false);
         }*/
+    }
+
+    /**
+     * 计划推进的日志：{@code [raw]} 前缀，和合成控制器的 {@code [craft]} 一起看，
+     * 能看出"这一批做到哪、下一批还差不差料"。
+     */
+    private static void log(String format, Object... args) {
+        Playercontrolpp.LOGGER.info("[raw] " + format, args);
     }
 
     // ---- 工具 ----

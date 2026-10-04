@@ -1,29 +1,18 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
-import com.alonediamond.playercontrolpp.Playercontrolpp;
-import com.alonediamond.playercontrolpp.compat.InputCompat;
-import com.alonediamond.playercontrolpp.compat.PlayerCompat;
-import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
 import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
-import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
-import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -326,12 +315,6 @@ public class TaskStateMachine {
                 indexes.add(slot);
             }
         }
-        /*for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack item = inventory.getItem(i);
-            if (ctx.neededItems.contains(item.getItem())) {
-                indexes.add(player.inventoryMenu.getSlot(i));
-            }
-        }*/
         int times = 0;
         for (Slot slot : indexes) {
             if (times >= 27) {
@@ -341,7 +324,7 @@ public class TaskStateMachine {
             times++;
         }
         player.closeContainer();
-        setState(State.NEXT_ITEM);
+        setState(State.ANALYZING);
     }
 
     /**
@@ -444,6 +427,7 @@ public class TaskStateMachine {
 
         int gap = ctx.targetNeededTotal - ctx.currentlyGathered;
         if (gap <= 0) return false;
+
         if (!checkRawMaterialPrerequisites()) return false;
 
         return rawMaterialTask.start(ctx, this, ctx.currentTargetItem, gap);
