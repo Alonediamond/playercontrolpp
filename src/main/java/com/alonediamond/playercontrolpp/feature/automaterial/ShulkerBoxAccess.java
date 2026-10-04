@@ -27,6 +27,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -298,6 +299,10 @@ public class ShulkerBoxAccess {
             if (ctx.extractionBoxSlots.contains(i)) continue;
             ItemStack stack = mc.player.getInventory().getItem(i);
             if (!ItemUtil.isShulkerBox(stack)) continue;
+            if (ItemUtil.isShuklerBoxFull(stack)){
+                knownFullSlots.add(i);
+                continue;
+            }
             // 不能把材料存进我们正要收集的那种盒子里。
             if (isOnMissingList(stack, ctx)) continue;
             // 盒内装着缺失材料的（杂盒），留着待会儿开盒取物，也别拿来装东西：
