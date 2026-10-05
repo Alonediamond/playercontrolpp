@@ -81,10 +81,10 @@
   "playercontrolpp.gui.recording.idle": "状态：空闲",
 
   "playercontrolpp.gui.tab.baritone": "Baritone联动功能",
-  "playercontrolpp.gui.baritone.warning": "！本模式为作弊功能，若在多人服务器使用请确保经得服主或管理员同意",
+  "playercontrolpp.gui.baritone.warning": "本模式为作弊功能,若在多人服务器使用请确保经得服主或管理员同意,被封禁概不负责!",
   "playercontrolpp.config.hotkeys.name.baritoneAutoGather": "自动投影材料备货",
   "playercontrolpp.config.hotkeys.pretty_name.baritoneAutoGather": "自动投影材料备货",
-  "playercontrolpp.config.hotkeys.comment.baritoneAutoGather": "使用 Baritone + ChestTracker 自动备齐投影材料。",
+  "playercontrolpp.config.hotkeys.comment.baritoneAutoGather": "使用 Baritone + ChestTracker 自动备齐投影所需材料。",
 
   "playercontrolpp.message.baritone.mods_missing": "[PlayerControl++] 缺少 Baritone / Litematica / ChestTracker 模组 - 自动材料备货需要这三个模组同时安装。",
   "playercontrolpp.message.baritone.started": "[PlayerControl++] 材料备货已启动",
@@ -109,7 +109,7 @@
 
   "playercontrolpp.message.baritone.litematlist_no_list": "[PlayerControl++] LitematList 中没有已上传的材料列表，请先在 LitematList 中上传投影文件或材料清单。",
   "playercontrolpp.message.baritone.litematlist_not_loaded": "[PlayerControl++] 未检测到 LitematList 模组，无法跟随其材料清单。",
-  "playercontrolpp.message.baritone.litematlist_took_over": "[PlayerControl++] 检测到 LitematList 已接管投影材料清单，无法跟随投影自身的信息HUD。请在 LitematList 中取消上传（接管），或将「备货数据来源」切换为「跟随LitematList清单」。",
+  "playercontrolpp.message.baritone.litematlist_took_over": "[PlayerControl++] 检测到 LitematList 已接管投影材料清单，无法跟随投影自身的信息HUD。请在 LitematList 中取消上传，或将「备货数据来源」切换为「跟随LitematList清单」。",
 
   "playercontrolpp.message.baritone.mixed_box_found": "[PlayerControl++] 缓存中的 %s 只有盒装库存，正在取出潜影盒...",
   "playercontrolpp.message.baritone.mixed_box_take_failed": "[PlayerControl++] 未能从容器中取出潜影盒，已跳过该材料。",
@@ -158,11 +158,11 @@
 
   "playercontrolpp.config.baritone.name.shulkerBoxPriorityThreshold": "整盒优先阈值",
   "playercontrolpp.config.baritone.pretty_name.shulkerBoxPriorityThreshold": "整盒优先阈值",
-  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "当某种材料的缺口超过该数量（64~1728）时，若箱子追踪缓存中存有装着该材料的整盒（潜影盒），则优先搬走整盒，而不是按组取散装；缓存里没有整盒时仍按组取散装。默认：864。",
+  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "当某种材料缺失数量超过该数量时，若箱子追踪缓存中存有满潜影盒的该材料，\n则优先取该满盒材料，而不是按组取散装；缓存里没有则照常取散装材料。默认：864。",
 
   "playercontrolpp.config.baritone.name.recognizeMixedShulkerBox": "识别箱子追踪杂盒",
   "playercontrolpp.config.baritone.pretty_name.recognizeMixedShulkerBox": "识别箱子追踪杂盒",
-  "playercontrolpp.config.baritone.comment.recognizeMixedShulkerBox": "当某种材料的缺口未超过整盒优先阈值（即散装场景）、箱子追踪缓存里没有它的散装库存、却存有装着它的潜影盒时，把潜影盒取出来、开盒取走盒内所有缺失材料，再把盒子放回原容器。关闭时维持原行为：直接跳过该材料。",
+  "playercontrolpp.config.baritone.comment.recognizeMixedShulkerBox": "当某种材料的缺失数量未超过整盒优先阈值（即取散装场景）、箱子追踪缓存里没有它的散装库存、却存有装着它的潜影盒时，\n把潜影盒取出来、打开潜影盒取走盒内的缺失材料，再把盒子放回原容器。\n关闭时维持原行为：直接跳过该材料。",
 
   "playercontrolpp.config.baritone.name.rawMaterialCraftMode": "材料备货追溯原材料并合成",
   "playercontrolpp.config.baritone.pretty_name.rawMaterialCraftMode": "材料备货追溯原材料并合成",
