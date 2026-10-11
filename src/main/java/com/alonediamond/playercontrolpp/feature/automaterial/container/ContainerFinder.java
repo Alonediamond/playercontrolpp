@@ -4,6 +4,9 @@ import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.util.InteractionUtil;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
@@ -12,9 +15,11 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 
 public class ContainerFinder {
-    ChestTrackerIntegration chestTracker;
-    public ContainerFinder(ChestTrackerIntegration chestTracker) {
+    private final ChestTrackerIntegration chestTracker;
+    private final GatherContext ctx;
+    public ContainerFinder(ChestTrackerIntegration chestTracker, GatherContext ctx) {
         this.chestTracker = chestTracker;
+        this.ctx = ctx;
     }
 
     public void search(AutoMaterialGatherer amg) {
@@ -23,6 +28,13 @@ public class ContainerFinder {
                 amg.onInventoryFull();
                 return;
             }
+
+            if (ctx.missingItems.isEmpty()) {
+                MessageUtil.sendActionBar(amg.mc, "playercontrolpp.message.baritone.all_materials_ready");
+                amg.setState(State.COMPLETED);
+                return;
+            }
+
             int searchRange = chestTracker.getSearchRange();
             int listRange = chestTracker.getListRange();
             if (searchRange < 0 && listRange < 0) {
@@ -44,46 +56,25 @@ public class ContainerFinder {
             }
 
             BlockPos playerPos = amg.mc.player.blockPosition();
-            amg.foundPositions.clear();
-            amg.wholeBoxPriority = false;
-            amg.mixedBoxMode = false;
-            int stillNeeded = amg.targetNeededTotal - amg.currentlyGathered;
-            int boxThreshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
-            if (stillNeeded > boxThreshold) {
-                for (BlockPos pos : chestTracker.searchShulkerBoxWithItem(
-                        amg.currentTargetItem, playerPos, effectiveRange)) {
-                    // 排除表里的容器（已确认对本物品无货）不再入选，防止失效缓存造成死循环。
-                    if (!amg.exhaustedPositions.contains(pos)) {
-                        amg.foundPositions.add(pos);
-                    }
-                }
-                amg.wholeBoxPriority = !amg.foundPositions.isEmpty();
+            ctx.foundBoxPositions.clear();
+            ctx.foundItemPositions.clear();
+
+            MaterialItemEntry currItem = ctx.missingItems.getFirst();
+
+            //盒装先
+            for (BlockPos pos : chestTracker.searchShulkerBoxWithItem(
+                    currItem.item, playerPos, effectiveRange)) {
+                ctx.foundBoxPositions.add(pos);
             }
 
-            // 散装容器照常追加在整盒容器后面；已经作为整盒来源的容器不重复排。
-            for (BlockPos pos : chestTracker.searchItem(amg.currentTargetItem, playerPos, effectiveRange)) {
-                if (!amg.foundPositions.contains(pos) && !amg.exhaustedPositions.contains(pos)) {
-                    amg.foundPositions.add(pos);
-                }
+            //散装
+            for (BlockPos pos : chestTracker.searchItem(currItem.item, playerPos, effectiveRange)) {
+                ctx.foundItemPositions.add(pos);
             }
 
-            // 缺口没超过整盒阈值时，材料常常整盒躺在容器里——散装搜索一个都搜不到，
-            // 而 searchItem() 只认散装物品堆，不会因为"盒里有"而返回这个容器。
-            // 所以这里再按"装着该材料的潜影盒"查一遍，命中就转成"取盒→开盒取物→归还"。
-            if (amg.foundPositions.isEmpty()
-                    && stillNeeded <= boxThreshold
-                    && Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue()) {
-                for (BlockPos pos : chestTracker.searchShulkerBoxWithItem(
-                        amg.currentTargetItem, playerPos, effectiveRange)) {
-                    if (!amg.exhaustedPositions.contains(pos)) {
-                        amg.foundPositions.add(pos);
-                    }
-                }
-                amg.mixedBoxMode = !amg.foundPositions.isEmpty();
-            }
 
-            if (amg.foundPositions.isEmpty()) {
-                String itemName = BuiltInRegistries.ITEM.getKey(amg.currentTargetItem).toString();
+            if (ctx.foundItemPositions.isEmpty() && ctx.foundBoxPositions.isEmpty()) {
+                String itemName = BuiltInRegistries.ITEM.getKey(currItem.item).toString();
                 MessageUtil.sendActionBar(amg.mc,
                         "playercontrolpp.message.baritone.item_missing", itemName);
                 // 顶层物品：这里可能会转入"追溯原材料并合成"，而不是直接跳过。
@@ -91,20 +82,38 @@ public class ContainerFinder {
                 return;
             }
 
-            amg.currentPosIndex = 0;
-            amg.chestRetryCount = 0;
-            amg.adjacentContainerTargets = null;
-            amg.adjacentTryIndex = 0;
-            amg.adjacentOriginTarget = null;
-            navigateToContainer(amg.foundPositions.get(0), amg);
+            int stillNeeded = currItem.neededCount;
+            int boxThreshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
 
+            if (stillNeeded > boxThreshold) {
+                if (!ctx.foundBoxPositions.isEmpty()) navigateToContainer(ctx.foundBoxPositions.getFirst(), amg);
+                ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
+                return;
+            }
+            if (!ctx.foundItemPositions.isEmpty()){
+                navigateToContainer(ctx.foundItemPositions.getFirst(), amg);
+                ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
+                return;
+            }
+            ctx.missingItems.removeFirst();
         } catch (Exception e) {
-            Playercontrolpp.LOGGER.warn("ChestTracker search failed for {}", amg.currentTargetItem, e);
             MessageUtil.sendActionBar(amg.mc,
                     "playercontrolpp.message.baritone.search_error", String.valueOf(e));
             //amg.onCurrentTargetUnavailable();
-            amg.setState(State.NEXT_ITEM);
+            //amg.setState(State.NEXT_ITEM);
+            ctx.missingItems.removeFirst();
+            ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
         }
+    }
 
+    private void navigateToContainer(BlockPos pos, AutoMaterialGatherer amg) {
+        if (amg.mc.player == null) return;
+        if (amg.mc.player.blockPosition().distSqr(pos) <= PlayerUtil.blockReachSq(amg.mc.player)) {
+            InteractionUtil.openContainerAt(pos,amg.mc);
+            amg.setState(State.OPENING_CONTAINER);
+        } else {
+            amg.startPathing(pos);
+            amg.setState(State.PATHING);
+        }
     }
 }

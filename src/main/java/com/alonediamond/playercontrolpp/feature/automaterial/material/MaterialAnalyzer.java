@@ -5,39 +5,33 @@ import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * 读材料清单，算出还要收集什么，同时尊重清单方自己的忽略列表和本模组的全局忽略列表。
- *
- * <p>数据来源由 {@code materialListSource} 配置决定：跟随投影时读 Litematica 自己的材料清单
- * （要求其信息HUD开着；若清单已被 LitematList 接管则停机提示）；跟随 LitematList 时读它
- * 上传区域里处理过替换/忽略/聚合的清单，不要求投影HUD。
- *
- * <p>条目的 {@code neededCount} 一律写<b>需求总量</b>（投影的 countMissing / LitematList 的
- * totalCount），不是扣除持有量后的缺口。缺口只用来过滤「已经齐了」的条目；
- * 「还差多少」由运行中的 countEverywhere（含潜影盒内的持有量）对总量实时判定。
- * 两者口径必须一致：早先把「总量−持有量」当目标量、又拿持有总量去比满足，
- * 拿过一整盒后重启就会双重扣减——缺口 1152 被持有 1786 直接判满，误报「备货完毕」。
- */
 public class MaterialAnalyzer {
 
     private final LitematicaIntegration litematica;
     private final LitematListIntegration litematlist;
+    private final GatherContext ctx;
 
-    public MaterialAnalyzer(LitematicaIntegration litematica, LitematListIntegration litematlist) {
+    public MaterialAnalyzer(LitematicaIntegration litematica, LitematListIntegration litematlist, GatherContext ctx) {
         this.litematica = litematica;
         this.litematlist = litematlist;
+        this.ctx = ctx;
     }
 
     public void analyze(AutoMaterialGatherer amg) {
@@ -45,22 +39,36 @@ public class MaterialAnalyzer {
             List<MaterialItemEntry> missing = readMissingMaterials(amg);
             if (missing == null) return;
 
-            amg.missingItems.clear();
-            amg.missingItems.addAll(missing);
+            ctx.missingItems.clear();
+            ctx.missingItems.addAll(missing);
 
             // 需求量最大的排前面：这些最可能需要整盒搬。
-            amg.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
+            ctx.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
 
-            if (amg.missingItems.isEmpty()) {
+            if (ctx.missingItems.isEmpty()) {
                 MessageUtil.sendActionBar(amg.mc, "playercontrolpp.message.baritone.all_materials_ready");
                 amg.setState(State.COMPLETED);
                 return;
             }
 
-            // 必须等缺失清单建好之后才检查：onInventoryFull() 是靠「身上有没有缺失清单里的材料」
-            // 来决定要不要启动存盒的，而在这行之前清单还是空的——那会让存盒开个盒子、什么都不存、
-            // 然后死循环。这个顺序还让「背包满但材料已齐」的情况在上面报 COMPLETED，
-            // 而不是以「背包已满」停下。
+            if (QuickShulkerIntegration.getInstance().isLoaded()) {
+                int freeBox = -1;
+                boolean hasNeededItems = false;
+                for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+                    ItemStack item = amg.mc.player.getInventory().getItem(i);
+                    if (ItemUtil.isShulkerBox(item) && ItemUtil.contentsOf(item).isEmpty()) {
+                        freeBox = i;
+                    }else if (ctx.needItemTypes.contains(item.getItem())){
+                        hasNeededItems = true;
+                    }
+                }
+                if (hasNeededItems && freeBox != -1) {
+                    QuickShulkerIntegration.getInstance().openShulkerBox(freeBox);
+                    amg.setState(State.STORING);
+                    return;
+                }
+            }
+
             if (isInventoryFull(amg.mc)) {
                 //amg.onInventoryFull();
                 amg.setState(State.FAILED);
@@ -68,8 +76,8 @@ public class MaterialAnalyzer {
             }
 
             //ctx.currentItemIndex = 0;
-            amg.processingItems.clear();
-            amg.processingItems.offer(amg.missingItems.getFirst().item);
+            /*amg.processingItems.clear();
+            amg.processingItems.offer(amg.missingItems.getFirst().item);*/
             amg.setState(State.SEARCHING);
 
         } catch (Exception e) {
@@ -118,17 +126,18 @@ public class MaterialAnalyzer {
         }
 
         // 投影只在自己的 HUD 开着时才维护原生清单。
-        if (!litematica.isMaterialListHudVisible()) {
+        /*if (!litematica.isMaterialListHudVisible()) {
             MessageUtil.sendActionBar(amg.mc, "playercontrolpp.message.baritone.no_hud");
             amg.setState(State.STOPPED);
             return null;
-        }
+        }*/
 
         Set<String> globalIgnoreSet = buildGlobalIgnoreSet();
 
         List<MaterialItemEntry> missing = new ArrayList<>();
         for (LitematicaIntegration.MaterialEntry entry : litematica.getMaterialListEntries(amg.mc.player)) {
             if (entry.ignored()) continue;
+            ctx.needItemTypes.add(entry.stack().getItem());
 
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
@@ -168,6 +177,7 @@ public class MaterialAnalyzer {
         for (LitematListIntegration.MaterialEntry entry : uploaded) {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.stack().getItem()).toString();
             if (globalIgnoreSet.contains(itemId)) continue;
+            ctx.needItemTypes.add(entry.stack().getItem());
 
             // missingCount 是 LitematList 按它自己的口径（含潜影盒内持有量）算出的缺口，
             // 这里只拿它过滤已齐的条目；目标量同样写总量 totalCount，口径与投影路径一致。

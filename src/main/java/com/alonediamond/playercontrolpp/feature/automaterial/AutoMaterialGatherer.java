@@ -1,36 +1,34 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerFinder;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialAnalyzer;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.util.InteractionUtil;
 import com.alonediamond.playercontrolpp.feature.restock.MarkedContainerManager;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
+import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/**
- * 自动投影材料备货——{@code automaterial} 包对外的门面。
- *
- * <p>需要 Baritone、Litematica、ChestTracker 三者齐备；缺任何一个时热键会报出缺哪个，
- * 而不是按下去没反应。
- *
- * <p>材料清单来源可选（{@code materialListSource}）：默认跟随投影的信息HUD；
- * 装有 LitematList 时可改为跟随它上传的材料清单，其余行为不变。
- */
 public class AutoMaterialGatherer implements ClientFeature {
     private static final AutoMaterialGatherer INSTANCE = new AutoMaterialGatherer();
 
-    public final List<MaterialItemEntry> missingItems = new ArrayList<>();
+    /*public final List<MaterialItemEntry> missingItems = new ArrayList<>();
     public final Queue<Item> processingItems = new LinkedList<>();
 
     public final List<BlockPos> foundPositions = new ArrayList<>();
@@ -41,15 +39,23 @@ public class AutoMaterialGatherer implements ClientFeature {
     public int targetNeededTotal;
     public int currentlyGathered;
 
-    public Set<BlockPos> exhaustedPositions = new HashSet<>();
+    public Set<BlockPos> exhaustedPositions = new HashSet<>();*/
 
     public void setState(State state) {
         this.state = state;
     }
 
     public enum State {
-        IDLE, ANALYZING, SEARCHING, PATHING, OPENING_CONTAINER,
-        TRANSFERRING_ITEM, VERIFYING, NEXT_ITEM, COMPLETED, FAILED, STOPPED
+        IDLE,
+        ANALYZING,//分析材料
+        STORING,//存入背包
+        SEARCHING,//查找位置
+        PATHING,//寻路
+        OPENING_CONTAINER,//打开容器
+        TRANSFERRING_ITEM,//移动物品
+        VERIFYING,//校验并更新
+        CRAFTING,//合成材料
+        COMPLETED, FAILED, STOPPED//完成
     }
     private State state = State.IDLE;
     private boolean isActive = false;
@@ -57,7 +63,7 @@ public class AutoMaterialGatherer implements ClientFeature {
     public Minecraft mc;
 
     private final MaterialAnalyzer materialAnalyzer;
-    //private final GatherContext ctx;
+    private final GatherContext ctx;
     //private final TaskStateMachine stateMachine;
     //private final BaritonePathingController pathingController;
     //private final ContainerOpener containerOpener;
@@ -70,26 +76,13 @@ public class AutoMaterialGatherer implements ClientFeature {
 
 
     private AutoMaterialGatherer() {
-        //ctx = new GatherContext();
-
+        ctx = new GatherContext();
         litematica = LitematicaIntegration.getInstance();
         baritone = BaritoneIntegration.getInstance();
         chestTracker = ChestTrackerIntegration.getInstance();
 
-        materialAnalyzer = new MaterialAnalyzer(litematica,LitematListIntegration.getInstance());
-        containerFinder = new ContainerFinder(chestTracker);
-
-        //MaterialAnalyzer materialAnalyzer =
-        //        new MaterialAnalyzer(litematica, LitematListIntegration.getInstance());
-        //ContainerSearcher containerSearcher = new ContainerSearcher(chestTracker);
-        //pathingController = new BaritonePathingController(baritone);
-        //containerOpener = new ContainerOpener();
-        //shulkerAccess = new ShulkerBoxAccess();
-        //rawMaterialTask = new RawMaterialTask(shulkerAccess);
-        //ItemTransferExecutor transferExecutor = new ItemTransferExecutor(shulkerAccess);
-
-        //stateMachine = new TaskStateMachine(ctx, materialAnalyzer, containerSearcher,
-        //        pathingController, containerOpener, transferExecutor, shulkerAccess, rawMaterialTask);
+        materialAnalyzer = new MaterialAnalyzer(litematica,LitematListIntegration.getInstance(),ctx);
+        containerFinder = new ContainerFinder(chestTracker,ctx);
     }
 
     public static AutoMaterialGatherer getInstance() { return INSTANCE; }
@@ -118,33 +111,42 @@ public class AutoMaterialGatherer implements ClientFeature {
                 materialAnalyzer.analyze(this);
                 break;
 
+            case STORING:
+                if (!(mc.player.containerMenu instanceof ShulkerBoxMenu)) {
+                    break;
+                }
+                putItemInInventory(ctx);
+                break;
+
             case SEARCHING:
                 containerFinder.search(this);
                 break;
 
             case PATHING:
-                checkProgress(this);
-                break;
-
-            case TRANSFERRING_ITEM:
-                transfer(this);
-                break;
-
-            case VERIFYING:
-                verify(this);
-                break;
-
-            case NEXT_ITEM:
-                nextItem(this);
+                checkProgress();
                 break;
 
             case OPENING_CONTAINER:
-                // 由上面的 transferCooldown 机制驱动。
+                if (mc.player.containerMenu instanceof AbstractContainerMenu){
+                    setState(State.TRANSFERRING_ITEM);
+                }else {
+                    return;
+                }
+                break;
+
+            case TRANSFERRING_ITEM:
+                break;
+
+            case VERIFYING:
+                break;
+
+            case CRAFTING:
+
                 break;
 
             case FAILED:
                 // 寻路卡住 / 没开始，只是"这一项这次拿不到"：先给追溯任务一次机会，再决定跳过。
-                onCurrentTargetUnavailable();
+                //onCurrentTargetUnavailable();
                 break;
 
             case STOPPED:
@@ -154,6 +156,41 @@ public class AutoMaterialGatherer implements ClientFeature {
     }
 
 
+    private void putItemInInventory(GatherContext ctx) {
+        Inventory inventory = mc.player.getInventory();
+        List<Integer> indexes = new ArrayList<>();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack item = inventory.getItem(i);
+            if (ctx.needItemTypes.contains(item.getItem())) {
+                indexes.add(i);
+            }
+        }
+        int times = 0;
+        for (Integer index : indexes) {
+            if (times >= 27) {
+                break;
+            }
+            SlotActionCompat.quickMove(mc,mc.player.containerMenu.containerId,index);
+            times++;
+        }
+        mc.player.closeContainer();
+        setState(State.SEARCHING);
+    }
+
+    public void startPathing(BlockPos pos) {
+        baritone.pathTo(pos);
+    }
+
+    private void checkProgress() {
+        if (PlayerUtil.isInventoryFull(mc.player)) {
+            onInventoryFull();
+            return;
+        }
+        if (!baritone.isPathing() && mc.player.blockPosition().distSqr(ctx.currentContainerPos) <= PlayerUtil.blockReachSq(mc.player)) {
+            InteractionUtil.openContainerAt(ctx.currentContainerPos,mc);
+            setState(State.OPENING_CONTAINER);
+        }
+    }
 
     public boolean toggle() {
         if (isActive) {
@@ -175,7 +212,6 @@ public class AutoMaterialGatherer implements ClientFeature {
 
         //pathingController.cancelPathing();
         //containerOpener.closeAnyContainer(mc);
-//
         //shulkerAccess.resetKnownFullSlots();
         //stateMachine.resetRunState();
         isActive = true;
@@ -217,8 +253,6 @@ public class AutoMaterialGatherer implements ClientFeature {
     }
 
     public void onInventoryFull() {
-        this.missingItems.clear();
-        this.processingItems.clear();
         state = State.STOPPED;
     }
 }

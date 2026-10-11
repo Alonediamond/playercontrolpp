@@ -81,10 +81,10 @@
   "playercontrolpp.gui.recording.idle": "状态：空闲",
 
   "playercontrolpp.gui.tab.baritone": "Baritone联动功能",
-  "playercontrolpp.gui.baritone.warning": "！本模式为作弊功能，若在多人服务器使用请确保经得服主或管理员同意",
+  "playercontrolpp.gui.baritone.warning": "本模式为作弊功能,若在多人服务器使用请确保经得服主或管理员同意,被封禁概不负责!",
   "playercontrolpp.config.hotkeys.name.baritoneAutoGather": "自动投影材料备货",
   "playercontrolpp.config.hotkeys.pretty_name.baritoneAutoGather": "自动投影材料备货",
-  "playercontrolpp.config.hotkeys.comment.baritoneAutoGather": "使用 Baritone + ChestTracker 自动备齐投影材料。",
+  "playercontrolpp.config.hotkeys.comment.baritoneAutoGather": "使用 Baritone + ChestTracker 自动备齐投影所需材料。",
 
   "playercontrolpp.message.baritone.mods_missing": "[PlayerControl++] 缺少 Baritone / Litematica / ChestTracker 模组 - 自动材料备货需要这三个模组同时安装。",
   "playercontrolpp.message.baritone.started": "[PlayerControl++] 材料备货已启动",
@@ -97,7 +97,6 @@
   "playercontrolpp.message.baritone.completed": "[PlayerControl++] 备货完毕，如还有缺失材料请自行收集。",
   "playercontrolpp.message.baritone.no_hud": "[PlayerControl++] 请开启投影的材料清单信息HUD。",
   "playercontrolpp.message.baritone.inventory_full": "[PlayerControl++] 背包已满，请先清理。",
-  "playercontrolpp.message.baritone.inventory_threshold": "[PlayerControl++] 背包已达到满包阈值，且没有可存入潜影盒的材料，已停止。",
   "playercontrolpp.message.baritone.pathing_stuck": "[PlayerControl++] 寻路因某些原因被卡住，请更换位置重试。",
   "playercontrolpp.message.baritone.world_change": "[PlayerControl++] 材料备货已停止（世界切换）",
   "playercontrolpp.message.baritone.item_missing": "[PlayerControl++] 缓存中缺少 %s，请自行准备。",
@@ -110,7 +109,7 @@
 
   "playercontrolpp.message.baritone.litematlist_no_list": "[PlayerControl++] LitematList 中没有已上传的材料列表，请先在 LitematList 中上传投影文件或材料清单。",
   "playercontrolpp.message.baritone.litematlist_not_loaded": "[PlayerControl++] 未检测到 LitematList 模组，无法跟随其材料清单。",
-  "playercontrolpp.message.baritone.litematlist_took_over": "[PlayerControl++] 检测到 LitematList 已接管投影材料清单，无法跟随投影自身的信息HUD。请在 LitematList 中取消上传（接管），或将「备货数据来源」切换为「跟随LitematList清单」。",
+  "playercontrolpp.message.baritone.litematlist_took_over": "[PlayerControl++] 检测到 LitematList 已接管投影材料清单，无法跟随投影自身的信息HUD。请在 LitematList 中取消上传，或将「备货数据来源」切换为「跟随LitematList清单」。",
 
   "playercontrolpp.message.baritone.mixed_box_found": "[PlayerControl++] 缓存中的 %s 只有盒装库存，正在取出潜影盒...",
   "playercontrolpp.message.baritone.mixed_box_take_failed": "[PlayerControl++] 未能从容器中取出潜影盒，已跳过该材料。",
@@ -128,7 +127,6 @@
   "playercontrolpp.message.baritone.raw_material_crafting": "[PlayerControl++] 正在合成 %s",
   "playercontrolpp.message.baritone.raw_material_no_workstation": "[PlayerControl++] 背包中没有可用的工作台/切石机（或未安装 QuickShulker），只收集原材料不做合成。",
   "playercontrolpp.message.baritone.raw_material_craft_failed": "[PlayerControl++] 合成 %s 失败，只收集原材料。",
-  "playercontrolpp.message.baritone.raw_material_ingredients_blocked": "[PlayerControl++] 合成 %s 的材料在物品栏里凑不出一次合成（可能都锁在打不开的潜影盒里），只收集原材料。",
   "playercontrolpp.message.baritone.raw_material_no_recipe": "[PlayerControl++] 找不到 %s 的可用配方（熔炼/锻造等暂不支持），已跳过该材料。",
   "playercontrolpp.message.baritone.raw_material_done": "[PlayerControl++] %s 已通过原材料合成补齐。",
 
@@ -160,11 +158,11 @@
 
   "playercontrolpp.config.baritone.name.shulkerBoxPriorityThreshold": "整盒优先阈值",
   "playercontrolpp.config.baritone.pretty_name.shulkerBoxPriorityThreshold": "整盒优先阈值",
-  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "当某种材料的缺口超过该数量（64~1728）时，若箱子追踪缓存中存有装着该材料的整盒（潜影盒），则优先搬走整盒，而不是按组取散装；缓存里没有整盒时仍按组取散装。默认：864。",
+  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "当某种材料缺失数量超过该数量时，若箱子追踪缓存中存有满潜影盒的该材料，\n则优先取该满盒材料，而不是按组取散装；缓存里没有则照常取散装材料。默认：864。",
 
   "playercontrolpp.config.baritone.name.recognizeMixedShulkerBox": "识别箱子追踪杂盒",
   "playercontrolpp.config.baritone.pretty_name.recognizeMixedShulkerBox": "识别箱子追踪杂盒",
-  "playercontrolpp.config.baritone.comment.recognizeMixedShulkerBox": "当某种材料的缺口未超过整盒优先阈值（即散装场景）、箱子追踪缓存里没有它的散装库存、却存有装着它的潜影盒时，把潜影盒取出来、开盒取走盒内所有缺失材料，再把盒子放回原容器。关闭时维持原行为：直接跳过该材料。",
+  "playercontrolpp.config.baritone.comment.recognizeMixedShulkerBox": "当某种材料的缺失数量未超过整盒优先阈值（即取散装场景）、箱子追踪缓存里没有它的散装库存、却存有装着它的潜影盒时，\n把潜影盒取出来、打开潜影盒取走盒内的缺失材料，再把盒子放回原容器。\n关闭时维持原行为：直接跳过该材料。",
 
   "playercontrolpp.config.baritone.name.rawMaterialCraftMode": "材料备货追溯原材料并合成",
   "playercontrolpp.config.baritone.pretty_name.rawMaterialCraftMode": "材料备货追溯原材料并合成",
@@ -180,8 +178,6 @@
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] 背包已满 — 正在将材料存入潜影盒...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] 潜影盒存储完成，继续备货。",
   "playercontrolpp.message.baritone.shulker_store_skipped": "[PlayerControl++] 背包中没有可用潜影盒，材料暂留背包。",
-  "playercontrolpp.message.baritone.shulker_box_full": "[PlayerControl++] 该潜影盒已满，没有存入材料（盒子已收回背包）。",
-  "playercontrolpp.message.baritone.shulker_box_no_room": "[PlayerControl++] 该潜影盒放不下背包里的材料，换一个盒子。",
   "playercontrolpp.message.baritone.shulker_no_box": "[PlayerControl++] 背包中未找到可用潜影盒。已停止。",
   "playercontrolpp.message.baritone.shulker_no_position": "[PlayerControl++] 未找到合法的潜影盒放置位置。已停止。",
   "playercontrolpp.message.baritone.shulker_mine_failed": "[PlayerControl++] 挖掘潜影盒失败。已停止。",
@@ -248,10 +244,6 @@
   "playercontrolpp.config.settings.name.playbackPositionCorrection": "回放位置修正",
   "playercontrolpp.config.settings.pretty_name.playbackPositionCorrection": "回放位置修正",
   "playercontrolpp.config.settings.comment.playbackPositionCorrection": "回放偏离录制路径超过 2 格时，把玩家拉回关键帧位置。\n默认关闭：回放复现的是按键输入而非坐标，产生偏移属于正常现象；直接改写客户端坐标会与服务端权威位置不一致，可能被反作弊判定为飞行。建议仅在单人世界开启。",
-
-  "playercontrolpp.config.settings.name.inventoryFullThreshold": "满包阈值",
-  "playercontrolpp.config.settings.pretty_name.inventoryFullThreshold": "满包阈值",
-  "playercontrolpp.config.settings.comment.inventoryFullThreshold": "备货时物品栏（含快捷栏）占用到多少格就算「满」，触发材料自动存入潜影盒，给后面的取料与合成留出空位。\n范围 9~36，默认 27（留 9 格）；36 = 只有一格不剩才算满。",
 
   "playercontrolpp.message.playback.drift": "[PlayerControl++] 回放已明显偏离录制路径（地形或延迟导致）。若需要自动拉回，请在设置中开启「回放位置修正」。",
   "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] 录制索引读取失败，已另存为 index.json.corrupt-N，录制文件本身未受影响。",
