@@ -26,4 +26,12 @@ public class GatherContext {
     public final List<BlockPos> foundItemPositions = new ArrayList<>();//容器位置(散装)
 
     public BlockPos currentContainerPos;//当前正在寻路的容器的位置
+
+    public void reset() {
+        missingItems.clear();
+        needItemTypes.clear();
+        foundBoxPositions.clear();
+        foundItemPositions.clear();
+        currentContainerPos = null;
+    }
 }

@@ -215,14 +215,15 @@ public class AutoMaterialGatherer implements ClientFeature {
         //shulkerAccess.resetKnownFullSlots();
         //stateMachine.resetRunState();
         isActive = true;
-        //ctx.reset();
+        setState(State.IDLE);
+        ctx.reset();
 
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.started");
         return true;
     }
 
     public void stop() {
-        //pathingController.cancelPathing();
+        baritone.cancelPathing();
         //containerOpener.closeAnyContainer(mc);
         // 追溯任务可能正开着合成界面、或让 Baritone 挖着矿；取盒子状态机也可能正开着盒子界面。
         //rawMaterialTask.cancel(mc);

@@ -1,6 +1,5 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
-import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
@@ -73,7 +72,8 @@ public class ContainerFinder {
             }
 
 
-            if (ctx.foundItemPositions.isEmpty() && ctx.foundBoxPositions.isEmpty()) {
+            boolean isNoBox = ctx.foundBoxPositions.isEmpty();
+            if (ctx.foundItemPositions.isEmpty() && isNoBox) {
                 String itemName = BuiltInRegistries.ITEM.getKey(currItem.item).toString();
                 MessageUtil.sendActionBar(amg.mc,
                         "playercontrolpp.message.baritone.item_missing", itemName);
@@ -86,14 +86,19 @@ public class ContainerFinder {
             int boxThreshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
 
             if (stillNeeded > boxThreshold) {
-                if (!ctx.foundBoxPositions.isEmpty()) navigateToContainer(ctx.foundBoxPositions.getFirst(), amg);
+                if (!isNoBox) navigateToContainer(ctx.foundBoxPositions.getFirst(), amg);
                 ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
                 return;
             }
             if (!ctx.foundItemPositions.isEmpty()){
                 navigateToContainer(ctx.foundItemPositions.getFirst(), amg);
-                ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
+                ctx.currentContainerPos = ctx.foundItemPositions.getFirst();
                 return;
+            }else {
+                if (!isNoBox && Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue()){
+                    navigateToContainer(ctx.foundBoxPositions.getFirst(), amg);
+                    return;
+                }
             }
             ctx.missingItems.removeFirst();
         } catch (Exception e) {
@@ -102,7 +107,7 @@ public class ContainerFinder {
             //amg.onCurrentTargetUnavailable();
             //amg.setState(State.NEXT_ITEM);
             ctx.missingItems.removeFirst();
-            ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
+            ctx.currentContainerPos = null;
         }
     }
 
