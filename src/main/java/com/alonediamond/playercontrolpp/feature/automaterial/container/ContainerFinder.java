@@ -86,8 +86,17 @@ public class ContainerFinder {
             int boxThreshold = Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
 
             if (stillNeeded > boxThreshold) {
-                if (!isNoBox) navigateToContainer(ctx.foundBoxPositions.getFirst(), amg);
-                ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
+                if (isNoBox){
+                    if (!ctx.foundItemPositions.isEmpty()){
+                        navigateToContainer(ctx.foundItemPositions.getFirst(), amg);
+                        ctx.currentContainerPos = ctx.foundItemPositions.getFirst();
+                        return;
+                    }
+                } else {
+                    navigateToContainer(ctx.foundBoxPositions.getFirst(), amg);
+                    ctx.currentContainerPos = ctx.foundBoxPositions.getFirst();
+                    return;
+                }
                 return;
             }
             if (!ctx.foundItemPositions.isEmpty()){
@@ -105,9 +114,10 @@ public class ContainerFinder {
             MessageUtil.sendActionBar(amg.mc,
                     "playercontrolpp.message.baritone.search_error", String.valueOf(e));
             //amg.onCurrentTargetUnavailable();
-            //amg.setState(State.NEXT_ITEM);
             ctx.missingItems.removeFirst();
             ctx.currentContainerPos = null;
+            amg.setState(State.FAILED);
+            amg.stop();
         }
     }
 

@@ -51,13 +51,18 @@ public class MaterialAnalyzer {
                 return;
             }
 
-            if (QuickShulkerIntegration.getInstance().isLoaded()) {
+            if (QuickShulkerIntegration.getInstance().isLoaded() && Configs.BaritoneSettings.AUTO_STORE_TO_SHULKER.getBooleanValue()) {
                 int freeBox = -1;
                 boolean hasNeededItems = false;
+                boolean hasBox = false;
                 for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+                    if (hasNeededItems && freeBox != -1) {
+                        break;
+                    }
                     ItemStack item = amg.mc.player.getInventory().getItem(i);
-                    if (ItemUtil.isShulkerBox(item) && ItemUtil.contentsOf(item).isEmpty()) {
+                    if (ItemUtil.isShulkerBox(item) && ItemUtil.contentsOf(item).isEmpty() && !hasBox) {
                         freeBox = i;
+                        hasBox = true;
                     }else if (ctx.needItemTypes.contains(item.getItem())){
                         hasNeededItems = true;
                     }

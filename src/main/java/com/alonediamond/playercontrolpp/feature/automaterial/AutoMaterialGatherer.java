@@ -3,6 +3,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerFinder;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ItemTransferor;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialAnalyzer;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.util.InteractionUtil;
@@ -19,6 +20,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ShulkerBoxMenu;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -73,6 +75,7 @@ public class AutoMaterialGatherer implements ClientFeature {
     BaritoneIntegration baritone;
     ChestTrackerIntegration chestTracker;
     ContainerFinder containerFinder;
+    ItemTransferor itemTransferor;
 
 
     private AutoMaterialGatherer() {
@@ -83,6 +86,7 @@ public class AutoMaterialGatherer implements ClientFeature {
 
         materialAnalyzer = new MaterialAnalyzer(litematica,LitematListIntegration.getInstance(),ctx);
         containerFinder = new ContainerFinder(chestTracker,ctx);
+        itemTransferor = new ItemTransferor(ctx);
     }
 
     public static AutoMaterialGatherer getInstance() { return INSTANCE; }
@@ -135,6 +139,7 @@ public class AutoMaterialGatherer implements ClientFeature {
                 break;
 
             case TRANSFERRING_ITEM:
+                itemTransferor.transferring(this);
                 break;
 
             case VERIFYING:
@@ -157,24 +162,23 @@ public class AutoMaterialGatherer implements ClientFeature {
 
 
     private void putItemInInventory(GatherContext ctx) {
-        Inventory inventory = mc.player.getInventory();
-        List<Integer> indexes = new ArrayList<>();
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack item = inventory.getItem(i);
+        List<Slot> indexes = new ArrayList<>();
+        for (Slot slot : mc.player.containerMenu.slots) {
+            ItemStack item = slot.getItem();
             if (ctx.needItemTypes.contains(item.getItem())) {
-                indexes.add(i);
+                indexes.add(slot);
             }
         }
         int times = 0;
-        for (Integer index : indexes) {
+        for (Slot slot : indexes) {
             if (times >= 27) {
                 break;
             }
-            SlotActionCompat.quickMove(mc,mc.player.containerMenu.containerId,index);
+            SlotActionCompat.quickMove(mc, mc.player.containerMenu.containerId, slot.index/* + 27*/);
             times++;
         }
         mc.player.closeContainer();
-        setState(State.SEARCHING);
+        setState(State.ANALYZING);
     }
 
     public void startPathing(BlockPos pos) {
