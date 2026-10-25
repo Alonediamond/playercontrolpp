@@ -150,6 +150,11 @@
   "playercontrolpp.config.baritone.pretty_name.globalIgnoreList": "材料备货忽略项",
   "playercontrolpp.config.baritone.comment.globalIgnoreList": "自动备货时忽略的物品列表。点击打开列表编辑器。默认：minecraft:water_bucket 及所有潜影盒变种。",
 
+  "playercontrolpp.config.baritone.name.clickCooldown": "点击间隔",
+  "playercontrolpp.config.baritone.pretty_name.clickCooldown": "点击间隔",
+  "playercontrolpp.config.baritone.comment.clickCooldown": "设置每次在容器内转移物品之间冷却间隔的 tick 数",
+
+
   "playercontrolpp.config.baritone.name.materialListSource": "备货数据来源",
   "playercontrolpp.config.baritone.pretty_name.materialListSource": "备货数据来源",
   "playercontrolpp.config.baritone.comment.materialListSource": "自动投影材料备货读取哪份材料清单。\n跟随投影信息HUD：读取 Litematica 的材料清单信息HUD，即使 LitematList 已接管也照常按HUD备货。\n跟随LitematList：读取 LitematList 中上传（接管）的材料清单，其中被忽略的项目不会被收集。",

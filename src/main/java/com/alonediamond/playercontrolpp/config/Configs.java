@@ -153,6 +153,12 @@ public class Configs implements IConfigHandler {
     }
 
     public static class BaritoneSettings {
+
+        public static final ConfigInteger CLICK_COOLDOWN = new ConfigInteger(
+                "clickCooldown", 1, 0, 60,
+                "Set the number of ticks for the cooldown interval between transferring items in the container each time."
+        ).apply(KEY_BARITONE);
+
         /**
          * 备货读哪份材料清单。GUI 里只在装了 LitematList 时才显示这项；
          * 模组被卸载而配置还停在 LITEMATLIST 时，由 MaterialAnalyzer 报错停机。
@@ -223,7 +229,7 @@ public class Configs implements IConfigHandler {
 
         /** 前两项属于「自动投影材料备货」，排在最前，GUI 里正好落在备货热键的下面。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                MATERIAL_LIST_SOURCE, SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
+                CLICK_COOLDOWN,MATERIAL_LIST_SOURCE, SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
                 RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH,
                 ENABLE_GLOBAL_IGNORE, AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE, GLOBAL_IGNORE_LIST);
     }

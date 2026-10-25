@@ -555,7 +555,7 @@ public class ShulkerBoxAccess {
             try {
                 SlotActionCompat.quickMove(mc, handler.containerId, i);
                 anyItemsTransferred = true;
-                cooldown = 2;
+                cooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
             } catch (Exception e) {
                 // 这一格没收成，下一 tick 再看；连续失败也不会卡死，因为总会有扫完的一刻。
             }
@@ -567,7 +567,7 @@ public class ShulkerBoxAccess {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_empty");
         }
         state = StorageState.CLOSING;
-        cooldown = 3;
+        cooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
     }
 
     /** @return 这一堆物品是不是这次还要取出来的。 */
@@ -632,7 +632,7 @@ public class ShulkerBoxAccess {
                     fail(mc);
                     return;
                 }
-                cooldown = 3;
+                cooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
                 state = StorageState.FINDING_SHULKER;
                 return;
             }
@@ -663,10 +663,10 @@ public class ShulkerBoxAccess {
                 anyItemsTransferred = true;
                 if (++transferAttempts > MAX_TRANSFER_ATTEMPTS) {
                     state = StorageState.CLOSING;
-                    cooldown = 3;
+                    cooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
                     return;
                 }
-                cooldown = 2;
+                cooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
                 return;
             } catch (Exception e) {
                 // 这一格没收成，继续看下一格。
@@ -678,7 +678,7 @@ public class ShulkerBoxAccess {
             knownFullSlots.add(shulkerSlotIndex);
         }
         state = StorageState.CLOSING;
-        cooldown = 3;
+        cooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
     }
 
     private void doClose(Minecraft mc, GatherContext ctx) {

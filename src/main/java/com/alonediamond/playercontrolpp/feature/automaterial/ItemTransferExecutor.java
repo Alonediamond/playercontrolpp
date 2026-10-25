@@ -40,9 +40,9 @@ public class ItemTransferExecutor {
     }
 
     /** 两次容器点击之间的 tick 数，别超出服务端对点击频率的预期。 */
-    private static final int CLICK_COOLDOWN = 4;
+    //private static final int CLICK_COOLDOWN = 4;//让玩家自己设置
     /** 关闭容器后先稳定几 tick 再核对拿到了多少。 */
-    private static final int CLOSE_COOLDOWN = 8;
+    private static final int CLOSE_COOLDOWN = 6;
 
     /**
      * @return 当前物品是否已经凑够，物品栏里的和其中潜影盒内的都算。自动存盒之后用它决定要不要继续。
@@ -178,7 +178,7 @@ public class ItemTransferExecutor {
 
             if (tryTransferShulker(mc, handler, slot, bestEntry, ctx)) {
                 ctx.justTookShulkerBox = true;
-                ctx.transferCooldown = CLICK_COOLDOWN;
+                ctx.transferCooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
                 return true;
             }
         }
@@ -214,7 +214,7 @@ public class ItemTransferExecutor {
             if (matchedEntry == null) continue;
 
             if (tryTransferLoose(mc, handler, slot, matchedEntry, ctx)) {
-                ctx.transferCooldown = CLICK_COOLDOWN;
+                ctx.transferCooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
                 return true;
             }
         }

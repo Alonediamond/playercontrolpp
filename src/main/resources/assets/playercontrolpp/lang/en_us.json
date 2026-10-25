@@ -150,6 +150,10 @@
   "playercontrolpp.config.baritone.pretty_name.globalIgnoreList": "Material Ignore List",
   "playercontrolpp.config.baritone.comment.globalIgnoreList": "Items to ignore during auto-gathering. Click to open the list editor. Default: minecraft:water_bucket + all shulker box variants.",
 
+  "playercontrolpp.config.baritone.name.clickCooldown": "Click Cooldown",
+  "playercontrolpp.config.baritone.pretty_name.clickCooldown": "Click Cooldown",
+  "playercontrolpp.config.baritone.comment.clickCooldown": "Set the number of ticks for the cooldown interval between transferring items in the container each time.",
+
   "playercontrolpp.config.baritone.name.materialListSource": "Material List Source",
   "playercontrolpp.config.baritone.pretty_name.materialListSource": "Material List Source",
   "playercontrolpp.config.baritone.comment.materialListSource": "Which material list the auto-gatherer reads.\nSchematic HUD: read Litematica's material list HUD, even if LitematList has taken it over.\nLitematList: read the list uploaded in LitematList; items ignored there are not gathered.",
