@@ -2,23 +2,17 @@
 
 # PlayerControl++
 
-**A lightweight client-side Fabric mod that hands your repetitive keypresses to a macro**
+**A lightweight, client-side Fabric mod that turns repetitive tasks into hotkey-driven actions**
 
-Auto forward · Quick turn · Route cruising · Input recording & playback · Bulk container caching · Schematic water filling
+Think of it as a mod that brings other mods together: optional integrations unlock more powerful features.
 
 </div>
 
 ---
 
-## What it is for
+## Overview
 
-When you build something large, reorganise a warehouse, or run a long supply route, the time does not
-go into deciding what to do — it goes into **holding one key down for a minute**, **clicking open one
-chest after another**, and **right-clicking a water bucket onto three hundred blocks**.
-
-PlayerControl++ turns those into hotkey-driven routines. Everything works by **simulating your own key
-presses** — it never rewrites your position and never sends malformed packets, so it behaves the same
-in single-player, on a LAN world, and on a multiplayer server.
+PlayerControl++ builds on MaLiLib to add practical client-side utilities. Press **`P + C`** to open the settings by default.
 
 ---
 
@@ -26,31 +20,19 @@ in single-player, on a LAN world, and on a multiplayer server.
 
 | Feature | What it does |
 |---|---|
-| **Auto Forward** | Keeps walking forward on one keypress — the same as holding W. Switches off on world change |
-| **Quick Turn** | Turns you around instantly; the angle is configurable (180° by default) |
-| **Route Cruising** | Record a start, any number of waypoints, and an end, then walk the whole thing on one key. Round-trip N times or loop forever, sprint the whole way, and jump automatically when stuck |
-| **Input Recording & Playback** | Records your movement, camera and click input at tick precision and plays it back. Loops indefinitely; the files are compressed |
-| **Auto-cache Nearby Containers** | Opens every container within arm's reach so a container-index mod can record its contents — no more clicking through a wall of chests by hand |
-| **Cache Containers in a Selection** | The whole-area version of the above: mark out a region, then simply walk through it and the containers inside get cached as you pass them |
-| **Auto Water Fill** | Fills in the blocks that your schematic says should be waterlogged but are not yet, saving hundreds of manual right-clicks |
-| **Render-layer Sync** | Flips the schematic to the next layer each time a route completes a lap, so the blueprint follows you |
+| **Auto Forward** | Keeps you moving forward with a single keypress, just like holding down W |
+| **Quick Turn** | Turns you around with one keypress. The angle is configurable, with a default of 180° |
+| **Route Playback** | Record a start, waypoints, and an end, then follow the route with one keypress. Supports a set number of round trips or an endless loop, sprinting, and automatic jumps to help you get unstuck |
+| **Input Recording & Playback** | Records movement, camera direction, and left- and right-click input at tick-level precision. Replay whenever you like, with optional endless looping and compressed recording files |
+| **Auto-cache Nearby Containers (requires Chest Tracker)** | Automatically opens containers within reach so Chest Tracker can remember their contents. No need to open every chest by hand |
+| **Cache Containers in a Schematic Selection (requires Chest Tracker and Litematica)** | The area-wide version of nearby caching: select a region, then walk through it to cache the containers within reach |
+| **Auto Water Fill (requires Litematica)** | Waterlogs blocks that should contain water according to your schematic but do not yet. Especially handy for technical builds and redstone contraptions |
+| **Render-layer Sync (requires Litematica)** | Advances the schematic's render layer after each route traversal, helping you work through a build layer by layer |
 
-> The options in the config screen **grow and shrink with the optional mods you have installed**.
-> Install a material-list manager or a pathing mod and a few extra advanced options appear —
-> like collecting whole boxes of building materials from chests, straight from your schematic.
-> Have a look for yourself.
-
----
-
-## Getting started
-
-1. Install **Fabric Loader**, **Fabric API** and **MaLiLib**, then drop this mod into `mods`.
-2. In game press **`P` + `C`** to open the config screen (Mod Menu works too, if you have it).
-3. Bind keys for the features you want on the **Main Features** tab — nothing is bound by default, so it
-   cannot clash with your existing keys.
-
-The UI follows the MaLiLib convention (Litematica / Tweakeroo), so there is nothing new to learn.
-All text is available in **English** and **简体中文**.
+> Available features and configuration options depend on the optional mods you have installed.
+> Compatible material-list managers and pathfinding mods can unlock additional tools not listed here,
+> such as collecting building supplies from chests to match your schematic, whole shulker boxes at a time.
+> Explore the settings to see what your setup supports.
 
 ---
 
@@ -58,45 +40,40 @@ All text is available in **English** and **简体中文**.
 
 **Required**
 
-| Mod | Why |
+| Mod | What it provides |
 |---|---|
-| Fabric API | Base runtime |
-| MaLiLib | Config, GUI and hotkey system |
+| Fabric API | Core runtime support |
+| MaLiLib | Configuration, menus, and hotkeys |
 
-**Optional — the matching features appear only when these are present, and their options stay hidden otherwise**
+**Optional — install these to use their integrations**
 
-| Mod | Unlocks |
+| Mod | What it unlocks |
 |---|---|
-| Litematica | Selection container caching, auto water fill, render-layer sync |
-| Chest Tracker | Container content caching |
-| QuickShulker | Opening shulker boxes straight from the inventory |
-| LitematList | Manage multiple schematic material lists (upload / merge / replace / ignore) and serve as an extra source for the auto-staging flow |
-| Mod Menu | Config entry from the mod list |
+| Litematica | Container caching within an area selection, automatic waterlogging, and render-layer sync |
+| Chest Tracker | Container contents caching |
+| QuickShulker | Opening shulker boxes directly from your inventory |
+| LitematList | Manage multiple schematic material lists: upload, merge, replace, and ignore materials. Its lists can also be used for automatic material gathering |
+| Mod Menu | Access to the configuration screen from the mod list |
 
 ---
 
-## Supported versions
+## Supported Versions
 
 `1.21` – `1.21.1` · `1.21.4` · `1.21.6` – `1.21.7` · `1.21.8` · `1.21.11` · `26.1` – `26.1.2` · `26.2`
 
-**Client-side only** — nothing needs to be installed on the server.
+**Client-side only:** PlayerControl++ does not need to be installed on the server.
 
 ---
 
-## Good to know
+## Feedback & Support
 
-- Every automated routine stops or pauses immediately when you **change world, die, or open another
-  screen**. Control is always one keypress away.
-- The material-staging routine stops with a clear message when your **inventory is full** or the
-  cache has nothing left to take — it never wanders off with your items.
-- Route and recording data is written atomically, so a crash will not leave you with a corrupt config.
-- Playback reproduces **key input, not coordinates**, so a little positional drift is normal. The mod
-  tells you when it happens and offers an optional correction toggle.
+- Found a bug or have a feature request? Please get in touch on GitHub or send me a private message on [Bilibili](https://space.bilibili.com/478620684).
+- Much of the mod was developed with AI assistance. I remain responsible for technical support and will do my best to respond promptly to feedback.
 
 ---
 
 <div align="center">
 
-**by Alonediamond** · MIT licence · Issues and suggestions welcome on GitHub
+**By Alonediamond** · MIT License
 
 </div>
