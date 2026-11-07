@@ -147,9 +147,43 @@ public class Configs implements IConfigHandler {
                         + "anti-cheat may read it as flying.")
                 .apply(KEY_SETTINGS);
 
+        public static final ConfigBoolean RECORD_DROP = new ConfigBoolean(
+                "recordingCaptureDrop", true,
+                "Record item drop actions (Q / Ctrl+Q) into the recording, and replay them. Only has an effect while Recording is on.").apply(KEY_SETTINGS);
+
+        public static final ConfigBoolean RECORD_HOTBAR = new ConfigBoolean(
+                "recordingCaptureHotbar", true,
+                "Record hotbar selection (1-9 keys and the mouse wheel) and offhand swap (F) into the recording, and replay them. Only has an effect while Recording is on.").apply(KEY_SETTINGS);
+
+        public static final ConfigBoolean RECORD_CHAT = new ConfigBoolean(
+                "recordingCaptureChat", true,
+                "Record sent chat messages and commands into the recording, and replay them. Only has an effect while Recording is on.").apply(KEY_SETTINGS);
+
+        /**
+         * 刻意默认关闭。按住右键（使用）在回放里会吃东西、格挡、放方块、开容器，
+         * 副作用比左键大得多；要复现就显式打开。
+         */
+        public static final ConfigBoolean RECORD_USE = new ConfigBoolean(
+                "recordingCaptureUse", false,
+                "Record right-click / use (held) into the recording, and replay it. Off by default: replaying held use can eat, block, place blocks or open containers. Only has an effect while Recording is on.").apply(KEY_SETTINGS);
+
+        public static final ConfigBoolean RECORD_ATTACK = new ConfigBoolean(
+                "recordingCaptureAttack", true,
+                "Record left-click / attack (held) into the recording, and replay it. Only has an effect while Recording is on.").apply(KEY_SETTINGS);
+
+        public static final ConfigBoolean RECORD_MOVEMENT = new ConfigBoolean(
+                "recordingCaptureMovement", true,
+                "Record movement input (WASD, jump, sneak, sprint) into the recording, and replay it. Only has an effect while Recording is on.").apply(KEY_SETTINGS);
+
+        public static final ConfigBoolean RECORD_LOOK = new ConfigBoolean(
+                "recordingCaptureLook", true,
+                "Record look angles (yaw/pitch) into the recording, and replay them. Only has an effect while Recording is on.").apply(KEY_SETTINGS);
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 TURN_ANGLE, CACHE_DELAY, WATER_FILL_SCAN_RADIUS, WATER_FILL_OPERATION_DELAY,
-                PLAYBACK_POSITION_CORRECTION);
+                PLAYBACK_POSITION_CORRECTION,
+                RECORD_DROP, RECORD_HOTBAR, RECORD_CHAT,
+                RECORD_MOVEMENT, RECORD_LOOK, RECORD_ATTACK, RECORD_USE);
     }
 
     public static class BaritoneSettings {

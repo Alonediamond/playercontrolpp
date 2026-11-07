@@ -27,9 +27,14 @@ public class RecordingFile {
     private String dimension;
     private double startX, startY, startZ;
     private float startYaw, startPitch;
+    /** 开始录制时选中的快捷栏槽位；回放开始时恢复它，录制里的动作都假定手持那一格。 */
+    private int startSlot;
+    /** 循环回放开关。只是回放偏好，存在 index.json 里，不进 .pcr。 */
+    private boolean loop;
 
     private List<RecordedSegment> segments = new ArrayList<>();
     private List<PositionKeyframe> keyframes = new ArrayList<>();
+    private List<RecordedAction> actions = new ArrayList<>();
 
     public RecordingFile() {
         this.name = "Unnamed Recording";
@@ -61,11 +66,23 @@ public class RecordingFile {
     public float getStartPitch() { return startPitch; }
     public void setStartPitch(float v) { startPitch = v; }
 
+    /** @return 开始录制时选中的快捷栏槽位，{@code 0..8}。 */
+    public int getStartSlot() { return startSlot; }
+    public void setStartSlot(int v) { startSlot = v; }
+
+    /** @return 这条录制是否循环回放。 */
+    public boolean isLoop() { return loop; }
+    public void setLoop(boolean v) { loop = v; }
+
     public List<RecordedSegment> getSegments() { return segments; }
     public void setSegments(List<RecordedSegment> segments) { this.segments = segments; }
 
     public List<PositionKeyframe> getKeyframes() { return keyframes; }
     public void setKeyframes(List<PositionKeyframe> keyframes) { this.keyframes = keyframes; }
+
+    /** 离散动作事件（丢、换手、发言、命令…），按 tick 升序；可为空。 */
+    public List<RecordedAction> getActions() { return actions; }
+    public void setActions(List<RecordedAction> actions) { this.actions = actions; }
 
     // ---- 索引 JSON（轻量，供 index.json 用）----
 
@@ -75,6 +92,7 @@ public class RecordingFile {
         obj.addProperty("name", name);
         obj.addProperty("durationTicks", durationTicks);
         obj.addProperty("dimension", dimension);
+        obj.addProperty("loop", loop);
         return obj;
     }
 
@@ -84,6 +102,7 @@ public class RecordingFile {
         if (obj.has("name")) rf.setName(obj.get("name").getAsString());
         if (obj.has("durationTicks")) rf.setDurationTicks(obj.get("durationTicks").getAsInt());
         if (obj.has("dimension")) rf.setDimension(obj.get("dimension").getAsString());
+        if (obj.has("loop")) rf.setLoop(obj.get("loop").getAsBoolean());
         return rf;
     }
 
@@ -105,6 +124,7 @@ public class RecordingFile {
         root.putDouble("startZ", startZ);
         root.putFloat("startYaw", startYaw);
         root.putFloat("startPitch", startPitch);
+        root.putInt("startSlot", startSlot);
 
         ListTag segList = new ListTag();
         for (RecordedSegment seg : segments) {
@@ -117,6 +137,12 @@ public class RecordingFile {
             kfList.add(kf.toNbt());
         }
         root.put("keyframes", kfList);
+
+        ListTag actionList = new ListTag();
+        for (RecordedAction action : actions) {
+            actionList.add(action.toNbt());
+        }
+        root.put("actions", actionList);
         return root;
     }
 
@@ -137,6 +163,7 @@ public class RecordingFile {
         rf.startZ = NbtCompat.getDouble(root, "startZ", 0.0);
         rf.startYaw = NbtCompat.getFloat(root, "startYaw", 0.0f);
         rf.startPitch = NbtCompat.getFloat(root, "startPitch", 0.0f);
+        rf.startSlot = NbtCompat.getInt(root, "startSlot", 0);
 
         ListTag segList = NbtCompat.getCompoundList(root, "segments");
         for (int i = 0; i < segList.size(); i++) {
@@ -151,6 +178,14 @@ public class RecordingFile {
             CompoundTag tag = NbtCompat.getCompoundAt(kfList, i);
             if (tag != null) {
                 rf.keyframes.add(PositionKeyframe.fromNbt(tag));
+            }
+        }
+
+        ListTag actionList = NbtCompat.getCompoundList(root, "actions");
+        for (int i = 0; i < actionList.size(); i++) {
+            CompoundTag tag = NbtCompat.getCompoundAt(actionList, i);
+            if (tag != null) {
+                rf.actions.add(RecordedAction.fromNbt(tag));
             }
         }
 

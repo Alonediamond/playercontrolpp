@@ -1,5 +1,7 @@
 package com.alonediamond.playercontrolpp.input;
 
+import com.alonediamond.playercontrolpp.mixin.client.KeyMappingAccessor;
+
 import net.minecraft.client.KeyMapping;
 
 import java.util.ArrayList;
@@ -28,6 +30,15 @@ public final class SimulatedInput {
     private static final Map<KeyMapping, Set<Object>> HOLDERS = new IdentityHashMap<>();
     /** 本类按下且还没松开的键——只有 {@link #apply()} 能清。 */
     private static final Set<KeyMapping> PRESSED = newIdentitySet();
+
+    /**
+     * 上一个 tick 是否被我们按下——用来检测按下沿。真实玩家按下键时 GLFW 事件
+     * 会调 {@code KeyMapping.click()} 让 {@code clickCount} +1，实体攻击和挖掘起手
+     * 只认这个计数（{@code while (consumeClick()) startAttack()}），光按住不放
+     * 只驱动持续分支（挖掘延续、按住使用），永远不会打出第一下。模拟输入在上升沿
+     * 补一次计数，录下来的攻击/使用回放时才能真的发生。
+     */
+    private static final Set<KeyMapping> PREV_HELD = newIdentitySet();
 
     private SimulatedInput() {}
 
@@ -87,11 +98,18 @@ public final class SimulatedInput {
         for (KeyMapping key : HOLDERS.keySet()) {
             key.setDown(true);
             PRESSED.add(key);
+            // 按下沿：上一 tick 没按、这一 tick 按了 → 补一次点击计数，等价于真实按键事件。
+            if (!PREV_HELD.contains(key)) {
+                KeyMappingAccessor accessor = (KeyMappingAccessor) key;
+                accessor.playercontrolpp$setClickCount(accessor.playercontrolpp$getClickCount() + 1);
+            }
         }
         PRESSED.removeIf(key -> {
             if (HOLDERS.containsKey(key)) return false;
             key.setDown(false);
             return true;
         });
+        PREV_HELD.clear();
+        PREV_HELD.addAll(HOLDERS.keySet());
     }
 }

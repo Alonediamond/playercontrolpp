@@ -39,6 +39,8 @@ public class RecordingListGui extends Screen {
 
     private EditBox nameField;
     private EditBox playCountField;
+    private Button loopButton;
+    private boolean loopMode;
     private boolean dirty;
 
     public RecordingListGui(Screen parent) {
@@ -70,9 +72,10 @@ public class RecordingListGui extends Screen {
                         dirty = true;
                         refreshFields();
                     } else {
-                        if (RecordingManager.getInstance().getPlayer().isBusy()) return;
-                        rec.startRecording(
-                                StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
+                        if (!rec.startRecording(
+                                StringUtils.translate("playercontrolpp.gui.recording.new_recording"))) {
+                            return;
+                        }
                         ScreenCompat.setScreen(Minecraft.getInstance(), null); // 退出所有界面
                     }
                 })
@@ -105,15 +108,31 @@ public class RecordingListGui extends Screen {
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.recording.play")),
                 btn -> {
                     if (selectedRecording != null) {
-                        int count = 1;
-                        try { count = Integer.parseInt(playCountField.getValue()); }
-                        catch (NumberFormatException ignored) {}
-                        RecordingManager.getInstance().getPlayer().start(selectedRecording, count);
-                        ScreenCompat.setScreen(Minecraft.getInstance(), null); // 退出所有界面
+                        // 循环模式下一直放，直到手动按停止（playCount 0 = 无限）。
+                        int count = loopMode ? 0 : 1;
+                        if (!loopMode) {
+                            try { count = Integer.parseInt(playCountField.getValue()); }
+                            catch (NumberFormatException ignored) {}
+                        }
+                        if (RecordingManager.getInstance().getPlayer().start(selectedRecording, count)) {
+                            ScreenCompat.setScreen(Minecraft.getInstance(), null); // 退出所有界面
+                        }
                     }
                 })
                 .bounds(0, 0, 45, 20)
                 .build()).visible = false;
+
+        // 循环模式开关 —— 未选中录制时隐藏
+        loopButton = Button.builder(loopLabel(), btn -> {
+            loopMode = !loopMode;
+            if (selectedRecording != null) {
+                selectedRecording.setLoop(loopMode);
+                dirty = true;
+            }
+            btn.setMessage(loopLabel());
+        }).bounds(0, 0, 60, 20).build();
+        loopButton.visible = false;
+        this.addRenderableWidget(loopButton);
 
         // 停止 —— 未开始回放时隐藏
         this.addRenderableWidget(Button.builder(
@@ -136,8 +155,10 @@ public class RecordingListGui extends Screen {
 
     private void refreshFields() {
         boolean hasSel = selectedRecording != null;
+        loopMode = hasSel && selectedRecording.isLoop();
+        loopButton.setMessage(loopLabel());
         nameField.setEditable(hasSel);
-        playCountField.setEditable(hasSel);
+        playCountField.setEditable(hasSel && !loopMode);
 
         if (hasSel) {
             nameField.setValue(selectedRecording.getName());
@@ -146,6 +167,14 @@ public class RecordingListGui extends Screen {
             nameField.setValue("");
             playCountField.setValue("");
         }
+    }
+
+    /** 循环开关的显示文本。 */
+    private Component loopLabel() {
+        String key = loopMode
+                ? "playercontrolpp.gui.recording.loop_on"
+                : "playercontrolpp.gui.recording.loop_off";
+        return Component.nullToEmpty(StringUtils.translate(key));
     }
 
     //#if MC >= 260000
@@ -217,7 +246,7 @@ public class RecordingListGui extends Screen {
         }
         context.text(font, Component.nullToEmpty(status), RIGHT_X + 4, TOP + 4, statusColor,true);
 
-        // 没选中任何录制时隐藏 播放/停止
+        // 没选中任何录制时隐藏 播放/停止/循环
         if (selectedRecording == null) {
             String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
             String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
@@ -227,6 +256,7 @@ public class RecordingListGui extends Screen {
                     if (msg.equals(playLabel) || msg.equals(stopLabel)) btn.visible = false;
                 }
             }
+            loopButton.visible = false;
             return;
         }
 
@@ -249,13 +279,19 @@ public class RecordingListGui extends Screen {
         context.text(font, Component.nullToEmpty(info), RIGHT_X + 4, ry + 4, 0xFFCCCCCC,true);
         ry += ROW_H;
 
-        // 播放次数标签 + 输入框
+        // 播放次数标签 + 输入框（循环模式下输入框禁用）
         context.text(font,
                 Component.nullToEmpty(StringUtils.translate("playercontrolpp.gui.recording.play_count") + ":"),
                 RIGHT_X, ry + 4, 0xFFFFFFFF,true);
         playCountField.setX(FIELD_X);
         playCountField.setY(ry + 2);
+        playCountField.setEditable(!loopMode);
         context.renderWidget(playCountField, mouseX, mouseY, delta);
+        // 循环开关紧跟在次数输入框右侧
+        loopButton.setX(FIELD_X + 56);
+        loopButton.setY(ry + 1);
+        loopButton.visible = true;
+        loopButton.setMessage(loopLabel());
         ry += ROW_H + 4;
 
         // 播放 / 停止 按钮

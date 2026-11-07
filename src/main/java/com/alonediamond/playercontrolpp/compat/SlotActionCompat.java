@@ -85,4 +85,13 @@ public final class SlotActionCompat {
         //$$ mc.gameMode.handleInventoryMouseClick(containerId, slotIndex, hotbarIndex, ClickType.SWAP, mc.player);
         //#endif
     }
+
+    /**
+     * 主副手交换（vanilla 的 F 键）。走 {@code mc.player} 自己的容器，屏幕空间槽位
+     * {@code 45} 是背包界面的副手格，这是同一服务端操作的屏幕入口。
+     */
+    public static void swapWithOffhand(Minecraft mc) {
+        if (mc.player == null) return;
+        swapWithHotbar(mc, mc.player.inventoryMenu.containerId, 45, 40);
+    }
 }

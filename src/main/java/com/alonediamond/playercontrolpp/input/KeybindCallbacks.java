@@ -107,9 +107,11 @@ public class KeybindCallbacks {
                 RecordingFile rf = rec.stopRecording();
                 RecordingManager.getInstance().addRecording(rf);
             } else {
-                // 回放期间（含还在加载）禁止开始新录制
-                if (RecordingManager.getInstance().getPlayer().isBusy()) return false;
-                rec.startRecording(StringUtils.translate("playercontrolpp.gui.recording.new_recording"));
+                // 回放期间（含还在加载）禁止开始新录制；判据在 startRecording 里。
+                if (!rec.startRecording(
+                        StringUtils.translate("playercontrolpp.gui.recording.new_recording"))) {
+                    return false;
+                }
                 ScreenCompat.setScreen(client, null); // 退出所有界面
             }
             return true;

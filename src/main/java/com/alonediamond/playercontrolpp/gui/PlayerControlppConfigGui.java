@@ -80,6 +80,16 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 return ConfigOptionWrapper.createFor(baritoneOptions);
             case ROUTES:
                 return Collections.emptyList();
+            case RECORDING_FEATURES:
+                List<IConfigBase> recOptions = new ArrayList<>();
+                recOptions.add(Configs.Settings.RECORD_DROP);
+                recOptions.add(Configs.Settings.RECORD_HOTBAR);
+                recOptions.add(Configs.Settings.RECORD_CHAT);
+                recOptions.add(Configs.Settings.RECORD_MOVEMENT);
+                recOptions.add(Configs.Settings.RECORD_LOOK);
+                recOptions.add(Configs.Settings.RECORD_ATTACK);
+                recOptions.add(Configs.Settings.RECORD_USE);
+                return ConfigOptionWrapper.createFor(recOptions);
         }
         return Collections.emptyList();
     }
@@ -122,6 +132,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         SETTINGS("playercontrolpp.gui.tab.settings"),
         ROUTES("playercontrolpp.gui.tab.routes"),
         RECORDING("playercontrolpp.gui.tab.recording"),
+        RECORDING_FEATURES("playercontrolpp.gui.tab.recording_features"),
         BARITONE("playercontrolpp.gui.tab.baritone");
 
         private final String translationKey;
