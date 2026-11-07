@@ -32,6 +32,9 @@ bin/
 
 run/
 
+# graphify analysis output (generated, not part of the mod)
+graphify-out/
+
 # NOTE: libs/ is intentionally NOT ignored — the malilib / ModMenu jars for every
 # supported Minecraft version are committed so the project builds after a plain clone.
 /.gradle-user-home/daemon/9.5.1/daemon-37432.out.log

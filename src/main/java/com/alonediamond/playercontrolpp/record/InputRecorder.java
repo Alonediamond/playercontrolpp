@@ -1,6 +1,8 @@
 package com.alonediamond.playercontrolpp.record;
 
 import com.alonediamond.playercontrolpp.compat.InputCompat;
+import com.alonediamond.playercontrolpp.compat.InventoryCompat;
+import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -20,15 +22,15 @@ public class InputRecorder {
 
     /** 两个位置关键帧之间的 tick 数。 */
     private static final int KEYFRAME_INTERVAL = 20;
-    /** 「录制中」ActionBar 提示的间隔 tick 数。 */
-    private static final int STATUS_INTERVAL = 40;
 
     private boolean recording;
     private int totalTicks;
+    private int actionCount;
 
     // Recording metadata
     private double startX, startY, startZ;
     private float startYaw, startPitch;
+    private int startSlot;
     private String dimension;
     private String recordingName;
 
@@ -37,33 +39,55 @@ public class InputRecorder {
     private RecordedSegment currentSegment;
 
     private final List<PositionKeyframe> keyframes = new ArrayList<>();
+    /** 与段同源的离散动作事件（丢、换手、发言、命令…），按 tick 升序。 */
+    private final List<RecordedAction> actions = new ArrayList<>();
 
-    private int actionBarCounter;
+    private final ActionRecorder actionRecorder = new ActionRecorder();
 
     public boolean isRecording() { return recording; }
 
-    public void startRecording(String name) {
+    /** @return 录制内的绝对 tick；只在 {@link #isRecording()} 时有意义。 */
+    public int getTick() { return totalTicks; }
+
+    /** @return 至今记到的离散动作数；给「录制中」状态栏用。 */
+    public int getActionCount() { return actionCount; }
+
+    /**
+     * 开始录制。
+     *
+     * @return 真的开始了才返回 {@code true}；没有玩家、或回放正忙时返回 {@code false}
+     *         并给出提示。回放期间不录：回放按下的键会被当成玩家输入录进去。
+     */
+    public boolean startRecording(String name) {
         Minecraft client = Minecraft.getInstance();
         LocalPlayer player = client.player;
-        if (player == null) return;
+        if (player == null) return false;
+        if (RecordingManager.getInstance().getPlayer().isBusy()) {
+            MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.playback_active");
+            return false;
+        }
 
         this.recordingName = name;
         this.totalTicks = 0;
-        this.actionBarCounter = 0;
+        this.actionCount = 0;
 
         this.segments.clear();
         this.keyframes.clear();
+        this.actions.clear();
         this.currentSegment = null;
+        this.actionRecorder.reset(client);
 
         this.startX = player.getX();
         this.startY = player.getY();
         this.startZ = player.getZ();
         this.startYaw = player.getYRot();
         this.startPitch = player.getXRot();
+        this.startSlot = InventoryCompat.getSelectedSlot(player.getInventory());
         this.dimension = client.level.dimension().identifier().toString();
         this.recording = true;
 
         MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.started");
+        return true;
     }
 
     public RecordingFile stopRecording() {
@@ -76,6 +100,14 @@ public class InputRecorder {
         }
 
         Minecraft client = Minecraft.getInstance();
+        // 末尾补一个关键帧：循环模式的回程要靠它知道录制结束时的位置。
+        if (totalTicks > 0 && client.player != null
+                && (keyframes.isEmpty()
+                    || keyframes.get(keyframes.size() - 1).tick != totalTicks)) {
+            LocalPlayer end = client.player;
+            keyframes.add(new PositionKeyframe(totalTicks, end.getX(), end.getY(), end.getZ()));
+        }
+
         if (client.player != null) {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.stopped");
         }
@@ -89,10 +121,23 @@ public class InputRecorder {
         file.setStartZ(startZ);
         file.setStartYaw(startYaw);
         file.setStartPitch(startPitch);
+        file.setStartSlot(startSlot);
         // 交出副本，继续录制不会改到已经交出去的东西。
         file.setSegments(new ArrayList<>(segments));
         file.setKeyframes(new ArrayList<>(keyframes));
+        file.setActions(new ArrayList<>(actions));
         return file;
+    }
+
+    /**
+     * 收一条动作事件。两个入口：{@code ActionCapture} 的 mixin（事件不带 tick，统一在这打上）
+     * 和 {@link ActionRecorder} 的轮询差分（已带 tick）。
+     */
+    public void addAction(RecordedAction action) {
+        if (action == null) return;
+        if (action.tick == 0) action.tick = totalTicks;
+        actions.add(action);
+        actionCount++;
     }
 
     public void tick(Minecraft client) {
@@ -101,21 +146,22 @@ public class InputRecorder {
         LocalPlayer player = client.player;
         if (player == null || player.input == null) return;
 
-        actionBarCounter++;
-        if (actionBarCounter % STATUS_INTERVAL == 0) {
-            MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.active");
-        }
-
         var movementVec = player.input.getMoveVector();
-        float fw = movementVec.y;
-        float sw = movementVec.x;
-        boolean j = InputCompat.isJumping(player);
-        boolean sn = InputCompat.isSneaking(player);
-        boolean sp = InputCompat.isSprinting(player);
-        boolean at = client.options.keyAttack.isDown();
-        boolean us = client.options.keyUse.isDown();
-        float y = Mth.wrapDegrees(player.getYRot());
-        float p = player.getXRot();
+        // 每类输入各自受「录制功能」开关控制；关掉的类别一律记成中性值，
+        // 这样 RLE 段不会因为它而分裂，回放时也不会驱动对应的键。
+        boolean move = Configs.Settings.RECORD_MOVEMENT.getBooleanValue();
+        float fw = move ? movementVec.y : 0f;
+        float sw = move ? movementVec.x : 0f;
+        boolean j = move && InputCompat.isJumping(player);
+        boolean sn = move && InputCompat.isSneaking(player);
+        boolean sp = move && InputCompat.isSprinting(player);
+        boolean at = Configs.Settings.RECORD_ATTACK.getBooleanValue()
+                && client.options.keyAttack.isDown();
+        boolean us = Configs.Settings.RECORD_USE.getBooleanValue()
+                && client.options.keyUse.isDown();
+        boolean look = Configs.Settings.RECORD_LOOK.getBooleanValue();
+        float y = look ? Mth.wrapDegrees(player.getYRot()) : 0f;
+        float p = look ? player.getXRot() : 0f;
 
         if (currentSegment != null && currentSegment.matches(fw, sw, j, sn, sp, y, p, at, us)) {
             currentSegment.duration++;
@@ -128,6 +174,10 @@ public class InputRecorder {
         }
 
         totalTicks++;
+
+        // 离散动作：先采样（拿的是本 tick 结束后的世界状态，差分上一 tick 的），
+        // 再存关键帧。顺序无所谓，两者互不依赖。
+        actionRecorder.tick(client, this);
 
         if (totalTicks % KEYFRAME_INTERVAL == 0) {
             keyframes.add(new PositionKeyframe(totalTicks, player.getX(), player.getY(), player.getZ()));

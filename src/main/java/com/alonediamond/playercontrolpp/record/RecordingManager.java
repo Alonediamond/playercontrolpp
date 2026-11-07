@@ -248,6 +248,20 @@ public class RecordingManager implements ClientFeature {
         player.tick(client);
     }
 
+    /**
+     * 换世界、换维度、断线：位置与维度都对不上了。
+     *
+     * <p>录到一半的先存下来（数据本身还是有效的），回放直接停——继续放只会一路跑偏，
+     * 而且回放按下的键会留在新世界里。
+     */
+    @Override
+    public void onWorldChange() {
+        if (recorder.isRecording()) {
+            addRecording(recorder.stopRecording());
+        }
+        player.stop();
+    }
+
     @Override
     public boolean isActive() {
         return recorder.isRecording() || player.isPlaying();
