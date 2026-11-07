@@ -1,11 +1,11 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.material;
 
 import net.minecraft.world.item.Item;
 
 /**
  * Litematica 材料清单里还需要收集的单个条目。
  */
-public class MaterialItemEntry {
+public final class MaterialItemEntry {
     public final Item item;
     public final int neededCount;
     public final int maxStackSize;

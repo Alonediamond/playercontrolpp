@@ -1,42 +1,48 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
-import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialListReader;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ItemTransferExecutor;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerSearcher;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
+import com.alonediamond.playercontrolpp.feature.automaterial.navigation.BaritonePathingController;
+import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
+import com.alonediamond.playercontrolpp.feature.automaterial.shulker.MixedBoxReturn;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialTask;
+import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
+
+import com.alonediamond.playercontrolpp.feature.ClientFeature;
+import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
+import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+import com.alonediamond.playercontrolpp.util.MessageUtil;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.Minecraft;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
-import com.alonediamond.playercontrolpp.util.ItemUtil;
-import com.alonediamond.playercontrolpp.util.MessageUtil;
-import com.alonediamond.playercontrolpp.util.PlayerUtil;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.inventory.ShulkerBoxMenu;
-import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import com.alonediamond.playercontrolpp.Playercontrolpp;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/**
- * 驱动自动备货的状态机：把每个状态派发给拥有它的模块，并在它们之上跑两个子状态机——
- * {@code ShulkerBoxAccess}（存盒 / 开盒取物）与 {@code RawMaterialTask}（追溯原材料并合成）。
- *
- * <p>三个"放弃当前目标"的出口集中在这里：{@link #skipCurrentItem()} 是顶层的"这个物品不要了"，
- * {@link #onCurrentTargetSatisfied()} / {@link #onCurrentTargetUnavailable()} 则会先问一句
- * 原材料追溯任务——追踪途中的"子材料到手了/找不到了"是它的推进信号，不是顶层物品的成败。
- */
-public class TaskStateMachine {
-
+/** 自动备货入口和主状态机；生命周期、状态转换以及子任务衔接由本类统一拥有。 */
+public final class AutoMaterialGatherer implements ClientFeature {
+    private static final AutoMaterialGatherer INSTANCE = new AutoMaterialGatherer();
+    public enum State {
+        IDLE, ANALYZING, SEARCHING, PATHING, OPENING_CONTAINER,
+        TRANSFERRING_ITEM, VERIFYING, NEXT_ITEM, COMPLETED, FAILED, STOPPED
+    }
+    private State state = State.IDLE;
+    private boolean active;
+    private int currentItemIndex;
+    private int requiredStorageStartCount = -1;
     /**
      * 存盒结束后再等几 tick，让服务端的物品栏更新先到，再去数手上真正有多少。
      */
     private static final int STORAGE_SYNC_TICKS = 15;
 
     private final GatherContext ctx;
-    private final MaterialAnalyzer materialAnalyzer;
+    private final MaterialListReader materialReader = new MaterialListReader();
     private final ContainerSearcher containerSearcher;
     private final BaritonePathingController pathingController;
     private final ContainerOpener containerOpener;
@@ -52,6 +58,7 @@ public class TaskStateMachine {
     private boolean resumeNextItemAfterStorage;
     /** 这趟存盒只是"顺手收一下"：找不到盒子时跳过即可，不要停掉整轮备货。 */
     private boolean voluntaryStorage;
+    private boolean initialStorageDone;
 
     /** 存盒后的「同步并核对」还没做完时为 true。 */
     private boolean pendingStorageDone;
@@ -59,22 +66,161 @@ public class TaskStateMachine {
     /** FAILED 转换没给原因时的兜底文案。 */
     private static final String DEFAULT_FAILURE_KEY = "playercontrolpp.message.baritone.pathing_stuck";
 
-    public TaskStateMachine(GatherContext ctx,
-                            MaterialAnalyzer materialAnalyzer,
-                            ContainerSearcher containerSearcher,
-                            BaritonePathingController pathingController,
-                            ContainerOpener containerOpener,
-                            ItemTransferExecutor transferExecutor,
-                            ShulkerBoxAccess shulkerAccess,
-                            RawMaterialTask rawMaterialTask) {
-        this.ctx = ctx;
-        this.materialAnalyzer = materialAnalyzer;
-        this.containerSearcher = containerSearcher;
-        this.pathingController = pathingController;
-        this.containerOpener = containerOpener;
-        this.transferExecutor = transferExecutor;
-        this.shulkerAccess = shulkerAccess;
-        this.rawMaterialTask = rawMaterialTask;
+    private AutoMaterialGatherer() {
+        ctx = new GatherContext();
+        containerSearcher = new ContainerSearcher();
+        pathingController = new BaritonePathingController(BaritoneIntegration.getInstance());
+        containerOpener = new ContainerOpener();
+        shulkerAccess = new ShulkerBoxAccess();
+        rawMaterialTask = new RawMaterialTask(shulkerAccess);
+        transferExecutor = new ItemTransferExecutor(shulkerAccess);
+    }
+
+    public static AutoMaterialGatherer getInstance() { return INSTANCE; }
+
+    public State getState() { return state; }
+
+    @Override
+    public boolean isActive() { return active; }
+
+    public boolean toggle() {
+        if (active) {
+            stop();
+            return false;
+        } else {
+            return start();
+        }
+    }
+
+    private boolean start() {
+        ctx.client = Minecraft.getInstance();
+        if (ctx.client.player == null || ctx.client.level == null) return false;
+
+        if (!areAllThreeModsPresent() || !LitematicaIntegration.getInstance().isLoaded()
+                || !BaritoneIntegration.getInstance().isLoaded() || !ChestTrackerIntegration.getInstance().isLoaded()) {
+            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.mods_missing");
+            return false;
+        }
+
+        if (AutoRestockFeature.getInstance().isActive()
+                || com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature.isEnabled()
+                || com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature.isActive()) {
+            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.busy");
+            return false;
+        }
+        pathingController.cancelPathing();
+        containerOpener.closeAnyContainer(ctx.client);
+
+        resetRunState();
+        active = true;
+        ctx.reset();
+        state = State.IDLE;
+
+        MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.started");
+        return true;
+    }
+
+    public void stop() {
+        setState(State.STOPPED);
+        MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.stopped");
+    }
+
+    @Override
+    public void onClientTick(Minecraft mc) {
+        ctx.client = mc;
+        try {
+            tickTask();
+        } catch (Exception e) {
+            com.alonediamond.playercontrolpp.Playercontrolpp.LOGGER.error("Auto material task failed", e);
+            setState(State.STOPPED, "playercontrolpp.message.baritone.transfer_interrupted");
+        }
+    }
+
+    @Override
+    public void onWorldChange() {
+        if (active) {
+            stop();
+            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.world_change");
+        }
+    }
+
+    public static boolean areAllThreeModsPresent() {
+        FabricLoader loader = FabricLoader.getInstance();
+        return (loader.isModLoaded("zbaritone")||loader.isModLoaded("baritone-meteor")||loader.isModLoaded("baritone"))
+                && loader.isModLoaded("litematica")
+                && loader.isModLoaded("chesttracker");
+    }
+
+    private void analyze() {
+        try {
+            var result = materialReader.read(ctx.client.player);
+            if (result.error() != null) {
+                MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone." + result.error());
+                setState(State.STOPPED);
+                return;
+            }
+            ctx.missingItems.clear();
+            ctx.missingItems.addAll(result.items());
+            ctx.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
+            currentItemIndex = 0;
+            if (startInitialStorage()) return;
+            // NEXT_ITEM 会跳过已满足条目，满包且材料已齐也能正常结束。
+            setState(State.NEXT_ITEM);
+        } catch (Exception e) {
+            Playercontrolpp.LOGGER.warn("Unable to read material requirements", e);
+            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.analyze_error", e.toString());
+            setState(State.STOPPED);
+        }
+    }
+
+    private boolean isCurrentItemSatisfied() {
+        if (ctx.currentTargetItem == null) return false;
+        return ctx.countHeld(ctx.currentTargetItem) >= ctx.targetNeededTotal;
+    }
+
+    /** 换到下一个缺失物品，或者结束。 */
+    private void nextItem() {
+        transferExecutor.reset();
+
+        if (currentItemIndex >= ctx.missingItems.size()) {
+            setState(State.COMPLETED);
+            return;
+        }
+
+        MaterialItemEntry entry = ctx.missingItems.get(currentItemIndex);
+        ctx.currentTargetItem = entry.item;
+        ctx.targetNeededTotal = entry.neededCount;
+        ctx.currentPosIndex = 0;
+        ctx.chestRetryCount = 0;
+        ctx.foundPositions.clear();
+        // 对上一件物品空手的容器，对这一件可能还有货。
+        ctx.exhaustedPositions.clear();
+
+        if (ctx.countHeld(ctx.currentTargetItem) >= ctx.targetNeededTotal) {
+            onCurrentTargetSatisfied();
+            return;
+        }
+
+        setState(State.SEARCHING);
+    }
+
+    /** 关闭容器后重新数一遍，然后决定推进还是换下一个位置。 */
+    private void verifyTransfer() {
+
+        if (ctx.countHeld(ctx.currentTargetItem) >= ctx.targetNeededTotal) {
+            onCurrentTargetSatisfied();
+            return;
+        }
+
+        ctx.currentPosIndex++;
+        ctx.adjacentContainerTargets = null;
+        ctx.adjacentTryIndex = 0;
+
+        if (ctx.currentPosIndex >= ctx.foundPositions.size()) {
+            setState(State.SEARCHING);
+        } else {
+            pathingController.navigateTo(ctx.foundPositions.get(ctx.currentPosIndex), ctx, this, containerOpener);
+        }
     }
 
     public void setState(State newState) {
@@ -82,7 +228,10 @@ public class TaskStateMachine {
     }
 
     /** 每次开始新一轮备货时调用：清掉只在单轮内有效的判断与中间状态。 */
-    public void resetRunState() {
+    private void resetRunState() {
+        requiredStorageStartCount = -1;
+        initialStorageDone = false;
+        transferExecutor.reset();
         rawMaterialPrereqChecked = false;
         rawMaterialPrereqOk = false;
         pendingTraceStorage = false;
@@ -101,7 +250,7 @@ public class TaskStateMachine {
      *                  把用户引去排查毫不相干的 Baritone。
      */
     public void setState(State newState, String reasonKey) {
-        ctx.state = newState;
+        state = newState;
         switch (newState) {
             case ANALYZING:
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.analyzing");
@@ -122,8 +271,10 @@ public class TaskStateMachine {
             case NEXT_ITEM:
                 break;
             case COMPLETED:
-                MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.completed");
-                ctx.active = false;
+                long missing = ctx.missingItems.stream().filter(entry -> ctx.countHeld(entry.item) < entry.neededCount).count();
+                if (missing > 0) MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.incomplete", missing);
+                else MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.completed");
+                active = false;
                 stopEverythingAndTasks();
                 break;
             case FAILED:
@@ -134,7 +285,8 @@ public class TaskStateMachine {
                 ctx.adjacentTryIndex = 0;
                 break;
             case STOPPED:
-                ctx.active = false;
+                if (reasonKey != null) MessageUtil.sendActionBar(ctx.client, reasonKey);
+                active = false;
                 stopEverythingAndTasks();
                 break;
             default:
@@ -154,11 +306,13 @@ public class TaskStateMachine {
     private void stopEverythingAndTasks() {
         stopEverything();
         rawMaterialTask.cancel(ctx.client);
+        shulkerAccess.cancel(ctx.client);
+        clearMixedBoxReturn();
     }
 
-    public void tick() {
-        if (!ctx.active || ctx.client.player == null || ctx.client.player.isDeadOrDying()) {
-            if (ctx.active) {
+    private void tickTask() {
+        if (!active || ctx.client.player == null || ctx.client.level == null || ctx.client.player.isDeadOrDying()) {
+            if (active) {
                 setState(State.STOPPED);
             }
             return;
@@ -192,31 +346,22 @@ public class TaskStateMachine {
             }
             pendingStorageDone = false;
             storageSyncTicks = 0;
+            if (requiredStorageStartCount >= 0) {
+                int before = requiredStorageStartCount;
+                requiredStorageStartCount = -1;
+                if (shulkerAccess.countStorableMaterials(ctx) >= before) {
+                    setState(State.STOPPED, "playercontrolpp.message.baritone.inventory_full");
+                    return;
+                }
+            }
 
             // 开盒取物之后：盒子是从容器里拿出来的就先还回去。
             if (ctx.mixedBoxReturnSlot >= 0) {
-                startMixedBoxReturn();
+                MixedBoxReturn.start(ctx, this, containerOpener);
                 return;
             }
 
-            // 追溯失败触发的存盒：当前目标已经作废（索引早就推进过了），直接走下一个物品。
-            if (resumeNextItemAfterStorage) {
-                resumeNextItemAfterStorage = false;
-                voluntaryStorage = false;
-                setState(State.NEXT_ITEM);
-                return;
-            }
-            voluntaryStorage = false;
-
-            if (ctx.currentTargetItem == null) {
-                // 存盒发生在还没选定任何物品之前（从 ANALYZING 触发的）；
-                // 此时去搜索会拿 null 物品去问箱子追踪。改为重新分析。
-                setState(State.ANALYZING);
-            } else if (transferExecutor.isCurrentItemSatisfied(ctx)) {
-                onCurrentTargetSatisfied();
-            } else {
-                setState(State.SEARCHING);
-            }
+            resumeAfterStorage();
             return;
         }
 
@@ -232,14 +377,7 @@ public class TaskStateMachine {
                 ctx.transferCooldown--;
                 return;
             }
-            ctx.mixedBoxReturnClosing = false;
-            int boxSlot = ctx.mixedBoxReturnSlot;
-            if (boxSlot >= 0) {
-                ctx.extractionBoxSlots.remove(boxSlot);
-            }
-            containerOpener.closeAnyContainer(ctx.client);
-            clearMixedBoxReturn();
-            continueAfterExtraction();
+            MixedBoxReturn.verify(ctx, this);
             return;
         }
 
@@ -252,22 +390,15 @@ public class TaskStateMachine {
             }
         }
 
-        switch (ctx.state) {
+        switch (state) {
             case IDLE:
-                if (ctx.active) {
+                if (active) {
                     setState(State.ANALYZING);
                 }
                 break;
 
             case ANALYZING:
-                materialAnalyzer.analyze(ctx, this);
-                break;
-
-            case INVENTORY:
-                if (!(ctx.client.player.containerMenu instanceof ShulkerBoxMenu)) {
-                    break;
-                }
-                putItemInInventory(ctx);
+                analyze();
                 break;
 
             case SEARCHING:
@@ -283,11 +414,12 @@ public class TaskStateMachine {
                 break;
 
             case VERIFYING:
-                transferExecutor.verify(ctx, this, containerOpener, pathingController);
+                if (ctx.transferCooldown > 0) break;
+                verifyTransfer();
                 break;
 
             case NEXT_ITEM:
-                transferExecutor.nextItem(ctx, this);
+                nextItem();
                 break;
 
             case OPENING_CONTAINER:
@@ -305,40 +437,19 @@ public class TaskStateMachine {
         }
     }
 
-    private void putItemInInventory(GatherContext ctx) {
-        LocalPlayer player = ctx.client.player;
-        //Inventory inventory = player.getInventory();
-        List<Slot> indexes = new ArrayList<>();
-        for (Slot slot : player.containerMenu.slots) {
-            ItemStack item = slot.getItem();
-            if (ctx.neededItems.contains(item.getItem())) {
-                indexes.add(slot);
-            }
-        }
-        int times = 0;
-        for (Slot slot : indexes) {
-            if (times >= 27) {
-                break;
-            }
-            SlotActionCompat.quickMove(ctx.client, player.containerMenu.containerId, slot.index/* + 27*/);
-            times++;
-        }
-        player.closeContainer();
-        setState(State.ANALYZING);
+    /**
+     * 启动前的可选整理，只执行一次，失败时保留材料并继续普通备货。
+     */
+    private boolean startInitialStorage() {
+        if (initialStorageDone) return false;
+        initialStorageDone = true;
+        if (!ShulkerBoxAccess.isEnabled() || !shulkerAccess.hasStorableMaterials(ctx)) return false;
+        voluntaryStorage = true;
+        return shulkerAccess.startStorage(ctx, true);
     }
 
-    /**
-     * 检测到背包已满时调用。用户开了自动存盒就交给存盒流程，否则以「背包已满」提示停止。
-     */
+    /** 满包时必须成功释放材料占用；同步后没有实际进展就停止，避免反复开盒。 */
     public void onInventoryFull() {
-        // 刚刚才取走一整盒，这时再往盒子里存等于立刻撤销自己。
-        if (ctx.justTookShulkerBox) {
-            ctx.justTookShulkerBox = false;
-            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.inventory_full");
-            setState(State.STOPPED);
-            return;
-        }
-
         // 存盒只挪缺失清单上的材料，手上一点都没有时它腾不出任何空间；
         // 它照样会报 DONE，而依然满着的背包会无限重新触发它。
         if (ShulkerBoxAccess.isEnabled() && shulkerAccess.hasStorableMaterials(ctx)) {
@@ -346,6 +457,7 @@ public class TaskStateMachine {
             containerOpener.closeAnyContainer(ctx.client);
             clearMixedBoxReturn();
             ctx.mixedBoxReturnClosing = false;
+            requiredStorageStartCount = shulkerAccess.countStorableMaterials(ctx);
             if (shulkerAccess.startStorage(ctx)) {
                 return;
             }
@@ -372,7 +484,7 @@ public class TaskStateMachine {
 
     /** 顶层物品的"这个不要了"：跳过它，处理清单里的下一个。 */
     public void skipCurrentItem() {
-        ctx.currentItemIndex++;
+        currentItemIndex++;
         setState(State.NEXT_ITEM);
     }
 
@@ -389,7 +501,7 @@ public class TaskStateMachine {
             rawMaterialTask.onSubItemDone(ctx, this);
             return;
         }
-        ctx.currentItemIndex++;
+        currentItemIndex++;
         setState(State.NEXT_ITEM);
     }
 
@@ -425,7 +537,7 @@ public class TaskStateMachine {
         // 追溯过一次还是凑不齐的物品不再重试，否则"搜不到 → 追溯 → 仍不够 → 再搜"会打转。
         if (ctx.tracedItems.contains(ctx.currentTargetItem)) return false;
 
-        int gap = ctx.targetNeededTotal - ctx.currentlyGathered;
+        int gap = ctx.targetNeededTotal - ctx.countHeld(ctx.currentTargetItem);
         if (gap <= 0) return false;
 
         if (!checkRawMaterialPrerequisites()) return false;
@@ -467,52 +579,37 @@ public class TaskStateMachine {
 
     /** 开盒取物（以及把盒子还回去）之后重新核对当前物品，决定继续搜索还是换下一个。 */
     public void continueAfterExtraction() {
-        if (ctx.currentTargetItem == null) {
-            setState(State.ANALYZING);
+        if (ctx.storageAfterExtraction) {
+            ctx.storageAfterExtraction = false;
+            onInventoryFull();
             return;
         }
-        if (transferExecutor.isCurrentItemSatisfied(ctx)) {
+        if (ctx.currentTargetItem == null) {
+            setState(State.NEXT_ITEM);
+            return;
+        }
+        if (isCurrentItemSatisfied()) {
             onCurrentTargetSatisfied();
         } else {
             setState(State.SEARCHING);
         }
     }
 
-    /**
-     * 把从容器里取出来的杂盒还回原容器。
-     *
-     * <p>复用现成的开容器机制：够得着就直接开，界面出现后由
-     * {@code ContainerOpener.checkOpenResult} 把盒子 quickMove 回容器；够不着就提示一声，
-     * 盒子留在背包里继续用（作者确认：不需要塞回去，材料已经拿到手了）。
-     */
-    private void startMixedBoxReturn() {
-        Minecraft mc = ctx.client;
-        int boxSlot = ctx.mixedBoxReturnSlot;
-        BlockPos target = ctx.mixedBoxReturnTarget;
-
-        if (mc.player == null || target == null || boxSlot < 0 || boxSlot >= Inventory.INVENTORY_SIZE
-                || !ItemUtil.isShulkerBox(mc.player.getInventory().getItem(boxSlot))) {
-            clearMixedBoxReturn();
-            continueAfterExtraction();
-            return;
-        }
-
-        if (mc.player.blockPosition().distSqr(target) > PlayerUtil.blockReachSq(mc.player)) {
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_return_failed");
-            ctx.extractionBoxSlots.remove(boxSlot);
-            clearMixedBoxReturn();
-            continueAfterExtraction();
-            return;
-        }
-
-        setState(State.OPENING_CONTAINER);
-        containerOpener.openContainerAt(target, ctx);
-    }
-
     /** 清掉"待归还的杂盒"，归还成功、放弃归还、停止备货时都要清。 */
     public void clearMixedBoxReturn() {
         ctx.mixedBoxReturnSlot = -1;
         ctx.mixedBoxReturnTarget = null;
+        ctx.mixedBoxIdentity = ItemStack.EMPTY;
+        ctx.mixedBoxOriginSlot = -1;
+    }
+
+    /** 启动整理、满包整理及追溯失败整理统一从这里恢复，避免重复推进材料索引。 */
+    private void resumeAfterStorage() {
+        boolean nextItem = resumeNextItemAfterStorage;
+        resumeNextItemAfterStorage = false;
+        voluntaryStorage = false;
+        if (nextItem) setState(State.NEXT_ITEM);
+        else continueAfterExtraction();
     }
 
     /** 潜影盒存取子状态机的结果处理。 */
@@ -531,9 +628,7 @@ public class TaskStateMachine {
             case ABORTED -> {
                 // "顺手存一下"没找到盒子：材料留着，继续备货。
                 if (voluntaryStorage) {
-                    voluntaryStorage = false;
-                    resumeNextItemAfterStorage = false;
-                    continueAfterExtraction();
+                    resumeAfterStorage();
                     return;
                 }
                 // 开盒取物做不成（没地方放盒子 / 打不开 / 盒内没有要的东西）。
@@ -553,15 +648,10 @@ public class TaskStateMachine {
             case INVENTORY_FULL -> onInventoryFull();
             case FAILED -> {
                 shulkerAccess.cancel(ctx.client);
-                if (voluntaryStorage) {
-                    voluntaryStorage = false;
-                    resumeNextItemAfterStorage = false;
-                    continueAfterExtraction();
-                    return;
-                }
                 setState(State.STOPPED);
             }
             case ACTIVE -> { }
         }
     }
+
 }

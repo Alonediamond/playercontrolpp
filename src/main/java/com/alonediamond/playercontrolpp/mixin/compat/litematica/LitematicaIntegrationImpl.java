@@ -181,7 +181,9 @@ public abstract class LitematicaIntegrationImpl {
                 ItemStack stack = entry.getStack();
                 if (stack == null) continue;
                 result.add(new LitematicaIntegration.MaterialEntry(
-                        stack, entry.getCountMissing(), entry.getCountAvailable(), ignored.contains(entry)));
+                        stack, (int) Math.min(Integer.MAX_VALUE, list.getMultiplier() == 1
+                                ? entry.getCountMissing() : (long) entry.getCountTotal() * list.getMultiplier()),
+                        entry.getCountAvailable(), ignored.contains(entry)));
             }
             return result;
         } catch (Throwable e) {

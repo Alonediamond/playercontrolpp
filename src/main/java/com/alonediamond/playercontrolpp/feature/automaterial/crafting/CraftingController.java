@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
@@ -59,7 +59,7 @@ import net.minecraft.world.item.crafting.display.SlotDisplayContext;
  *
  * <p>失败原因会打一条 {@code [craft]} 日志，方便实机排查。
  */
-public class CraftingController {
+final class CraftingController {
 
     public enum Result {
         ACTIVE, DONE,
@@ -76,7 +76,7 @@ public class CraftingController {
     private enum PlaceMode { PACKET, MANUAL }
 
     // 工作台菜单：0 = 产物，1..9 = 3×3 合成格。原版常量是 private 的，跨版本自己定义
-    // （理由同 ItemTransferStrategy.SHULKER_SLOT_COUNT）。
+    // （所有支持版本的菜单布局一致）。
     private static final int CRAFT_RESULT_SLOT = 0;
     private static final int CRAFT_GRID_START = 1;
     private static final int CRAFT_GRID_WIDTH = 3;

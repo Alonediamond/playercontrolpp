@@ -5,39 +5,30 @@
   "playercontrolpp.gui.tab.settings": "Settings",
   "playercontrolpp.gui.tab.routes": "Routes",
   "playercontrolpp.gui.tab.recording": "Recording",
-
   "playercontrolpp.config.hotkeys.name.autoForward": "Auto Forward",
   "playercontrolpp.config.hotkeys.pretty_name.autoForward": "Auto Forward",
   "playercontrolpp.config.hotkeys.comment.autoForward": "Toggle auto forward movement.",
-
   "playercontrolpp.config.hotkeys.name.quickTurn": "Quick Turn",
   "playercontrolpp.config.hotkeys.pretty_name.quickTurn": "Quick Turn",
   "playercontrolpp.config.hotkeys.comment.quickTurn": "Quick turn by the configured angle.",
-
   "playercontrolpp.config.settings.name.turnAngle": "Turn Angle",
   "playercontrolpp.config.settings.pretty_name.turnAngle": "Turn Angle",
   "playercontrolpp.config.settings.comment.turnAngle": "Turn angle in degrees for Quick Turn.",
-
-
   "playercontrolpp.config.hotkeys.name.openConfigGui": "Open Config GUI",
   "playercontrolpp.config.hotkeys.pretty_name.openConfigGui": "Open Config GUI",
   "playercontrolpp.config.hotkeys.comment.openConfigGui": "Open the config GUI. Default: P + C.",
-
   "playercontrolpp.config.hotkeys.name.recordingToggle": "Toggle Recording",
   "playercontrolpp.config.hotkeys.pretty_name.recordingToggle": "Toggle Recording",
   "playercontrolpp.config.hotkeys.comment.recordingToggle": "Start/stop input recording.",
-
   "playercontrolpp.message.auto_forward.on": "[PlayerControl++] Auto Forward: ON",
   "playercontrolpp.message.auto_forward.off": "[PlayerControl++] Auto Forward: OFF",
   "playercontrolpp.message.auto_forward.world_change": "[PlayerControl++] Auto Forward: OFF (world changed)",
-
   "playercontrolpp.message.route.started": "[PlayerControl++] Route Started",
   "playercontrolpp.message.route.stopped": "[PlayerControl++] Route Stopped",
   "playercontrolpp.message.route.completed": "[PlayerControl++] Route Completed",
   "playercontrolpp.message.route.failed": "[PlayerControl++] Route Failed (Stuck)",
   "playercontrolpp.message.route.world_change": "[PlayerControl++] Route Stopped (world changed)",
   "playercontrolpp.message.route.death": "[PlayerControl++] Route Stopped (player died)",
-
   "playercontrolpp.message.recording.started": "[PlayerControl++] Recording Started",
   "playercontrolpp.message.recording.stopped": "[PlayerControl++] Recording Stopped",
   "playercontrolpp.message.recording.active": "[PlayerControl++] ... Recording ...",
@@ -45,9 +36,7 @@
   "playercontrolpp.message.playback.stopped": "[PlayerControl++] Playback Stopped",
   "playercontrolpp.message.playback.completed": "[PlayerControl++] Playback Completed",
   "playercontrolpp.message.playback.walking": "[PlayerControl++] Walking to start...",
-
   "playercontrolpp.message.litematica.layer": "[PlayerControl++] Layer: %s",
-
   "playercontrolpp.gui.route.title": "Route Flow System",
   "playercontrolpp.gui.route.add": "+ Add Route",
   "playercontrolpp.gui.route.remove": "Remove",
@@ -68,7 +57,6 @@
   "playercontrolpp.gui.route.on": "ON",
   "playercontrolpp.gui.route.off": "OFF",
   "playercontrolpp.gui.route.no_selection": "Select a route on the left to edit.",
-
   "playercontrolpp.gui.recording.title": "Recording & Playback",
   "playercontrolpp.gui.recording.start_recording": "Start/Stop Rec",
   "playercontrolpp.gui.recording.new_recording": "New Recording",
@@ -79,13 +67,11 @@
   "playercontrolpp.gui.recording.recording": "Status: Recording...",
   "playercontrolpp.gui.recording.playing": "Status: Playing...",
   "playercontrolpp.gui.recording.idle": "Status: Idle",
-
-  "playercontrolpp.gui.tab.baritone": "Baritone",
+  "playercontrolpp.gui.tab.baritone": "Gather & Build",
   "playercontrolpp.gui.baritone.warning": "WARNING: This mode is a cheat feature. If using on a multiplayer server, ensure you have the server owner or admin's consent.",
   "playercontrolpp.config.hotkeys.name.baritoneAutoGather": "Auto Material Gather",
   "playercontrolpp.config.hotkeys.pretty_name.baritoneAutoGather": "Auto Material Gather",
   "playercontrolpp.config.hotkeys.comment.baritoneAutoGather": "Toggle auto material gathering from projections using Baritone + ChestTracker.",
-
   "playercontrolpp.message.baritone.mods_missing": "[PlayerControl++] Missing Baritone / Litematica / ChestTracker - all three mods are required for auto material gathering.",
   "playercontrolpp.message.baritone.started": "[PlayerControl++] Material Gathering Started",
   "playercontrolpp.message.baritone.stopped": "[PlayerControl++] Material Gathering Stopped",
@@ -106,11 +92,9 @@
   "playercontrolpp.message.baritone.analyze_error": "[PlayerControl++] Error analyzing material list: %s",
   "playercontrolpp.message.baritone.no_cache": "[PlayerControl++] Chest Tracker cache not loaded.",
   "playercontrolpp.message.baritone.search_error": "[PlayerControl++] Error searching for items: %s",
-
   "playercontrolpp.message.baritone.litematlist_no_list": "[PlayerControl++] No uploaded material list in LitematList. Upload a schematic file or material list in LitematList first.",
   "playercontrolpp.message.baritone.litematlist_not_loaded": "[PlayerControl++] LitematList mod not detected; cannot follow its material list.",
   "playercontrolpp.message.baritone.litematlist_took_over": "[PlayerControl++] LitematList has taken over the schematic material list, so the schematic's own HUD list cannot be followed. Cancel the upload/takeover in LitematList, or switch 'Material List Source' to 'Follow LitematList'.",
-
   "playercontrolpp.message.baritone.mixed_box_found": "[PlayerControl++] %s is only stocked inside shulker boxes in the cache; fetching the box...",
   "playercontrolpp.message.baritone.mixed_box_take_failed": "[PlayerControl++] Could not take the shulker box out of the container; skipping this material.",
   "playercontrolpp.message.baritone.mixed_box_no_position": "[PlayerControl++] No valid spot to place the shulker box; skipping this material (the box stays in your inventory).",
@@ -129,56 +113,45 @@
   "playercontrolpp.message.baritone.raw_material_craft_failed": "[PlayerControl++] Failed to craft %s; only gathering raw materials.",
   "playercontrolpp.message.baritone.raw_material_no_recipe": "[PlayerControl++] No usable recipe for %s (smelting/smithing are not supported yet); skipping this material.",
   "playercontrolpp.message.baritone.raw_material_done": "[PlayerControl++] %s has been completed by crafting from raw materials.",
-
-  "playercontrolpp.config.baritone.name.enableGlobalIgnore": "Enable Global Material Ignore",
-  "playercontrolpp.config.baritone.pretty_name.enableGlobalIgnore": "Enable Global Material Ignore",
+  "playercontrolpp.config.baritone.name.enableGlobalIgnore": "Gather: Enable Global Material Ignore",
+  "playercontrolpp.config.baritone.pretty_name.enableGlobalIgnore": "Gather: Enable Global Material Ignore",
   "playercontrolpp.config.baritone.comment.enableGlobalIgnore": "When enabled, items in the Global Ignore List will be skipped during auto-gathering.",
-  "playercontrolpp.config.baritone.name.autoStoreToShulker": "Auto Store to Shulker Box",
-  "playercontrolpp.config.baritone.pretty_name.autoStoreToShulker": "Auto Store to Shulker Box",
-  "playercontrolpp.config.baritone.comment.autoStoreToShulker": "When enabled, automatically store gathered building materials into shulker boxes when inventory is full, then resume auto-gathering.",
-
-  "playercontrolpp.config.baritone.name.shulkerStorageMode": "Shulker Storage/Retrieval Mode",
-  "playercontrolpp.config.baritone.pretty_name.shulkerStorageMode": "Shulker Storage/Retrieval Mode",
+  "playercontrolpp.config.baritone.name.autoStoreToShulker": "Gather: Auto Store to Shulker Box",
+  "playercontrolpp.config.baritone.pretty_name.autoStoreToShulker": "Gather: Auto Store to Shulker Box",
+  "playercontrolpp.config.baritone.comment.autoStoreToShulker": "Store list materials in available shulker boxes at startup and when inventory fills. Uses the selected access mode; borrowed boxes are excluded.",
+  "playercontrolpp.config.baritone.name.shulkerStorageMode": "Gather: Shulker Storage/Retrieval Mode",
+  "playercontrolpp.config.baritone.pretty_name.shulkerStorageMode": "Gather: Shulker Storage/Retrieval Mode",
   "playercontrolpp.config.baritone.comment.shulkerStorageMode": "How to store materials into shulker boxes.\nSimulate: place/open/mine the shulker box normally.\nQuickShulker: open directly from inventory via QuickShulker API (requires QuickShulker mod on both client and server).",
-
   "playercontrolpp.config.baritone.storage_mode.simulate": "simulate",
   "playercontrolpp.config.baritone.storage_mode.simulate.display_name": "Simulate Manual Place",
   "playercontrolpp.config.baritone.storage_mode.quickshulker": "quickshulker",
   "playercontrolpp.config.baritone.storage_mode.quickshulker.display_name": "Use QuickShulker",
-
-  "playercontrolpp.config.baritone.name.globalIgnoreList": "Material Ignore List",
-  "playercontrolpp.config.baritone.pretty_name.globalIgnoreList": "Material Ignore List",
+  "playercontrolpp.config.baritone.name.globalIgnoreList": "Gather: Material Ignore List",
+  "playercontrolpp.config.baritone.pretty_name.globalIgnoreList": "Gather: Material Ignore List",
   "playercontrolpp.config.baritone.comment.globalIgnoreList": "Items to ignore during auto-gathering. Click to open the list editor. Default: minecraft:water_bucket + all shulker box variants.",
-
-  "playercontrolpp.config.baritone.name.clickCooldown": "Click Cooldown",
-  "playercontrolpp.config.baritone.pretty_name.clickCooldown": "Click Cooldown",
-  "playercontrolpp.config.baritone.comment.clickCooldown": "Set the number of ticks for the cooldown interval between transferring items in the container each time.",
-
-  "playercontrolpp.config.baritone.name.materialListSource": "Material List Source",
-  "playercontrolpp.config.baritone.pretty_name.materialListSource": "Material List Source",
+  "playercontrolpp.config.baritone.name.clickCooldown": "Gather: Click Cooldown",
+  "playercontrolpp.config.baritone.pretty_name.clickCooldown": "Gather: Click Cooldown",
+  "playercontrolpp.config.baritone.comment.clickCooldown": "Ticks between transfer transactions (default 1). Exact splitting and returning the remainder complete in one transaction. Increase for slow server synchronization.",
+  "playercontrolpp.config.baritone.name.materialListSource": "Gather: Material List Source",
+  "playercontrolpp.config.baritone.pretty_name.materialListSource": "Gather: Material List Source",
   "playercontrolpp.config.baritone.comment.materialListSource": "Which material list the auto-gatherer reads.\nSchematic HUD: read Litematica's material list HUD, even if LitematList has taken it over.\nLitematList: read the list uploaded in LitematList; items ignored there are not gathered.",
   "playercontrolpp.config.baritone.material_source.litematica.display_name": "Follow Schematic HUD",
   "playercontrolpp.config.baritone.material_source.litematlist.display_name": "Follow LitematList",
-
-  "playercontrolpp.config.baritone.name.shulkerBoxPriorityThreshold": "Whole-Box Priority Threshold",
-  "playercontrolpp.config.baritone.pretty_name.shulkerBoxPriorityThreshold": "Whole-Box Priority Threshold",
-  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "When a material's shortage exceeds this amount (64-1728) and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks; without such boxes it still takes loose stacks. Default: 864.",
-
-  "playercontrolpp.config.baritone.name.recognizeMixedShulkerBox": "Recognize Mixed Shulker Boxes",
-  "playercontrolpp.config.baritone.pretty_name.recognizeMixedShulkerBox": "Recognize Mixed Shulker Boxes",
-  "playercontrolpp.config.baritone.comment.recognizeMixedShulkerBox": "When a material's shortage is below the whole-box threshold (the loose-stack case), ChestTracker has no loose stock of it, but cached containers do hold shulker boxes containing it: take such a box out, open it, take out every missing material inside, then put the box back. Off: such materials are simply skipped, as before.",
-
-  "playercontrolpp.config.baritone.name.rawMaterialCraftMode": "Trace Raw Materials and Craft",
-  "playercontrolpp.config.baritone.pretty_name.rawMaterialCraftMode": "Trace Raw Materials and Craft",
+  "playercontrolpp.config.baritone.name.shulkerBoxPriorityThreshold": "Gather: Whole-Box Priority Threshold",
+  "playercontrolpp.config.baritone.pretty_name.shulkerBoxPriorityThreshold": "Gather: Whole-Box Priority Threshold",
+  "playercontrolpp.config.baritone.comment.shulkerBoxPriorityThreshold": "When the live shortage exceeds this threshold, prefer boxes filled with one material; over-collection is allowed. Otherwise collect the exact loose amount.",
+  "playercontrolpp.config.baritone.name.recognizeMixedShulkerBox": "Gather: Recognize Mixed Shulker Boxes",
+  "playercontrolpp.config.baritone.pretty_name.recognizeMixedShulkerBox": "Gather: Recognize Mixed Shulker Boxes",
+  "playercontrolpp.config.baritone.comment.recognizeMixedShulkerBox": "After loose stock and eligible full boxes, unpack boxes containing needed materials and return them to the source, preferring the original slot. Keep the box and report if return fails.",
+  "playercontrolpp.config.baritone.name.rawMaterialCraftMode": "Gather: Trace Raw Materials and Craft",
+  "playercontrolpp.config.baritone.pretty_name.rawMaterialCraftMode": "Gather: Trace Raw Materials and Craft",
   "playercontrolpp.config.baritone.comment.rawMaterialCraftMode": "Whether to trace a missing material down to its raw materials via LitematList's recipe tree and try to craft it when ChestTracker has none.\nDisabled: skip the material, as before.\nCache Only: gather raw materials from cached containers only.\nWorld Search: when the cache has none either, let Baritone mine/find them in the world.\nRequires 'Material List Source' = 'Follow LitematList', with a list uploaded there.",
   "playercontrolpp.config.baritone.raw_material_mode.disabled.display_name": "Disabled",
   "playercontrolpp.config.baritone.raw_material_mode.cache_only.display_name": "Cache Only",
   "playercontrolpp.config.baritone.raw_material_mode.world_search.display_name": "World Search",
-
-  "playercontrolpp.config.baritone.name.rawMaterialMaxDepth": "Raw Material Trace Depth",
-  "playercontrolpp.config.baritone.pretty_name.rawMaterialMaxDepth": "Raw Material Trace Depth",
+  "playercontrolpp.config.baritone.name.rawMaterialMaxDepth": "Gather: Raw Material Trace Depth",
+  "playercontrolpp.config.baritone.pretty_name.rawMaterialMaxDepth": "Gather: Raw Material Trace Depth",
   "playercontrolpp.config.baritone.comment.rawMaterialMaxDepth": "How many recipe layers to trace when decomposing a missing material into raw materials. -1 = follow the layer count set on LitematList's raw material screen (its default is 5); 0-10 = use this value instead.",
-
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] Inventory full — storing materials to shulker box...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] Shulker box storage complete, resuming gathering.",
   "playercontrolpp.message.baritone.shulker_store_skipped": "[PlayerControl++] No usable shulker box in the inventory; the materials stay in your inventory.",
@@ -188,25 +161,20 @@
   "playercontrolpp.message.baritone.shulker_place_failed": "[PlayerControl++] Failed to place shulker box. Stopped.",
   "playercontrolpp.message.baritone.shulker_open_failed": "[PlayerControl++] Failed to open placed shulker box — aborting to prevent damage to surroundings.",
   "playercontrolpp.message.baritone.shulker_pickup_failed": "[PlayerControl++] Shulker box not picked up within 5 seconds — stopping auto-gathering to prevent item loss.",
-
   "playercontrolpp.config.hotkeys.name.autoCacheNearbyContainers": "Auto Cache Nearby Containers",
   "playercontrolpp.config.hotkeys.pretty_name.autoCacheNearbyContainers": "Auto Cache Nearby Containers",
   "playercontrolpp.config.hotkeys.comment.autoCacheNearbyContainers": "Toggle auto-caching of nearby container contents for ChestTracker.",
-
   "playercontrolpp.config.hotkeys.name.cacheSchematicSelectionContainers": "Cache Schematic Selection Containers",
   "playercontrolpp.config.hotkeys.pretty_name.cacheSchematicSelectionContainers": "Cache Schematic Selection Containers",
   "playercontrolpp.config.hotkeys.comment.cacheSchematicSelectionContainers": "Scan containers in Litematica's current area selection, open them within player reach, and cache to Chest Tracker. Press again to cancel.",
-
   "playercontrolpp.config.cache_nearby.name.containerWhitelist": "Cachable Container Whitelist",
   "playercontrolpp.config.cache_nearby.pretty_name.containerWhitelist": "Cachable Container Whitelist",
   "playercontrolpp.config.cache_nearby.comment.containerWhitelist": "List of container Block IDs that can be auto-cached. Click to open the list editor. Default: all vanilla storage containers.",
-
   "playercontrolpp.message.cache_nearby.on": "[PlayerControl++] Auto Cache Nearby Containers: ON",
   "playercontrolpp.message.cache_nearby.off": "[PlayerControl++] Auto Cache Nearby Containers: OFF",
   "playercontrolpp.message.cache_nearby.all_cached": "[PlayerControl++] All nearby containers cached. Stopping in 3 seconds...",
   "playercontrolpp.message.cache_nearby.auto_stop": "[PlayerControl++] Auto Cache Nearby Containers: Stopped (all nearby containers cached)",
   "playercontrolpp.message.cache_nearby.world_change": "[PlayerControl++] Auto Cache Nearby Containers: OFF (world changed)",
-
   "playercontrolpp.message.schematic_cache.mods_missing": "[PlayerControl++] Cache Schematic Selection Containers requires both Litematica and Chest Tracker.",
   "playercontrolpp.message.schematic_cache.no_memory_bank": "[PlayerControl++] Chest Tracker has no normally loaded memory bank.",
   "playercontrolpp.message.schematic_cache.waiting_move": "[PlayerControl++] %s containers left in the selection are out of reach — walk up to any of them to keep caching.",
@@ -219,73 +187,57 @@
   "playercontrolpp.message.schematic_cache.progress": "[PlayerControl++] %s containers remain; cached %s, failed %s. Press the hotkey again to cancel.",
   "playercontrolpp.message.schematic_cache.completed": "[PlayerControl++] Schematic container caching complete: cached %s, failed %s.",
   "playercontrolpp.message.schematic_cache.cancelled": "[PlayerControl++] Schematic selection container caching cancelled.",
-
   "playercontrolpp.config.hotkeys.name.waterFillToggle": "Auto Water Fill",
   "playercontrolpp.config.hotkeys.pretty_name.waterFillToggle": "Auto Water Fill",
   "playercontrolpp.config.hotkeys.comment.waterFillToggle": "Toggle auto water filling for waterloggable blocks in Litematica schematics.",
-
   "playercontrolpp.config.settings.name.waterFillScanRadius": "Water Fill Scan Radius",
   "playercontrolpp.config.settings.pretty_name.waterFillScanRadius": "Water Fill Scan Radius",
   "playercontrolpp.config.settings.comment.waterFillScanRadius": "Scan radius in blocks for finding waterloggable blocks. Clamped to player reach distance. Range: 0-5, default: 5.",
-
   "playercontrolpp.config.settings.name.waterFillOperationDelay": "Water Fill Operation Delay",
   "playercontrolpp.config.settings.pretty_name.waterFillOperationDelay": "Water Fill Operation Delay",
   "playercontrolpp.config.settings.comment.waterFillOperationDelay": "Delay in ticks between water fill operations. Range: 1-200, default: 1.",
-
   "playercontrolpp.config.settings.name.cacheDelay": "Cache Container Delay",
   "playercontrolpp.config.settings.pretty_name.cacheDelay": "Cache Container Delay",
   "playercontrolpp.config.settings.comment.cacheDelay": "Delay in ticks between closing one container and opening the next during auto-caching. Range: 0-200, default: 1. Set to 0 for almost no delay.",
-
   "playercontrolpp.message.water_fill.on": "[PlayerControl++] Auto Water Fill: ON",
   "playercontrolpp.message.water_fill.off": "[PlayerControl++] Auto Water Fill: OFF",
   "playercontrolpp.message.water_fill.no_schematic": "[PlayerControl++] No Litematica schematic loaded. Auto Water Fill stopped.",
   "playercontrolpp.message.water_fill.no_bucket": "[PlayerControl++] No water bucket found in inventory. Auto Water Fill stopped.",
   "playercontrolpp.message.water_fill.completed": "[PlayerControl++] All waterloggable blocks filled. Auto Water Fill stopped.",
   "playercontrolpp.message.water_fill.world_change": "[PlayerControl++] Auto Water Fill: OFF (world changed)",
-
   "playercontrolpp.message.recording.corrupt": "[PlayerControl++] Recording file is corrupt or damaged and cannot be loaded.",
-
   "playercontrolpp.config.settings.name.playbackPositionCorrection": "Playback Position Correction",
   "playercontrolpp.config.settings.pretty_name.playbackPositionCorrection": "Playback Position Correction",
   "playercontrolpp.config.settings.comment.playbackPositionCorrection": "Teleport the player back onto the recorded path when playback drifts more than 2 blocks.\nOFF by default: playback reproduces input, not positions, so some drift is normal. Correcting it rewrites the client position, which disagrees with the server and may look like flying to anti-cheat. Recommended for single-player only.",
-
   "playercontrolpp.message.playback.drift": "[PlayerControl++] Playback has drifted well off the recorded path (terrain or latency). Enable Playback Position Correction in settings if you want it snapped back.",
   "playercontrolpp.message.recording.index_corrupt": "[PlayerControl++] The recording index could not be read and has been set aside as index.json.corrupt-N. The recording files themselves are untouched.",
   "playercontrolpp.message.recording.save_failed": "[PlayerControl++] Failed to write the recording to disk; see the log for details.",
   "playercontrolpp.message.baritone.pathing_not_started": "[PlayerControl++] Baritone never started pathing. Check that it is enabled and that the target is reachable.",
-
   "playercontrolpp.config.hotkeys.name.markContainer": "Mark Container",
   "playercontrolpp.config.hotkeys.pretty_name.markContainer": "Mark Container",
   "playercontrolpp.config.hotkeys.comment.markContainer": "Mark/unmark the container you are looking at as a restock target for auto-build-restock. Sneak + hotkey enables/disables a container that is already marked.",
-
   "playercontrolpp.config.baritone.name.autoRestockToggle": "Auto Build Restock",
   "playercontrolpp.config.baritone.pretty_name.autoRestockToggle": "Auto Build Restock",
   "playercontrolpp.config.baritone.comment.autoRestockToggle": "When enabled, automatically monitors #litematica builds and fetches materials from marked containers when the builder pauses on shortage.",
-
-  "playercontrolpp.config.baritone.name.markedContainers": "Marked Container List",
-  "playercontrolpp.config.baritone.pretty_name.markedContainers": "Marked Container List",
+  "playercontrolpp.config.baritone.name.markedContainers": "Build Restock: Marked Container List",
+  "playercontrolpp.config.baritone.pretty_name.markedContainers": "Build Restock: Marked Container List",
   "playercontrolpp.config.baritone.comment.markedContainers": "Container positions for auto-restock. Each entry: dimension x y z [off] — a trailing 'off' disables that container without deleting it. Use the Mark Container hotkey, sneak + the hotkey to enable/disable, or edit this list directly.",
-
   "playercontrolpp.config.hotkeys.name.oneClickBuildRestock": "One-Click Build + Restock",
   "playercontrolpp.config.hotkeys.pretty_name.oneClickBuildRestock": "One-Click Build + Restock",
   "playercontrolpp.config.hotkeys.comment.oneClickBuildRestock": "Start Baritone #litematica build AND enable auto-restock in one keypress.",
-
-  "playercontrolpp.config.baritone.name.restockShulkerMode": "Restock: Collect Shulker Boxes",
-  "playercontrolpp.config.baritone.pretty_name.restockShulkerMode": "Restock: Collect Shulker Boxes",
+  "playercontrolpp.config.baritone.name.restockShulkerMode": "Build Restock: Collect Shulker Boxes",
+  "playercontrolpp.config.baritone.pretty_name.restockShulkerMode": "Build Restock: Collect Shulker Boxes",
   "playercontrolpp.config.baritone.comment.restockShulkerMode": "When enabled, auto-restock opens shulker boxes in your inventory that hold needed materials, and also takes such boxes out of marked containers. Requires QuickShulker to open them from the inventory.",
-
-  "playercontrolpp.config.baritone.name.restockStacksPerItem": "Restock: Stacks Per Material",
-  "playercontrolpp.config.baritone.pretty_name.restockStacksPerItem": "Restock: Stacks Per Material",
+  "playercontrolpp.config.baritone.name.restockStacksPerItem": "Build Restock: Stacks Per Material",
+  "playercontrolpp.config.baritone.pretty_name.restockStacksPerItem": "Build Restock: Stacks Per Material",
   "playercontrolpp.config.baritone.comment.restockStacksPerItem": "How many stacks of each missing material to top up to per restock trip. Litematica reports what the whole schematic still needs, which is usually far more than an inventory holds, so the target is capped here to leave room for the other materials.",
-
-  "playercontrolpp.config.baritone.name.restockContainerMaxDistance": "Restock: Container Range Limit",
-  "playercontrolpp.config.baritone.pretty_name.restockContainerMaxDistance": "Restock: Container Range Limit",
-  "playercontrolpp.config.baritone.comment.restockContainerMaxDistance": "Marked containers further than this many blocks from the player are ignored, so restocking never walks across the map for one chest. 0 means no limit.",
-
+  "playercontrolpp.config.baritone.name.restockContainerMaxDistance": "Build Restock: Container Range Limit",
+  "playercontrolpp.config.baritone.pretty_name.restockContainerMaxDistance": "Build Restock: Container Range Limit",
+  "playercontrolpp.config.baritone.comment.restockContainerMaxDistance": "Maximum container distance from the player; 0 adds no limit. Cache sourcing also respects ChestTracker search range; unbounded cache searches are rejected.",
   "playercontrolpp.message.restock.started": "[PlayerControl++] Auto Restock: ON — monitoring build for material shortages.",
   "playercontrolpp.message.restock.stopped": "[PlayerControl++] Auto Restock: OFF.",
   "playercontrolpp.message.restock.pause_detected": "[PlayerControl++] Builder paused — checking what is missing...",
-  "playercontrolpp.message.restock.gathering": "[PlayerControl++] Short of %d item types. Searching %d marked container(s)...",
+  "playercontrolpp.message.restock.gathering": "[PlayerControl++] Missing %d material types. Visiting %d supply containers.",
   "playercontrolpp.message.restock.container_marked": "[PlayerControl++] Container marked at %d, %d, %d.",
   "playercontrolpp.message.restock.container_unmarked": "[PlayerControl++] Container unmarked at %d, %d, %d.",
   "playercontrolpp.message.restock.container_enabled": "[PlayerControl++] Marked container at %d, %d, %d enabled.",
@@ -310,5 +262,16 @@
   "playercontrolpp.message.restock.hotbar_promoted": "[PlayerControl++] Moved %d material stack(s) onto the hotbar so Baritone can place them.",
   "playercontrolpp.message.restock.paused_unreachable": "[PlayerControl++] Builder is paused but you have every material — the remaining blocks are probably unreachable or blocked by liquid. Auto Restock stopped.",
   "playercontrolpp.message.restock.paused_hotbar_full": "[PlayerControl++] Materials are in your inventory but not on the hotbar, and the hotbar is full. Free a hotbar slot, or set Baritone's allowInventory to true. Auto Restock stopped.",
-  "playercontrolpp.message.restock.no_progress": "[PlayerControl++] No materials obtained across several cycles — your shulker boxes and marked containers may not hold the needed items. Auto Restock stopped."
+  "playercontrolpp.message.restock.no_progress": "[PlayerControl++] No materials obtained across several cycles — your shulker boxes and marked containers may not hold the needed items. Auto Restock stopped.",
+  "playercontrolpp.config.baritone.name.restockContainerSource": "Build Restock: Container Source",
+  "playercontrolpp.config.baritone.pretty_name.restockContainerSource": "Build Restock: Container Source",
+  "playercontrolpp.config.baritone.comment.restockContainerSource": "Marked: use player-marked coordinates.\nChestTracker: find missing materials in the current dimension cache. Requires a loaded ChestTracker memory bank. No automatic source fallback.",
+  "playercontrolpp.config.baritone.restock_container_source.marked.display_name": "Player Marked Containers",
+  "playercontrolpp.config.baritone.restock_container_source.chest_tracker.display_name": "ChestTracker Cache",
+  "playercontrolpp.message.baritone.incomplete": "[PlayerControl++] Gathering ended with %s material types still missing. Check stock and failure messages.",
+  "playercontrolpp.message.baritone.transfer_interrupted": "[PlayerControl++] Container operation interrupted. Gathering stopped; check cursor, inventory and logs.",
+  "playercontrolpp.message.baritone.busy": "[PlayerControl++] Stop the active gathering, build-restock or container-cache task first.",
+  "playercontrolpp.message.restock.cache_missing": "[PlayerControl++] Cache restocking requires ChestTracker.",
+  "playercontrolpp.message.restock.cache_empty": "[PlayerControl++] No cached containers hold needed materials in the current dimension and range. Restock stopped.",
+  "playercontrolpp.message.baritone.shulker_recover_at": "[PlayerControl++] Shulker box remains at %s, %s, %s. Recover it manually."
 }

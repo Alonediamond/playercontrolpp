@@ -1,37 +1,44 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
+import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
+
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * 一次自动备货运行的共享可变状态，传给本包内每个模块。
- *
- * <p>字段刻意是 public：它是从一个 1100 行的大类里拆出来的，读写它们的模块全在本包内。
- * 请把它当成那个类的字段块，而不是一套 API。
- */
-public class GatherContext {
+/** 单轮任务的协作数据；主状态由 AutoMaterialGatherer 私有持有，寻路及存取过程状态归各自执行器。 */
+public final class GatherContext {
 
-    public AutoMaterialGatherer.State state = AutoMaterialGatherer.State.IDLE;
-    public boolean active;
+    public int mixedBoxOriginSlot = -1;
+    public ItemStack mixedBoxIdentity = ItemStack.EMPTY;
+    public boolean storageAfterExtraction;
+
+    /** 借来的杂盒只把已取出的散装计入备货，盒内余额不能冒充自己的库存。 */
+    public int countHeld(Item item) {
+        int count = ItemUtil.countEverywhere(client.player, item);
+        for (int slot : extractionBoxSlots) {
+            if (slot >= 0 && slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE) {
+                count -= ItemUtil.countInside(client.player.getInventory().getItem(slot), item);
+            }
+        }
+        return Math.max(0, count);
+    }
+
     public Minecraft client;
 
     // 材料清单数据
     public final List<MaterialItemEntry> missingItems = new ArrayList<>();
-    public int currentItemIndex;
     public Item currentTargetItem;
     public int targetNeededTotal;
-    public int currentlyGathered;
-    public final Set<Item> neededItems = new HashSet<>();
 
     // 箱子搜索数据
     public final List<BlockPos> foundPositions = new ArrayList<>();
@@ -46,18 +53,6 @@ public class GatherContext {
     public final Set<BlockPos> exhaustedPositions = new HashSet<>();
 
     /**
-     * 整盒优先：最近一次搜索发现缺口超过阈值、且箱子追踪缓存里有装着当前所需材料的整盒。
-     * 为 true 时转移阶段先搬整盒再拿散装。每次 search() 重新判定。
-     */
-    public boolean wholeBoxPriority;
-
-    /**
-     * 杂盒模式：缺口没超过整盒阈值、散装容器一个都没搜到，但缓存里有"装着当前所需材料"的潜影盒。
-     * 为 true 时转移阶段改为把盒子取出来、开盒取走盒内所有缺失材料、再把盒子还回原容器。
-     */
-    public boolean mixedBoxMode;
-
-    /**
      * 待归还的杂盒所在物品栏槽位；&lt; 0 表示没有待归还的盒子。
      * 由 {@code ShulkerBoxAccess} 在取物结束时写入，{@code ContainerOpener} 在容器打开后消费。
      */
@@ -67,10 +62,10 @@ public class GatherContext {
     public BlockPos mixedBoxReturnTarget;
 
     /**
-     * 已经把盒子 quickMove 回容器、正等关闭界面的那一拍。
+     * 已经把盒子放回容器、正等关闭界面的那一拍。
      *
      * <p>点击和关闭是两个包，同 tick 连发有被服务端按"界面已关"处理掉的风险；
-     * 由 {@code TaskStateMachine} 在冷却结束后统一关界面。
+     * 由 {@code AutoMaterialGatherer} 在冷却结束后统一关界面。
      */
     public boolean mixedBoxReturnClosing;
 
@@ -105,37 +100,13 @@ public class GatherContext {
      */
     public final Set<Item> tracedItems = new HashSet<>();
 
-    // Baritone 寻路追踪
-    public Vec3 lastPlayerPos = Vec3.ZERO;
-    public int stuckTicks;
-    public int pathingTicks;
-    public boolean pathingWasActive;
-    public BlockPos currentPathTarget;
-
-    // Container interaction
+    // 容器交互
     public int transferCooldown;
     public boolean containerJustOpened;
     public int openAttemptCount;
     public BlockPos currentContainerTarget;
     public List<BlockPos> adjacentContainerTargets;
     public int adjacentTryIndex;
-
-    /**
-     * 上一次成功转移的是否是一整个潜影盒。如果是，紧接着背包满了也不能触发自动存盒——
-     * 那会把刚拿的盒子原样存回去。
-     */
-    public boolean justTookShulkerBox;
-
-    /**
-     * @return 当前正在收集的物品；清单走完后返回 {@code null}。
-     *
-     * <p>把 {@code currentItemIndex} 的边界检查收在一处，而不是每个调用点各写一遍。
-     */
-    public MaterialItemEntry currentItem() {
-        return currentItemIndex >= 0 && currentItemIndex < missingItems.size()
-                ? missingItems.get(currentItemIndex)
-                : null;
-    }
 
     /**
      * @return 这一次采集关心的所有条目：缺失清单（常规备货），再加上"当前采集目标"。
@@ -158,25 +129,11 @@ public class GatherContext {
         // 当前目标不在清单上（追溯派出去的中间材料），或虽然在家清单上、但这次要的更多
         // （清单预留量 + 合成要消耗的量）：临时补一条按这次目标量算的条目。
         // 少了这一步，取物会在拿到清单量时就停手，合成永远差料。
-        if (wantedCacheTarget != currentTargetItem
-                || wantedCacheNeed != targetNeededTotal
-                || wantedCacheMissingSize != missingItems.size()) {
-            wantedEntriesCache.clear();
-            wantedEntriesCache.addAll(missingItems);
-            wantedEntriesCache.removeIf(entry -> entry.item == currentTargetItem);
-            wantedEntriesCache.add(new MaterialItemEntry(currentTargetItem, targetNeededTotal,
-                    currentTargetItem.getDefaultMaxStackSize()));
-            wantedCacheTarget = currentTargetItem;
-            wantedCacheNeed = targetNeededTotal;
-            wantedCacheMissingSize = missingItems.size();
-        }
-        return wantedEntriesCache;
+        List<MaterialItemEntry> entries = new ArrayList<>(missingItems);
+        entries.removeIf(entry -> entry.item == currentTargetItem);
+        entries.add(new MaterialItemEntry(currentTargetItem, targetNeededTotal, currentTargetItem.getDefaultMaxStackSize()));
+        return entries;
     }
-
-    private final java.util.List<MaterialItemEntry> wantedEntriesCache = new ArrayList<>();
-    private Item wantedCacheTarget;
-    private int wantedCacheNeed = -1;
-    private int wantedCacheMissingSize = -1;
 
     /** @return 这个物品是不是本次采集关心的对象（清单上的，或当前正在追的那个子材料）。 */
     public boolean isWantedNow(Item item) {
@@ -208,53 +165,31 @@ public class GatherContext {
         return entry != null ? entry.neededCount : 0;
     }
 
-    /** @return 这个潜影盒里是否装着"本次采集关心的"任意一种材料（含追溯中的子材料）。 */
-    public boolean boxContainsWantedItem(ItemStack shulkerBox) {
-        for (ItemStack inner : ItemUtil.contentsOf(shulkerBox)) {
-            if (isWantedNow(inner.getItem())) return true;
-        }
-        return false;
-    }
-
     /**
      * 清掉属于一次运行的所有状态。
      *
-     * <p>{@code active} 和 {@code client} 刻意不动：{@code active} 由调用方在这个调用前后设置，
-     * 而 {@code client} 是 Minecraft 实例，根本不属于某一次运行。
+     * 客户端引用不属于运行状态，保留给下一轮任务使用。
      */
     public void reset() {
-        state = AutoMaterialGatherer.State.IDLE;
 
+        mixedBoxOriginSlot = -1;
+        mixedBoxIdentity = ItemStack.EMPTY;
+        storageAfterExtraction = false;
         missingItems.clear();
-        neededItems.clear();
-        currentItemIndex = 0;
         currentTargetItem = null;
         targetNeededTotal = 0;
-        currentlyGathered = 0;
 
         foundPositions.clear();
         currentPosIndex = 0;
         chestRetryCount = 0;
-        wholeBoxPriority = false;
-        mixedBoxMode = false;
         mixedBoxReturnSlot = -1;
         mixedBoxReturnTarget = null;
         mixedBoxReturnClosing = false;
         adjacentOriginTarget = null;
         extractionBoxSlots.clear();
         extraStorableItems.clear();
-        wantedEntriesCache.clear();
-        wantedCacheTarget = null;
-        wantedCacheNeed = -1;
-        wantedCacheMissingSize = -1;
         tracedItems.clear();
         exhaustedPositions.clear();
-
-        lastPlayerPos = Vec3.ZERO;
-        stuckTicks = 0;
-        pathingTicks = 0;
-        pathingWasActive = false;
-        currentPathTarget = null;
 
         transferCooldown = 0;
         containerJustOpened = false;
@@ -263,6 +198,5 @@ public class GatherContext {
         adjacentContainerTargets = null;
         adjacentTryIndex = 0;
 
-        justTookShulkerBox = false;
     }
 }

@@ -4,7 +4,7 @@ import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 
 import com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature;
 import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.AutoWaterFillFeature;
 import com.alonediamond.playercontrolpp.feature.QuickTurnFeature;
 import com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature;
@@ -29,7 +29,7 @@ import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.BARITONE_A
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.MARK_CONTAINER;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK;
 
-import com.alonediamond.playercontrolpp.feature.automaterial.AutoRestockFeature;
+import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
 
 public class KeybindCallbacks {
 

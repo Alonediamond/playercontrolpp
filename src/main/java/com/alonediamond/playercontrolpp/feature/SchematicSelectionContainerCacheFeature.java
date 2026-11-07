@@ -145,7 +145,9 @@ public final class SchematicSelectionContainerCacheFeature {
         if (client.player == null || client.level == null
                 || client.player.containerMenu != client.player.inventoryMenu
                 || ScreenCompat.getScreen(client) != null
-                || AutoCacheNearbyContainersFeature.isEnabled()) {
+                || AutoCacheNearbyContainersFeature.isEnabled()
+                || com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.getInstance().isActive()
+                || com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature.getInstance().isActive()) {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.schematic_cache.busy");
             return;
         }

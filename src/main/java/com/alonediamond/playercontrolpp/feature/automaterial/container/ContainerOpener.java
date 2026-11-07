@@ -1,20 +1,18 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.container;
+
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.navigation.BaritonePathingController;
+import com.alonediamond.playercontrolpp.feature.automaterial.shulker.MixedBoxReturn;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
 
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.input.SimulatedInput;
-import com.alonediamond.playercontrolpp.util.ItemUtil;
-import com.alonediamond.playercontrolpp.util.MessageUtil;
-import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -24,7 +22,7 @@ import java.util.List;
 /**
  * 打开容器：瞄准、重试，以及在目标其实是双箱另一半时回退去试相邻方块。
  */
-public class ContainerOpener {
+public final class ContainerOpener {
 
     /** 同一个方块尝试几次后才去试它的邻居。 */
     private static final int MAX_OPEN_ATTEMPTS = 3;
@@ -101,7 +99,7 @@ public class ContainerOpener {
     /**
      * 开容器冷却结束时运行：容器界面出现了吗？里面有我们还需要的东西吗？
      */
-    public void checkOpenResult(GatherContext ctx, TaskStateMachine tsm, BaritonePathingController pathing) {
+    public void checkOpenResult(GatherContext ctx, AutoMaterialGatherer tsm, BaritonePathingController pathing) {
         Minecraft mc = ctx.client;
 
         // 点击已经有了结果（成或不成），两种情况都不再按住右键。
@@ -109,7 +107,7 @@ public class ContainerOpener {
 
         // 需求1：这一趟开的容器只是用来把杂盒塞回去的。
         if (ctx.mixedBoxReturnSlot >= 0) {
-            handleMixedBoxReturn(ctx, tsm);
+            MixedBoxReturn.opened(ctx, tsm, this);
             return;
         }
 
@@ -134,49 +132,8 @@ public class ContainerOpener {
         }
     }
 
-    /**
-     * 归还杂盒：容器打开后把盒子 quickMove 回容器，再由状态机在冷却结束后关界面。
-     *
-     * <p>归还失败（界面迟迟不开）不算错误：盒子在背包里、材料也已经到手，
-     * 提示一声继续备货即可，不走"相邻容器重试"那套。
-     */
-    private void handleMixedBoxReturn(GatherContext ctx, TaskStateMachine tsm) {
-        Minecraft mc = ctx.client;
-        if (mc.player == null) return;
-
-        if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>) {
-            int boxSlot = ctx.mixedBoxReturnSlot;
-            if (boxSlot >= 0 && boxSlot < Inventory.INVENTORY_SIZE
-                    && ItemUtil.isShulkerBox(mc.player.getInventory().getItem(boxSlot))) {
-                int menuSlot = PlayerUtil.menuSlotOf(mc.player.containerMenu,
-                        mc.player.getInventory(), boxSlot);
-                if (menuSlot >= 0) {
-                    SlotActionCompat.quickMove(mc, mc.player.containerMenu.containerId, menuSlot);
-                }
-            }
-            // 交给状态机等一拍再关：点击与关闭是两个包，不能同 tick 连发。
-            ctx.mixedBoxReturnClosing = true;
-            ctx.transferCooldown = MIXED_BOX_RETURN_CLOSE_TICKS;
-            ctx.openAttemptCount = 0;
-            return;
-        }
-
-        ctx.openAttemptCount++;
-        if (ctx.openAttemptCount < MAX_OPEN_ATTEMPTS) {
-            openContainerWithRetry(ctx.currentContainerTarget, ctx.openAttemptCount, ctx);
-            return;
-        }
-
-        MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.mixed_box_return_failed");
-        ctx.extractionBoxSlots.remove(ctx.mixedBoxReturnSlot);
-        tsm.clearMixedBoxReturn();
-        ctx.transferCooldown = 8;
-        ctx.openAttemptCount = 0;
-        tsm.continueAfterExtraction();
-    }
-
     /** 当前目标打不开、或打开了但没有有用的东西时调用。 */
-    public void retryAdjacentOrFail(GatherContext ctx, TaskStateMachine tsm,
+    public void retryAdjacentOrFail(GatherContext ctx, AutoMaterialGatherer tsm,
                                      BaritonePathingController pathing) {
         if (ctx.adjacentContainerTargets == null) {
             // 记住原目标：接下来 openContainerAt() 会把 currentContainerTarget 换成每一个邻居，
@@ -213,28 +170,16 @@ public class ContainerOpener {
             if (ctx.currentPosIndex >= ctx.foundPositions.size()) {
                 tsm.onCurrentTargetUnavailable();
             } else {
-                navigateToNextContainer(ctx.foundPositions.get(ctx.currentPosIndex), ctx, tsm, pathing);
+                pathing.navigateTo(ctx.foundPositions.get(ctx.currentPosIndex), ctx, tsm, this);
             }
         } else {
             tsm.setState(State.SEARCHING);
         }
     }
 
-    private void navigateToNextContainer(BlockPos pos, GatherContext ctx, TaskStateMachine tsm,
-                                         BaritonePathingController pathing) {
-        if (ctx.client.player == null) return;
-        if (ctx.client.player.blockPosition().distSqr(pos) <= PlayerUtil.blockReachSq(ctx.client.player)) {
-            tsm.setState(State.OPENING_CONTAINER);
-            openContainerAt(pos, ctx);
-        } else {
-            tsm.setState(State.PATHING);
-            pathing.startPathing(pos, ctx);
-        }
-    }
-
     /** 关掉当前打开的容器界面。 */
     public void closeAnyContainer(Minecraft mc) {
-        if (mc.player != null && ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen) {
+        if (mc != null && mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
             mc.player.closeContainer();
         }
     }
@@ -245,7 +190,7 @@ public class ContainerOpener {
     }
 
     /** @return {@code target} 上最正对 {@code eye} 的那个面。 */
-    static Direction nearestFace(Vec3 eye, BlockPos target) {
+    public static Direction nearestFace(Vec3 eye, BlockPos target) {
         Vec3 center = Vec3.atCenterOf(target);
         double dx = eye.x - center.x;
         double dy = eye.y - center.y;
@@ -274,19 +219,6 @@ public class ContainerOpener {
     }
 
     private boolean containerHasAnyMissingItem(GatherContext ctx) {
-        if (ctx.client.player == null || ctx.client.player.containerMenu == null) return false;
-        List<Slot> slots = ctx.client.player.containerMenu.slots;
-        // 走 wantedEntries()：原材料追溯派出去的子材料不在缺失清单上，但同样要能开箱取到，
-        // 否则这个容器会被判成"没有需要的东西"而走六邻回退，永远拿不到里面的子材料。
-        for (Slot slot : slots) {
-            if (slot.container == ctx.client.player.getInventory()) continue;
-            ItemStack stack = slot.getItem();
-            if (stack.isEmpty()) continue;
-            for (MaterialItemEntry entry : ctx.wantedEntries()) {
-                if (ItemUtil.is(stack, entry.item)) return true;
-            }
-            if (ItemUtil.isShulkerBox(stack) && ctx.boxContainsWantedItem(stack)) return true;
-        }
-        return false;
+        return ContainerMaterialCollector.select(ctx, ctx.client.player.containerMenu.slots, slot -> true) != null;
     }
 }

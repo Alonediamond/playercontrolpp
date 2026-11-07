@@ -1,9 +1,16 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.restock;
+
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.SlotTransfer;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.config.RestockContainerSource;
+import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
@@ -252,6 +259,16 @@ public class AutoRestockFeature implements ClientFeature {
             return;
         }
 
+        if (AutoMaterialGatherer.getInstance().isActive()
+                || com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature.isEnabled()
+                || com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature.isActive()) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.busy");
+            return;
+        }
+        if (usesCache() && !ChestTrackerIntegration.getInstance().isLoaded()) {
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.cache_missing");
+            return;
+        }
         resetRunState();
 
         // 已经在跑的建造不去打扰——玩家可能是自己用 #litematica 起的，现在才想加上续料。
@@ -434,18 +451,29 @@ public class AutoRestockFeature implements ClientFeature {
     // ---- Marked containers ----
 
     private void startContainerTrip(Minecraft mc) {
-        BlockPos playerPos = mc.player.blockPosition();
-        MarkedContainerManager.Targets targets = containerManager.pickTargets(mc.level, playerPos);
-        if (targets.isEmpty()) {
-            // 分清"一个都没标记"和"标记了但全被禁用/超出距离"——后者玩家改个设置就能继续。
-            stop(targets.filtered() > 0
-                    ? "playercontrolpp.message.restock.all_containers_filtered"
-                    : "playercontrolpp.message.restock.no_containers");
-            return;
-        }
-        if (targets.filtered() > 0) {
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.containers_filtered",
-                    targets.disabled(), targets.tooFar());
+        containerQueue.clear();
+        if (usesCache()) {
+            var source = new CachedContainerSource();
+            var scope = source.scope(Configs.Restocks.RESTOCK_CONTAINER_MAX_DISTANCE.getIntegerValue());
+            if (scope.error() != null) { stop(scope.error()); return; }
+            Set<BlockPos> found = new HashSet<>();
+            for (Need need : needs) {
+                if (looseCount(mc, need.item()) >= need.target()) continue;
+                found.addAll(source.find(need.item(), mc.player.blockPosition(), scope.range(), false,
+                        shulkerModeEnabled() && quickShulker.isLoaded()));
+            }
+            containerQueue.addAll(found);
+            containerQueue.sort(Comparator.comparingDouble(pos -> pos.distSqr(mc.player.blockPosition())));
+            if (containerQueue.isEmpty()) { stop("playercontrolpp.message.restock.cache_empty"); return; }
+        } else {
+            var targets = containerManager.pickTargets(mc.level, mc.player.blockPosition());
+            if (targets.isEmpty()) {
+                stop(targets.filtered() > 0 ? "playercontrolpp.message.restock.all_containers_filtered"
+                        : "playercontrolpp.message.restock.no_containers");
+                return;
+            }
+            if (targets.filtered() > 0) MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.containers_filtered", targets.disabled(), targets.tooFar());
+            containerQueue.addAll(targets.positions());
         }
 
         // 到这一步才收掉暂停中的建造进程：驱动 CustomGoalProcess 会给它发
@@ -454,7 +482,6 @@ public class AutoRestockFeature implements ClientFeature {
         builderCancelled = true;
         containerTripDone = true;
 
-        containerQueue.addAll(targets.positions());
         containerIndex = 0;
 
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.gathering",
@@ -615,7 +642,7 @@ public class AutoRestockFeature implements ClientFeature {
 
         AbstractContainerMenu menu = mc.player.containerMenu;
 
-        if (takeOneNeeded(mc, menu) || (shulkerModeEnabled() && takeShulkerBox(mc, menu))) {
+        if (takeOneNeeded(mc, menu) || (shulkerModeEnabled() && quickShulker.isLoaded() && takeShulkerBox(mc, menu))) {
             tookFromThisContainer = true;
             dryTicks = 0;
             transferCooldown = 2;
@@ -680,7 +707,7 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     private void tickShulkerTake(Minecraft mc) {
-        if (!(ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
+        if (!(mc.player.containerMenu instanceof net.minecraft.world.inventory.ShulkerBoxMenu)) {
             if (--shulkerOpenWait <= 0) {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.shulker_open_failed");
                 state = State.SHULKER_OPEN;
@@ -716,8 +743,7 @@ public class AutoRestockFeature implements ClientFeature {
             mc.player.closeContainer();
         }
         // 还缺料、而且还有没跑过的容器？那就跑一趟；否则收尾——再绕一圈只会在两个阶段之间弹来弹去。
-        if (!containerTripDone && anythingStillNeeded(mc)
-                && !containerManager.pickTargets(mc.level, mc.player.blockPosition()).isEmpty()) {
+        if (!containerTripDone && anythingStillNeeded(mc)) {
             startContainerTrip(mc);
             return;
         }
@@ -831,7 +857,9 @@ public class AutoRestockFeature implements ClientFeature {
 
         try {
             int before = looseCount(mc, bestItem);
-            SlotActionCompat.quickMove(mc, menu.containerId, best.index);
+            int gap = 0;
+            for (Need need : needs) if (need.item() == bestItem) gap = Math.max(gap, need.target() - before);
+            SlotTransfer.toPlayer(mc, best, gap);
             // handleContainerInput 会同步把移动应用到客户端菜单上，所以这是真的确认，
             // 不是「假设点击生效了」。
             if (looseCount(mc, bestItem) > before) {
@@ -858,7 +886,7 @@ public class AutoRestockFeature implements ClientFeature {
             if (!shulkerHoldsSomethingNeeded(mc, stack)) continue;
 
             try {
-                SlotActionCompat.quickMove(mc, menu.containerId, slot.index);
+                if (SlotTransfer.toPlayer(mc, slot, 1) == 0) continue;
                 shulkersTaken++;
                 cycleGained++;
                 return true;
@@ -910,6 +938,10 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     // ---- Helpers ----
+
+    private static boolean usesCache() {
+        return Configs.Restocks.RESTOCK_CONTAINER_SOURCE.getOptionListValue() == RestockContainerSource.CHEST_TRACKER;
+    }
 
     private static boolean shulkerModeEnabled() {
         return Configs.Restocks.RESTOCK_SHULKER_MODE.getBooleanValue();

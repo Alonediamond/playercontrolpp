@@ -4,7 +4,7 @@ import com.alonediamond.playercontrolpp.compat.DrawCtx;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import fi.dy.masa.malilib.config.IConfigBase;
@@ -42,7 +42,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         int y = 26;
         for (ConfigGuiTab tab : ConfigGuiTab.values()) {
             // 三个模组都装了才显示 Baritone 标签页
-            if (tab == ConfigGuiTab.BARITONE && !AutoMaterialGatherer.areAllThreeModsPresent()) {
+            if (tab == ConfigGuiTab.BARITONE && !com.alonediamond.playercontrolpp.integration.BaritoneIntegration.getInstance().isLoaded()) {
                 continue;
             }
             int width = getStringWidth(tab.getDisplayName()) + 10;
@@ -58,36 +58,22 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         switch (selectedTab) {
             case HOTKEYS:
                 List<IConfigBase> hotkeyItems = new ArrayList<>(Configs.Hotkeys.HOTKEY_LIST);
-                hotkeyItems.add(Configs.CacheNearbySettings.CONTAINER_WHITELIST);
-                hotkeyItems.add(Configs.Restocks.MARKED_CONTAINERS);
                 return ConfigOptionWrapper.createFor(hotkeyItems);
             case ROUTE_HOTKEYS:
                 return ConfigOptionWrapper.createFor(
                         new ArrayList<>(RouteManager.getInstance().getRouteHotkeyList()));
             case SETTINGS:
-                return ConfigOptionWrapper.createFor(Configs.Settings.OPTIONS);
+                List<IConfigBase> settings = new ArrayList<>(Configs.Settings.OPTIONS);
+                settings.add(Configs.CacheNearbySettings.CONTAINER_WHITELIST);
+                return ConfigOptionWrapper.createFor(settings);
             case BARITONE:
                 List<IConfigBase> baritoneOptions = new ArrayList<>();
                 baritoneOptions.add(Configs.Hotkeys.BARITONE_AUTO_GATHER);
                 for (IConfigBase opt : Configs.BaritoneSettings.OPTIONS) {
-                    if (opt == Configs.BaritoneSettings.SHULKER_STORAGE_MODE
-                            && !QuickShulkerIntegration.getInstance().isLoaded()) {
-                        continue;
-                    }
-                    if (opt == Configs.BaritoneSettings.MATERIAL_LIST_SOURCE
-                            && !LitematListIntegration.getInstance().isLoaded()) {
-                        continue;
-                    }
-                    // 原材料溯源用的是 LitematList 的配方树，它不在时这两项没有意义。
-                    if ((opt == Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE
-                            || opt == Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH)
-                            && !LitematListIntegration.getInstance().isLoaded()) {
-                        continue;
-                    }
                     baritoneOptions.add(opt);
                 }
-                baritoneOptions.add(Configs.Hotkeys.MARK_CONTAINER);
                 baritoneOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
+                baritoneOptions.add(Configs.Hotkeys.MARK_CONTAINER);
                 for (IConfigBase opt : Configs.Restocks.OPTIONS) {
                     baritoneOptions.add(opt);
                 }

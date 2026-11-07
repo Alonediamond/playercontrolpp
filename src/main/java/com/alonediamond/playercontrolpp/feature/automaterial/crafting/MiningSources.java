@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -28,7 +28,7 @@ import java.util.Set;
  * <p>刻意<b>不</b>处理的：需要熔炼才能得到的（铁锭/玻璃/平滑石……）、需要合成步骤的（木棍/书/桶……）、
  * 靠生物掉落的（皮革/线团……）。前者由调用方判为"无法获取"并跳过，与本模组的合成范围（工作台/切石机）一致。
  */
-public final class MiningSources {
+final class MiningSources {
 
     private MiningSources() {}
 

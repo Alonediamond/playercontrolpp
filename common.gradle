@@ -229,3 +229,20 @@ publishing {
 		// mavenLocal()
 	}
 }
+
+// 真实物品组件下的取物规则回归，不启动客户端窗口。
+tasks.register('materialRegression', JavaExec) {
+	dependsOn tasks.named('testClasses')
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.alonediamond.playercontrolpp.feature.automaterial.MaterialCollectorRegression'
+	def regressionDir = layout.buildDirectory.dir('regression-run')
+	workingDir regressionDir
+	doFirst { regressionDir.get().asFile.mkdirs() }
+}
+// 本项目回归入口是 JavaExec，不依赖 JUnit；check 必须执行该入口。
+tasks.named('test') {
+	failOnNoDiscoveredTests = false
+}
+tasks.named('check') {
+	dependsOn tasks.named('materialRegression')
+}

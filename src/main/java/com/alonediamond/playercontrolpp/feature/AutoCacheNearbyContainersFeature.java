@@ -95,7 +95,9 @@ public class AutoCacheNearbyContainersFeature {
     }
 
     public static void toggle(Minecraft client) {
-        if (!enabled && SchematicSelectionContainerCacheFeature.isActive()) {
+        if (!enabled && (SchematicSelectionContainerCacheFeature.isActive()
+                || com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.getInstance().isActive()
+                || com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature.getInstance().isActive())) {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.schematic_cache.busy");
             return;
         }

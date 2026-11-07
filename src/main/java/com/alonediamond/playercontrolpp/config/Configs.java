@@ -160,8 +160,8 @@ public class Configs implements IConfigHandler {
         ).apply(KEY_BARITONE);
 
         /**
-         * 备货读哪份材料清单。GUI 里只在装了 LitematList 时才显示这项；
-         * 模组被卸载而配置还停在 LITEMATLIST 时，由 MaterialAnalyzer 报错停机。
+         * 备货读哪份材料清单。所有来源始终可见，依赖不足时启动检查会提示；
+         * 模组被卸载而配置还停在 LITEMATLIST 时，由 MaterialListReader 返回错误并停机。
          */
         public static final ConfigOptionList MATERIAL_LIST_SOURCE = new ConfigOptionList(
                 "materialListSource", MaterialSource.LITEMATICA,
@@ -170,27 +170,21 @@ public class Configs implements IConfigHandler {
 
         /**
          * 缺口超过这个数量时，箱子追踪缓存里若有装着所需材料的整盒（潜影盒）就优先搬整盒，
-         * 没有整盒才按组取散装。上限 1728 = 一个满盒的容量。
+         * 没有满盒时按实际缺口取散装。满盒容量按材料自身堆叠上限判定。
          */
         public static final ConfigInteger SHULKER_BOX_PRIORITY_THRESHOLD = new ConfigInteger(
                 "shulkerBoxPriorityThreshold", 864, 64, 1728,
                 "When a material's shortage exceeds this amount and ChestTracker's cache holds whole shulker boxes containing it, whole boxes are fetched first instead of loose stacks. Falls back to loose stacks when the cache has no such boxes. Default: 864.")
                 .apply(KEY_BARITONE);
 
-        /**
-         * v1.9：备货途中识别箱子追踪缓存里的潜影盒（杂盒）。
-         *
-         * <p>散装场景（缺口未超过整盒阈值）下，缓存里找不到散装库存、却存在"装着该材料"的潜影盒时，
-         * 把盒子取出来、开盒取走盒内所有缺失材料，再把盒子还回原容器。
-         * 关闭时维持 v1.8 行为（直接跳过该材料）。
-         */
+        /** 散装和可搬走的满盒不足时，借出含料盒精确取料，再归还原容器。 */
         public static final ConfigBoolean RECOGNIZE_MIXED_SHULKER_BOX = new ConfigBoolean(
                 "recognizeMixedShulkerBox", false,
                 "When a material's shortage is below the whole-box threshold and ChestTracker has no loose stock of it, look for shulker boxes containing it in cached containers: take the box out, open it, take out every missing material inside, then put the box back. Off: such materials are simply skipped, as before.")
                 .apply(KEY_BARITONE);
 
         /**
-         * v1.9：缓存里没有的材料要不要追溯原材料并合成。只在装了 LitematList 时显示；
+         * 缓存里没有的材料要不要追溯原材料并合成；
          * 启用前提是备货数据来源选了「跟随LitematList清单」且那边已上传清单。
          */
         public static final ConfigOptionList RAW_MATERIAL_CRAFT_MODE = new ConfigOptionList(
@@ -227,11 +221,11 @@ public class Configs implements IConfigHandler {
                 "Item IDs to ignore during auto-gathering. Edit via the GUI button or click to open the list editor.")
                 .apply(KEY_BARITONE);
 
-        /** 前两项属于「自动投影材料备货」，排在最前，GUI 里正好落在备货热键的下面。 */
+        /** 按清单、转移、潜影盒、追溯、忽略项的顺序展示备货设置。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                CLICK_COOLDOWN,MATERIAL_LIST_SOURCE, SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
-                RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH,
-                ENABLE_GLOBAL_IGNORE, AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE, GLOBAL_IGNORE_LIST);
+                MATERIAL_LIST_SOURCE, CLICK_COOLDOWN, SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
+                AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE,
+                RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH, ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST);
     }
 
     public static class CacheNearbySettings {
@@ -245,6 +239,11 @@ public class Configs implements IConfigHandler {
     }
 
     public static class Restocks {
+        public static final ConfigOptionList RESTOCK_CONTAINER_SOURCE = new ConfigOptionList(
+                "restockContainerSource", RestockContainerSource.MARKED,
+                "Container source for building restock: player marked coordinates or ChestTracker cache.")
+                .apply(KEY_BARITONE);
+
         public static final ConfigBoolean RESTOCK_SHULKER_MODE = new ConfigBoolean(
                 "restockShulkerMode", false,
                 "When enabled, auto-restock will also take shulker boxes that contain needed materials from marked containers. Requires QuickShulker to be useful after collecting.")
@@ -266,7 +265,7 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_BARITONE);
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                RESTOCK_SHULKER_MODE, RESTOCK_STACKS_PER_ITEM, RESTOCK_CONTAINER_MAX_DISTANCE,
+                RESTOCK_CONTAINER_SOURCE, RESTOCK_SHULKER_MODE, RESTOCK_STACKS_PER_ITEM, RESTOCK_CONTAINER_MAX_DISTANCE,
                 MARKED_CONTAINERS);
     }
 

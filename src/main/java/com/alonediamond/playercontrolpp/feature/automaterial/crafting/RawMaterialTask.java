@@ -1,10 +1,14 @@
-package com.alonediamond.playercontrolpp.feature.automaterial;
+package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
+
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.RegistryCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
-import com.alonediamond.playercontrolpp.feature.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
@@ -38,7 +42,7 @@ import java.util.*;
  * {@code 持有量 − 目标量} 的那部分富余；富余不够就先把差额当新的采集任务补上。
  * 否则"用箱子合成漏斗"会把刚为清单备好的箱子吃掉。
  */
-public class RawMaterialTask {
+public final class RawMaterialTask {
 
     /** LitematList 原材料界面的默认层数：观察不到玩家设置时用它。 */
     private static final int DEFAULT_DEPTH = 5;
@@ -153,7 +157,7 @@ public class RawMaterialTask {
      * @param gap 这个物品还差多少个（= 需求总量 − 当前持有）
      * @return false = 建不出计划（没有配方 / 是白名单材料又挖不到），调用方按原逻辑跳过该物品
      */
-    public boolean start(GatherContext ctx, TaskStateMachine tsm, Item item, int gap) {
+    public boolean start(GatherContext ctx, AutoMaterialGatherer tsm, Item item, int gap) {
         if (ctx.client == null || ctx.client.player == null) return false;
         reset();
 
@@ -188,7 +192,7 @@ public class RawMaterialTask {
         return true;
     }
 
-    public void tick(GatherContext ctx, TaskStateMachine tsm) {
+    public void tick(GatherContext ctx, AutoMaterialGatherer tsm) {
         if (ctx.client == null || ctx.client.player == null) {
             reset();
             return;
@@ -213,7 +217,7 @@ public class RawMaterialTask {
     // ---- 主状态机回调 ----
 
     /** 派出去的那一项已经采集够了。 */
-    public void onSubItemDone(GatherContext ctx, TaskStateMachine tsm) {
+    public void onSubItemDone(GatherContext ctx, AutoMaterialGatherer tsm) {
         // 只认"我们确实在等"的回调：合成中、取料中冒出来的 satisfied 事件不能拿来推进计划，
         // 否则会把正开着的合成界面丢在那里不管。
         if (this.stage != Stage.DISPATCHED && this.stage != Stage.MINING) return;
@@ -238,7 +242,7 @@ public class RawMaterialTask {
      * 还有别的子材料躺在盒里就再取一次（{@code unpackAttempts} 记着次数，有上限），
      * 实在取不出来就按"没有可用工作站"收场，不会来回开关盒子。
      */
-    public void onUnpackFinished(GatherContext ctx, TaskStateMachine tsm) {
+    public void onUnpackFinished(GatherContext ctx, AutoMaterialGatherer tsm) {
         this.unpackItem = null;
         if (this.frames.isEmpty()) {
             if (this.dispatchedItem == null) finish(ctx, tsm);
@@ -248,7 +252,7 @@ public class RawMaterialTask {
     }
 
     /** 派出去的那一项在缓存里没有。 */
-    public void onSubItemUnavailable(GatherContext ctx, TaskStateMachine tsm) {
+    public void onSubItemUnavailable(GatherContext ctx, AutoMaterialGatherer tsm) {
         if (this.stage != Stage.DISPATCHED) return;
         Item item = this.dispatchedItem;
         if (item == null) {
@@ -260,7 +264,7 @@ public class RawMaterialTask {
 
     // ---- 计划推进 ----
 
-    private void gatherTick(GatherContext ctx, TaskStateMachine tsm) {
+    private void gatherTick(GatherContext ctx, AutoMaterialGatherer tsm) {
         Frame frame = this.frames.peek();
         if (frame == null) {
             finish(ctx, tsm);
@@ -269,7 +273,7 @@ public class RawMaterialTask {
 
         // 这一批的目标已经达到（别的帧顺手做了出来、或玩家自己补上了）：直接收工。
         // 否则会拿着已经满足的数量再开一次工作台，白摆一次料。
-        if (ItemUtil.countEverywhere(ctx.client.player, frame.item) >= frame.targetTotal) {
+        if (ctx.countHeld(frame.item) >= frame.targetTotal) {
             popFrame(ctx, tsm);
             return;
         }
@@ -287,7 +291,7 @@ public class RawMaterialTask {
 
             int childNeed = scaleCount(childNode.count(), frame.need, frame.node.count());
             // 可动用富余 = 持有量 − 这个物品自己要留给清单的量；合成只能吃富余。
-            int surplus = ItemUtil.countEverywhere(ctx.client.player, childItem) - ctx.targetFor(childItem);
+            int surplus = ctx.countHeld(childItem) - ctx.targetFor(childItem);
             if (surplus >= childNeed) {
                 frame.nextChild++;
                 continue;
@@ -300,7 +304,7 @@ public class RawMaterialTask {
         startCraft(ctx, tsm, frame);
     }
 
-    private void dispatchGather(GatherContext ctx, TaskStateMachine tsm, Item item,
+    private void dispatchGather(GatherContext ctx, AutoMaterialGatherer tsm, Item item,
                                 RawNode node, int need, boolean isRoot) {
         remember(ctx, item);
         this.dispatchedItem = item;
@@ -312,22 +316,20 @@ public class RawMaterialTask {
 
         ctx.currentTargetItem = item;
         ctx.targetNeededTotal = this.dispatchedTarget;
-        ctx.currentlyGathered = ItemUtil.countEverywhere(ctx.client.player, item);
+
         ctx.currentPosIndex = 0;
         ctx.chestRetryCount = 0;
         ctx.foundPositions.clear();
         ctx.exhaustedPositions.clear();
-        ctx.wholeBoxPriority = false;
-        ctx.mixedBoxMode = false;
         ctx.adjacentContainerTargets = null;
         ctx.adjacentTryIndex = 0;
         tsm.setState(State.SEARCHING);
     }
 
-    private void startCraft(GatherContext ctx, TaskStateMachine tsm, Frame frame) {
+    private void startCraft(GatherContext ctx, AutoMaterialGatherer tsm, Frame frame) {
         remember(ctx, frame.item);
         Item input = firstChildItem(frame.node);
-        int held = ItemUtil.countEverywhere(ctx.client.player, frame.item);
+        int held = ctx.countHeld(frame.item);
         if (held >= frame.targetTotal) {           // 收集/取料这一圈里已经凑够了，别再开站
             popFrame(ctx, tsm);
             return;
@@ -365,7 +367,7 @@ public class RawMaterialTask {
         popFrame(ctx, tsm);
     }
 
-    private void craftTick(GatherContext ctx, TaskStateMachine tsm) {
+    private void craftTick(GatherContext ctx, AutoMaterialGatherer tsm) {
         switch (this.crafting.tick(ctx.client)) {
             case ACTIVE -> { }
             case DONE -> popFrame(ctx, tsm);
@@ -386,7 +388,7 @@ public class RawMaterialTask {
                 if (root != null) {
                     ctx.currentTargetItem = root;
                     ctx.targetNeededTotal = ctx.targetFor(root);
-                    ctx.currentlyGathered = ItemUtil.countEverywhere(ctx.client.player, root);
+
                 }
                 tsm.onInventoryFull();
             }
@@ -407,7 +409,7 @@ public class RawMaterialTask {
             int need = scaleCount(child.count(), frame.need, frame.node.count());
             if (need <= 0) continue;
             int loose = ItemUtil.countLoose(ctx.client.player, item);
-            if (loose < need && ItemUtil.countEverywhere(ctx.client.player, item) >= need) {
+            if (loose < need && ctx.countHeld(item) >= need) {
                 return new BoxedIngredient(item, need);
             }
         }
@@ -466,7 +468,7 @@ public class RawMaterialTask {
         return count;
     }
 
-    private void popFrame(GatherContext ctx, TaskStateMachine tsm) {
+    private void popFrame(GatherContext ctx, AutoMaterialGatherer tsm) {
         Frame done = this.frames.poll();
         if (this.frames.isEmpty()) { finish(ctx, tsm); return; }
         // 只有父子关系（分解出来的子材料）才推进父帧游标，顶层批次之间互不相干；
@@ -475,13 +477,13 @@ public class RawMaterialTask {
         this.stage = Stage.GATHER;
     }
 
-    private void finish(GatherContext ctx, TaskStateMachine tsm) {
+    private void finish(GatherContext ctx, AutoMaterialGatherer tsm) {
         Item root = this.rootItem;
 
         // 计划跑完了但顶层物品仍没凑齐（合成失败、没工作站、节点只能收集子材料……）：
         // 记下来免得在"搜不到 → 再追溯"之间打转，并把这一路收集到的材料收进潜影盒。
         boolean unfinished = root != null && ctx.client.player != null
-                && ItemUtil.countEverywhere(ctx.client.player, root) < ctx.targetFor(root);
+                && ctx.countHeld(root) < ctx.targetFor(root);
         if (unfinished) {
             ctx.tracedItems.add(root);
         }
@@ -493,7 +495,7 @@ public class RawMaterialTask {
         if (root != null) {
             ctx.currentTargetItem = root;
             ctx.targetNeededTotal = ctx.targetFor(root);
-            ctx.currentlyGathered = ItemUtil.countEverywhere(ctx.client.player, root);
+
         }
         if (unfinished) {
             // 不设"存完直接下一个"：这一步还没决定这个物品是补齐了还是要去搜索。
@@ -515,7 +517,7 @@ public class RawMaterialTask {
     }
 
     /** 整条链做不下去了：跳过顶层物品，并记下来免得反复重试。 */
-    private void failChain(GatherContext ctx, TaskStateMachine tsm, Item failedItem) {
+    private void failChain(GatherContext ctx, AutoMaterialGatherer tsm, Item failedItem) {
         if (failedItem != null) {
             MessageUtil.sendActionBar(ctx.client,
                     "playercontrolpp.message.baritone.raw_material_missing", name(failedItem));
@@ -542,7 +544,7 @@ public class RawMaterialTask {
      *
      * @param allowMine false = 刚从挖矿回来（挖不到），不要再挖一次
      */
-    private void afterGatherFailed(GatherContext ctx, TaskStateMachine tsm, Item item, boolean allowMine) {
+    private void afterGatherFailed(GatherContext ctx, AutoMaterialGatherer tsm, Item item, boolean allowMine) {
         RawNode node = this.dispatchedNode;
         boolean isRoot = this.dispatchedIsRoot;
         this.dispatchedItem = null;
@@ -571,7 +573,7 @@ public class RawMaterialTask {
 
     // ---- 世界内挖掘 ----
 
-    private void startMining(GatherContext ctx, TaskStateMachine tsm, Item item, int need,
+    private void startMining(GatherContext ctx, AutoMaterialGatherer tsm, Item item, int need,
                              RawNode node, boolean isRoot) {
         List<String> blocks = MiningSources.blocksFor(item);
         if (blocks.isEmpty()) {
@@ -585,7 +587,7 @@ public class RawMaterialTask {
         this.dispatchedNeed = need;
         this.dispatchedIsRoot = isRoot;
         this.dispatchedTarget = absoluteTarget(ctx, item, need, isRoot);
-        this.mineLastCount = ItemUtil.countEverywhere(ctx.client.player, item);
+        this.mineLastCount = ctx.countHeld(item);
         this.mineStallTicks = 0;
         this.stage = Stage.MINING;
 
@@ -596,14 +598,14 @@ public class RawMaterialTask {
                 "playercontrolpp.message.baritone.raw_material_mining", name(item));
     }
 
-    private void miningTick(GatherContext ctx, TaskStateMachine tsm) {
+    private void miningTick(GatherContext ctx, AutoMaterialGatherer tsm) {
         Item item = this.dispatchedItem;
         if (item == null) {
             finish(ctx, tsm);
             return;
         }
 
-        int have = ItemUtil.countEverywhere(ctx.client.player, item);
+        int have = ctx.countHeld(item);
         if (have >= this.dispatchedTarget) {
             this.baritone.cancelMining();
             onSubItemDone(ctx, tsm);
@@ -619,10 +621,10 @@ public class RawMaterialTask {
         if (have > this.mineLastCount) {
             this.mineLastCount = have;
             this.mineStallTicks = 0;
-        }/* else if (++this.mineStallTicks > MINE_STALL_TICKS) {
+        } else if (++this.mineStallTicks > 1200) {
             this.baritone.cancelMining();
             afterGatherFailed(ctx, tsm, item, false);
-        }*/
+        }
     }
 
     /**
