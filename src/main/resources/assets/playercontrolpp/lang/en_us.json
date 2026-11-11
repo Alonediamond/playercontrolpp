@@ -235,6 +235,7 @@
   "playercontrolpp.message.schematic_cache.found": "[PlayerControl++] Found %s containers; caching now.",
   "playercontrolpp.message.schematic_cache.progress": "[PlayerControl++] %s containers remain; cached %s, failed %s. Press the hotkey again to cancel.",
   "playercontrolpp.message.schematic_cache.completed": "[PlayerControl++] Schematic container caching complete: cached %s, failed %s.",
+  "playercontrolpp.message.schematic_cache.completed_highlight": "[PlayerControl++] Schematic container caching complete: cached %s, failed %s. Failed containers are highlighted in the world.",
   "playercontrolpp.message.schematic_cache.cancelled": "[PlayerControl++] Schematic selection container caching cancelled.",
   "playercontrolpp.config.hotkeys.name.waterFillToggle": "Auto Water Fill",
   "playercontrolpp.config.hotkeys.pretty_name.waterFillToggle": "Auto Water Fill",

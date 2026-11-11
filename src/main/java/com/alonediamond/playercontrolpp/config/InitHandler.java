@@ -6,6 +6,7 @@ import com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature
 import com.alonediamond.playercontrolpp.feature.AutoForwardFeature;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.AutoWaterFillFeature;
+import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
 import com.alonediamond.playercontrolpp.feature.FeatureRegistry;
 import com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature;
 import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
@@ -79,6 +80,9 @@ public class InitHandler implements IInitializationHandler {
         FeatureRegistry.register(SchematicSelectionContainerCacheFeature.FEATURE);
         FeatureRegistry.register(AutoWaterFillFeature.FEATURE);
         FeatureRegistry.register(AutoRestockFeature.getInstance());
+        // 高亮只是画描边 + 到期消失，不参与互斥判断（isActive 保持 false）。
+        FeatureRegistry.register(ContainerHighlightFeature.getInstance());
+        ContainerHighlightFeature.register();
     }
 
     public static void register() {

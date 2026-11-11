@@ -111,6 +111,13 @@ public final class SchematicSelectionContainerCacheFeature {
     private static int cachedCount;
     private static int failedCount;
     private static int messageTimer;
+    /**
+     * 没能缓存成功的容器坐标。
+     *
+     * <p>只用来在结束后描边高亮：玩家看到"有 3 个没缓存上"之后，总得知道是哪 3 个。
+     * 与 {@link #claimed} 不同——双箱的另一半也可能失败，所以按实际尝试的坐标记。
+     */
+    private static final Set<BlockPos> failedContainers = new HashSet<>();
 
     public static final ClientFeature FEATURE = new ClientFeature() {
         @Override public void onClientTick(Minecraft mc) { tick(mc); }
@@ -159,6 +166,8 @@ public final class SchematicSelectionContainerCacheFeature {
         }
 
         clearTaskState();
+        // 新一轮开始：上一轮的高亮到此为止，避免旧坐标和新进度混在一起。
+        ContainerHighlightFeature.getInstance().clear();
         buildScanQueue(boxes, client.player.position());
         active = true;
         state = State.SEEKING;
@@ -174,6 +183,10 @@ public final class SchematicSelectionContainerCacheFeature {
     }
 
     private static void finish(Minecraft client, String translationKey, Object... args) {
+        // 先把失败坐标交给高亮渲染，再清任务状态——clearTaskState() 会把失败列表一起清掉。
+        // 配置为 0 时 highlight() 自己什么都不做。
+        ContainerHighlightFeature.getInstance().highlight(
+                new ArrayList<>(failedContainers), ContainerHighlightFeature.configuredTicks());
         closeGuiIfOpen(client);
         clearTaskState();
         MessageUtil.sendActionBar(client, translationKey, args);
@@ -198,6 +211,7 @@ public final class SchematicSelectionContainerCacheFeature {
         pendingCount = 0;
         cachedCount = 0;
         failedCount = 0;
+        failedContainers.clear();
         messageTimer = 0;
         // 状态清零时同步撤掉 GUI 屏蔽；功能重启后下一 tick 会立刻续租。
         ContainerGuiSuppressor.expire();
@@ -277,6 +291,10 @@ public final class SchematicSelectionContainerCacheFeature {
             if (deferredSections.isEmpty()) {
                 if (cachedCount == 0 && failedCount == 0) {
                     finish(client, "playercontrolpp.message.schematic_cache.none_found");
+                } else if (failedCount > 0 && ContainerHighlightFeature.configuredTicks() > 0) {
+                    // 有失败项且高亮没被关掉：提示里明说一句，玩家才知道画面上那些框是什么。
+                    finish(client, "playercontrolpp.message.schematic_cache.completed_highlight",
+                            cachedCount, failedCount);
                 } else {
                     finish(client, "playercontrolpp.message.schematic_cache.completed",
                             cachedCount, failedCount);
@@ -316,7 +334,12 @@ public final class SchematicSelectionContainerCacheFeature {
 
     /** 当前目标处理结束：记账、发进度、按配置决定是否进入冷却。 */
     private static void complete(Minecraft client, boolean saved) {
-        if (saved) cachedCount++; else failedCount++;
+        if (saved) {
+            cachedCount++;
+        } else {
+            failedCount++;
+            if (currentTarget != null) failedContainers.add(currentTarget.immutable());
+        }
         currentTarget = null;
 
         notify(client, "playercontrolpp.message.schematic_cache.progress",

@@ -235,6 +235,7 @@
   "playercontrolpp.message.schematic_cache.found": "[PlayerControl++] 找到 %s 个容器，开始缓存。",
   "playercontrolpp.message.schematic_cache.progress": "[PlayerControl++] 剩余 %s 个容器；已缓存 %s，失败 %s。再次按下快捷键可取消。",
   "playercontrolpp.message.schematic_cache.completed": "[PlayerControl++] 投影选区容器缓存完成：已缓存 %s，失败 %s。",
+  "playercontrolpp.message.schematic_cache.completed_highlight": "[PlayerControl++] 投影选区容器缓存完成：已缓存 %s，失败 %s。未缓存的容器已在世界中高亮。",
   "playercontrolpp.message.schematic_cache.cancelled": "[PlayerControl++] 已取消缓存投影选区容器。",
   "playercontrolpp.config.hotkeys.name.waterFillToggle": "自动填水",
   "playercontrolpp.config.hotkeys.pretty_name.waterFillToggle": "自动填水",
