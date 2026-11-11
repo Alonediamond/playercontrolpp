@@ -118,7 +118,9 @@ public final class ContainerOpener {
                 ctx.openAttemptCount = 0;
             } else {
                 mc.player.closeContainer();
-                ctx.transferCooldown = 8;
+                // 关箱后等多久再继续由配置决定：延迟高的服务器上太快去开下一个箱子会被丢包。
+                ctx.transferCooldown = com.alonediamond.playercontrolpp.config.Configs.BaritoneSettings
+                        .CONTAINER_CLOSE_DELAY.getIntegerValue();
                 retryAdjacentOrFail(ctx, tsm, pathing);
             }
         } else {

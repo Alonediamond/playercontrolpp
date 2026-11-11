@@ -64,7 +64,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                         new ArrayList<>(RouteManager.getInstance().getRouteHotkeyList()));
             case SETTINGS:
                 List<IConfigBase> settings = new ArrayList<>(Configs.Settings.OPTIONS);
-                settings.add(Configs.CacheNearbySettings.CONTAINER_WHITELIST);
+                settings.addAll(Configs.CacheNearbySettings.OPTIONS);
                 return ConfigOptionWrapper.createFor(settings);
             case BARITONE:
                 List<IConfigBase> baritoneOptions = new ArrayList<>();
@@ -74,6 +74,9 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 }
                 baritoneOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
                 baritoneOptions.add(Configs.Hotkeys.MARK_CONTAINER);
+                // 世界坐标合成用的两个标记热键放在同一个区域，玩家一眼能看到"怎么记录工作站"。
+                baritoneOptions.add(Configs.Hotkeys.MARK_CRAFTING_TABLE);
+                baritoneOptions.add(Configs.Hotkeys.MARK_STONECUTTER);
                 for (IConfigBase opt : Configs.Restocks.OPTIONS) {
                     baritoneOptions.add(opt);
                 }

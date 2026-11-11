@@ -156,7 +156,10 @@ final class CraftingController {
     private int stationSlot = -1;
     /** 工作站的世界坐标（{@link StationSource#WORLD} 时有效）。 */
     private BlockPos stationPos;
+    /** 这一次实际选中的来源（背包或世界坐标），由选站流程写入。 */
     private StationSource source = StationSource.INVENTORY;
+    /** 玩家配置的来源策略：自动 / 仅背包 / 仅世界坐标。 */
+    private CraftStationSource mode = CraftStationSource.AUTO;
     /** 工作台用的配方；切石机为 {@code null}。 */
     private RecipePlan recipe;
     private boolean openSent;
@@ -192,18 +195,15 @@ final class CraftingController {
         this.item = item;
         this.targetCount = targetCount;
         this.stonecutterInput = stonecutterInput;
+        // 每次合成重新读一次配置：玩家可能在备货运行期间改了工作站来源。
+        this.mode = (CraftStationSource) Configs.BaritoneSettings.CRAFT_STATION_SOURCE.getOptionListValue();
+        this.source = StationSource.INVENTORY;
+        this.stationPos = null;
 
         // 配方类型不支持的（熔炼 / 锻造）直接说做不了：调用方会保留已收集的子材料。
         if (recipeType != null && !isSupportedRecipe(recipeType)) return false;
 
         if (!pickStation(mc, recipeType)) return false;
-
-        // 背包必须放得下这次要用的原材料：合成会把材料从盒里/背包里摆到合成格上，
-        // 但没有空位时"先取出散装"这一步就会失败。这里提前拦下来，调用方去存盒或跳过。
-        if (!hasRoomForIngredients(mc)) {
-            Playercontrolpp.LOGGER.info("[craft] skipping {}: inventory has no room for ingredients", item);
-            return false;
-        }
 
         this.stage = this.source == StationSource.WORLD && !canReachStation(mc)
                 ? Stage.TRAVEL
@@ -235,6 +235,10 @@ final class CraftingController {
     public void cancel(Minecraft mc) {
         if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
             mc.player.closeContainer();
+        }
+        // 世界坐标模式下是我们让 Baritone 走过去的，取消时要一并停下，否则玩家会继续被带着走。
+        if (this.stage == Stage.TRAVEL || this.source == StationSource.WORLD) {
+            BaritoneIntegration.getInstance().cancelPathing();
         }
         this.active = false;
         this.stage = Stage.IDLE;
@@ -626,9 +630,9 @@ final class CraftingController {
 
     private boolean tryStation(Minecraft mc, Item stationItem, boolean stonecutter) {
         // 1) 背包里的工作站（需要 QuickShulker 才能就地打开）。
-        if (this.source != StationSource.WORLD && tryInventoryStation(mc, stationItem, stonecutter)) return true;
+        if (this.mode != CraftStationSource.WORLD && tryInventoryStation(mc, stationItem, stonecutter)) return true;
         // 2) 世界坐标里记录的工作站（不装 QuickShulker 也能用）。
-        if (this.source != StationSource.INVENTORY) return tryWorldStation(mc, stationItem, stonecutter);
+        if (this.mode != CraftStationSource.INVENTORY && tryWorldStation(mc, stationItem, stonecutter)) return true;
         return false;
     }
 
@@ -700,60 +704,6 @@ final class CraftingController {
         double dz = Math.max(Math.abs(eye.z - (pos.getZ() + 0.5)) - 0.5, 0.0);
         double reach = PlayerUtil.blockReach(mc.player) + TRAVEL_REACH_PADDING;
         return dx * dx + dy * dy + dz * dz <= reach * reach;
-    }
-
-    /**
-     * 背包放不放得下这次合成要用的原材料。
-     *
-     * <p>摆料时材料可能散落在多个槽位，且摆完之后还要能腾出产物位置。这里按
-     * "每种原料至少占一格"估算最低需求，再额外留一格给产物；已经堆叠在背包里的
-     * 材料可以合并，所以只数还缺几格。
-     */
-    private boolean hasRoomForIngredients(Minecraft mc) {
-        if (this.recipe == null && this.station == Station.CRAFTING_TABLE) return true;
-
-        Map<Item, Integer> needed = ingredientsNeeded(mc);
-        if (needed.isEmpty()) return true;
-
-        int emptySlots = 0;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (mc.player.getInventory().getItem(i).isEmpty()) emptySlots++;
-        }
-        // 已经有一部分散装在背包里的材料可以合并进现有堆，不必占新格。
-        int missingSlots = 0;
-        for (Map.Entry<Item, Integer> entry : needed.entrySet()) {
-            if (ItemUtil.countLoose(mc.player, entry.getKey()) <= 0) missingSlots++;
-        }
-        return emptySlots >= missingSlots + 1;   // +1 是给产物留的位置
-    }
-
-    /**
-     * @return 这次合成（一次摆料）每种原料要几个。
-     *
-     * <p>切石机只需输入材料；工作台按配方图案统计。数量按"能做几批"的保守值 1 批算——
-     * 这里只做空间预检，不是精确配比。
-     */
-    private Map<Item, Integer> ingredientsNeeded(Minecraft mc) {
-        Map<Item, Integer> needed = new java.util.LinkedHashMap<>();
-        if (this.station == Station.STONECUTTER) {
-            if (this.stonecutterInput != null) needed.put(this.stonecutterInput, 1);
-            return needed;
-        }
-        if (this.recipe == null) return needed;
-        for (List<ItemStack> candidates : this.recipe.grid) {
-            if (candidates.isEmpty()) continue;
-            Item chosen = null;
-            for (ItemStack candidate : candidates) {
-                if (ItemUtil.countLoose(mc.player, candidate.getItem()) > 0
-                        || ItemUtil.countEverywhere(mc.player, candidate.getItem()) > 0) {
-                    chosen = candidate.getItem();
-                    break;
-                }
-            }
-            if (chosen == null && !candidates.isEmpty()) chosen = candidates.get(0).getItem();
-            if (chosen != null) needed.merge(chosen, 1, Integer::sum);
-        }
-        return needed;
     }
 
     /** @return 物品栏里第一个 {@code wanted} 的槽位；没有则 -1。 */

@@ -6,6 +6,7 @@
   "plugin": "com.alonediamond.playercontrolpp.mixin.PlayercontrolppMixinPlugin",
   "client": [
     "client.MixinLocalPlayer",
+    "client.MixinLevelRenderer",
     "compat.screen.MinecraftSetScreenMixin",
     "compat.screen.GuiSetScreenMixin",
     "compat.litematica.LitematicaIntegrationImpl",

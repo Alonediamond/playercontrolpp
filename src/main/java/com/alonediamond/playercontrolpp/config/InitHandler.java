@@ -82,7 +82,6 @@ public class InitHandler implements IInitializationHandler {
         FeatureRegistry.register(AutoRestockFeature.getInstance());
         // 高亮只是画描边 + 到期消失，不参与互斥判断（isActive 保持 false）。
         FeatureRegistry.register(ContainerHighlightFeature.getInstance());
-        ContainerHighlightFeature.register();
     }
 
     public static void register() {

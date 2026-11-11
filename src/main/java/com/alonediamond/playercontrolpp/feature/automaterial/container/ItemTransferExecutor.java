@@ -46,11 +46,8 @@ public final class ItemTransferExecutor {
             return;
         }
 
-        // 这个容器里已经没有任何还缺的东西了：记成"已取空"，之后无论换到哪一件材料都不再打开它。
-        if (ctx.currentContainerTarget != null) {
-            ctx.drainedContainers.add(ctx.currentContainerTarget);
-            ctx.exhaustedPositions.add(ctx.currentContainerTarget);
-        }
+        // 这个容器对"当前这几种缺料"已经没有东西可取了；换物品时清空，因为里面可能还有别的材料。
+        if (ctx.currentContainerTarget != null) ctx.exhaustedPositions.add(ctx.currentContainerTarget);
         mc.player.closeContainer();
         ctx.transferCooldown = Configs.BaritoneSettings.CONTAINER_CLOSE_DELAY.getIntegerValue();
         task.setState(State.VERIFYING);

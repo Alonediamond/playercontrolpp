@@ -53,15 +53,6 @@ public final class GatherContext {
     public final Set<BlockPos> exhaustedPositions = new HashSet<>();
 
     /**
-     * 本轮已经「把里面所有还需要的东西都拿走了」的容器。
-     *
-     * <p>与 {@link #exhaustedPositions} 的区别：后者换物品时清空，因为它只表示"对那一件没货"；
-     * 这个是**全局**的——一次开箱已经把当前所有缺料都拿走之后，无论接下来要哪一件，
-     * 这个箱子都不必再开一次。搜索时两个集合都跳过，所以同一个箱子只会被打开一次。
-     */
-    public final Set<BlockPos> drainedContainers = new HashSet<>();
-
-    /**
      * 待归还的杂盒所在物品栏槽位；&lt; 0 表示没有待归还的盒子。
      * 由 {@code ShulkerBoxAccess} 在取物结束时写入，{@code ContainerOpener} 在容器打开后消费。
      */
@@ -199,7 +190,6 @@ public final class GatherContext {
         extraStorableItems.clear();
         tracedItems.clear();
         exhaustedPositions.clear();
-        drainedContainers.clear();
 
         transferCooldown = 0;
         containerJustOpened = false;

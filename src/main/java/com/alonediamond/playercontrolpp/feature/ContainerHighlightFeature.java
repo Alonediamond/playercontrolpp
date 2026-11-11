@@ -1,23 +1,9 @@
 package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.config.Configs;
-import fi.dy.masa.malilib.event.RenderEventHandler;
-import fi.dy.masa.malilib.interfaces.IRenderer;
 import fi.dy.masa.malilib.render.RenderUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import org.joml.Matrix4f;
-
-//#if MC >= 260000
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.mojang.blaze3d.pipeline.RenderTarget;
-import net.minecraft.client.renderer.RenderBuffers;
-import net.minecraft.client.renderer.culling.Frustum;
-import net.minecraft.client.renderer.state.level.CameraRenderState;
-import net.minecraft.util.profiling.ProfilerFiller;
-import org.joml.Matrix4fc;
-import org.joml.Vector4f;
-//#endif
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,18 +14,13 @@ import java.util.Set;
 /**
  * 在世界里给方块描边高亮，用来指出"这些容器没能缓存成功"。
  *
- * <p>ChestTracker 本身只画悬浮名称文字，没有方块描边，所以这里自己做。渲染直接借 malilib
- * 的 {@code RenderUtils.renderBlockOutline}——它已经吃掉了 1.21.x 与 26.x 两代渲染管线的差异，
- * 本类只需要处理两处签名差异（见下面的预处理器分支）：
- * <ul>
- *   <li>1.21.6 起 {@code renderBlockOutline} 不再需要 {@code Minecraft} 参数，颜色类型也从
- *       {@code util.Color4f} 换成了 {@code util.data.Color4f}；</li>
- *   <li>26.x 的 {@code IRenderer.onRenderWorldLast} 换成了带相机/帧图的一整套参数。</li>
- * </ul>
+ * <p>ChestTracker 本身只画悬浮名称文字，没有方块描边，所以这里自己画。
+ * 真正调用渲染的入口在 {@code MixinLevelRenderer}（{@code LevelRenderer.renderLevel} 末尾），
+ * 与 ChestTracker / Litematica 画世界内容的方式一致；原因见那个类。
  *
- * <p>高亮是"一次性"的：指定持续 tick 数后自动消失，不长期占用画面，也不额外提供清除热键。
+ * <p>高亮是"一次性"的：持续指定 tick 数后自动消失。
  */
-public final class ContainerHighlightFeature implements IRenderer, ClientFeature {
+public final class ContainerHighlightFeature implements ClientFeature {
 
     /** 描边离方块表面略微外扩，避免和方块表面 z-fighting。 */
     private static final float EXPAND = 0.002F;
@@ -57,39 +38,25 @@ public final class ContainerHighlightFeature implements IRenderer, ClientFeature
 
     public static ContainerHighlightFeature getInstance() { return INSTANCE; }
 
-    /** 只在启动时调用一次：把渲染回调挂到 malilib 上。 */
-    public static void register() {
-        RenderEventHandler.getInstance().registerWorldLastRenderer(INSTANCE);
-    }
-
     /**
      * 高亮一组方块。
      *
-     * <p>时长取配置项；配置为 0（或列表为空）时什么都不做。
+     * @param ticks 持续 tick 数；&lt;= 0 表示关闭高亮
      */
-    public void highlight(Collection<BlockPos> blocks, int ticksFromConfig) {
-        if (blocks == null || blocks.isEmpty()) return;
-        if (ticksFromConfig <= 0) return;
-
+    public void highlight(Collection<BlockPos> blocks, int ticks) {
         positions.clear();
+        remainingTicks = 0;
+        if (blocks == null || blocks.isEmpty() || ticks <= 0) return;
         for (BlockPos pos : blocks) {
             if (pos != null) positions.add(pos.immutable());
         }
-        remainingTicks = ticksFromConfig;
+        remainingTicks = ticks;
     }
 
     /** 清掉当前高亮（重新运行缓存任务、切换世界时用）。 */
     public void clear() {
         positions.clear();
         remainingTicks = 0;
-    }
-
-    /** 每 tick 递减。由 {@link FeatureRegistry} 驱动，保证世界切换时也会被清掉。 */
-    public void tick() {
-        if (remainingTicks <= 0) return;
-        if (--remainingTicks <= 0) {
-            positions.clear();
-        }
     }
 
     /**
@@ -100,7 +67,8 @@ public final class ContainerHighlightFeature implements IRenderer, ClientFeature
      */
     @Override
     public void onClientTick(Minecraft mc) {
-        tick();
+        if (remainingTicks <= 0) return;
+        if (--remainingTicks <= 0) positions.clear();
     }
 
     @Override
@@ -108,71 +76,44 @@ public final class ContainerHighlightFeature implements IRenderer, ClientFeature
         clear();
     }
 
-    /** 配置项读取集中在这里，渲染线程之外也能安全调用。 */
-    public static int configuredTicks() {
-        return Configs.BaritoneSettings.UNCACHED_HIGHLIGHT_TICKS.getIntegerValue();
-    }
+    // ---- 渲染入口（由 MixinLevelRenderer 调用）----
 
-    // ---- 渲染 ----
-
-    //#if MC >= 260000
-    @Override
-    public void onRenderWorldLast(RenderTarget target, Matrix4fc modelViewMatrix,
-                                  CameraRenderState cameraState, Frustum frustum,
-                                  RenderBuffers buffers, GpuBufferSlice fog, Vector4f fogColor,
-                                  ProfilerFiller profiler) {
+    /** 在世界渲染末尾被调用，把当前所有高亮方块描一遍。 */
+    public void renderWorld() {
         if (positions.isEmpty() || remainingTicks <= 0) return;
+        // 拷一份再遍历：渲染期间高亮列表可能被 tick 清空（换维度、超时）。
         for (BlockPos pos : new ArrayList<>(positions)) {
-            Outline.draw(pos);
+            drawOutline(pos);
         }
     }
-    //#else
-    //$$ @Override
-    //$$ public void onRenderWorldLast(Matrix4f modelViewMatrix, Matrix4f projectionMatrix) {
-    //$$     if (positions.isEmpty() || remainingTicks <= 0) return;
-    //$$     for (BlockPos pos : new ArrayList<>(positions)) {
-    //$$         Outline.draw(pos);
-    //$$     }
-    //$$ }
-    //#endif
 
     /**
-     * 画出单个方块的描边。
+     * 画单个方块的描边。
      *
-     * <p>单独一个类是为了把"颜色类型/参数个数"这两个版本差异隔离在一处；
-     * 逻辑本身在渲染循环里。
+     * <p>1.21.6 起 malilib 的 {@code renderBlockOutline} 不再需要 {@code Minecraft} 参数，
+     * 颜色类型也从 {@code util.Color4f} 换成了 {@code util.data.Color4f}。这里就地分支，
+     * 其余逻辑只有一份。
      */
-    private static final class Outline {
-        /** 橙红色，和方块的灰调背景区分度高。 */
-        private static final float R = 1.0F;
-        private static final float G = 0.35F;
-        private static final float B = 0.15F;
-        private static final float A = 0.9F;
-
-        private Outline() {}
-
-        static void draw(BlockPos pos) {
-            try {
-                //#if MC >= 12106
-                RenderUtils.renderBlockOutline(pos, EXPAND, LINE_WIDTH,
-                        new fi.dy.masa.malilib.util.data.Color4f(R, G, B, A));
-                //#else
-                //$$ RenderUtils.renderBlockOutline(pos, EXPAND, LINE_WIDTH,
-                //$$         new fi.dy.masa.malilib.util.Color4f(R, G, B, A), Minecraft.getInstance());
-                //#endif
-            } catch (Throwable ignored) {
-                // 渲染路径上的异常绝不能冒到 tick/渲染循环里；最坏情况只是这一帧没画出描边。
-            }
+    // 1.21.1/1.21.4 只有 util.Color4f 这个重载，而它在新版里标了过时；这是被迫使用旧重载。
+    @SuppressWarnings("deprecation")
+    private static void drawOutline(BlockPos pos) {
+        try {
+            //#if MC >= 12106
+            // renderThrough = true：走 NO_DEPTH_NO_CULL 管线。高亮框被墙挡住时也看得见，
+            // 玩家才知道"还有几个箱子没缓存"，也避开了深度测试把线裁掉的可能。
+            RenderUtils.renderBlockOutline(pos, EXPAND, LINE_WIDTH,
+                    new fi.dy.masa.malilib.util.data.Color4f(1.0F, 0.35F, 0.15F, 0.9F), true);
+            //#else
+            //$$ RenderUtils.renderBlockOutline(pos, EXPAND, LINE_WIDTH,
+            //$$         new fi.dy.masa.malilib.util.Color4f(1.0F, 0.35F, 0.15F, 0.9F), Minecraft.getInstance());
+            //#endif
+        } catch (Throwable ignored) {
+            // 渲染路径上的异常绝不能冒到渲染循环里；最坏情况只是这一帧没画出描边。
         }
     }
 
-    /** 供调试：当前有多少个高亮方块。 */
-    public int highlightedCount() {
-        return remainingTicks > 0 ? positions.size() : 0;
-    }
-
-    /** 便于测试：直接读取内部列表（只读拷贝）。 */
-    List<BlockPos> snapshot() {
-        return new ArrayList<>(positions);
+    /** 配置项读取集中在这里。 */
+    public static int configuredTicks() {
+        return Configs.CacheNearbySettings.UNCACHED_HIGHLIGHT_TICKS.getIntegerValue();
     }
 }

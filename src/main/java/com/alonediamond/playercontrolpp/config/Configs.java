@@ -256,14 +256,8 @@ public class Configs implements IConfigHandler {
          * <p>旧版固定 1200 tick（一分钟），挖不到时会长时间空转。调小更早换变体/换来源。
          */
         public static final ConfigInteger MINING_STALL_TICKS = new ConfigInteger(
-                "miningStallTicks", 200, 40, 1200,
+                "miningStallTicks", 200, 40, 3600,
                 "How many ticks Baritone may mine without the target material increasing before the raw-material trace switches to another source or variant.")
-                .apply(KEY_BARITONE);
-
-        /** 等价变体（木板/原木/圆石族）按什么顺序挑。 */
-        public static final ConfigOptionList RAW_MATERIAL_VARIANT_MODE = new ConfigOptionList(
-                "rawMaterialVariantMode", VariantMode.CACHE_COUNT,
-                "How to pick between equivalent raw materials (any plank type, any log type, cobblestone family...).\nCache Count: use the variant with the most matches in ChestTracker's cache.\nTree Default: keep whatever LitematList's recipe tree picked.")
                 .apply(KEY_BARITONE);
 
         /** 模拟模式放置潜影盒时的搜索半径（以玩家为中心）。 */
@@ -296,11 +290,6 @@ public class Configs implements IConfigHandler {
                 "Marked stonecutter positions for auto-crafting. Each entry: dimension x y z. Use the Mark Stonecutter hotkey to record one.")
                 .apply(KEY_BARITONE);
 
-        /** 未缓存容器高亮持续多少 tick；0 = 关闭。 */
-        public static final ConfigInteger UNCACHED_HIGHLIGHT_TICKS = new ConfigInteger(
-                "uncachedHighlightTicks", 100, 0, 600,
-                "How long (in ticks) containers that failed to be cached stay highlighted in the world. 0 disables the highlight.")
-                .apply(KEY_BARITONE);
 
         public static final ConfigStringList GLOBAL_IGNORE_LIST = new ConfigStringList(
                 "globalIgnoreList", withWaterBucket(ALL_SHULKER_BOX_IDS),
@@ -313,9 +302,8 @@ public class Configs implements IConfigHandler {
                 SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
                 AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE,
                 SHULKER_PLACE_RADIUS, ALLOW_NUDGE_FOR_PLACEMENT,
-                RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH, RAW_MATERIAL_VARIANT_MODE, MINING_STALL_TICKS,
+                RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH, MINING_STALL_TICKS,
                 CRAFT_STATION_SOURCE, CRAFTING_TABLE_POSITIONS, STONECUTTER_POSITIONS,
-                UNCACHED_HIGHLIGHT_TICKS,
                 ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST);
     }
 
@@ -325,8 +313,19 @@ public class Configs implements IConfigHandler {
                 "Block IDs of containers that can be auto-cached. Edit via the GUI button or click to open the list editor.")
                 .apply(KEY_CACHE_NEARBY);
 
+        /**
+         * 缓存投影选区容器后，没能缓存成功的容器在世界里描边高亮多久。
+         *
+         * <p>放在容器缓存这一组而不是备货组：这个功能是给箱子追踪补缓存的，
+         * 与自动备货无关，关掉备货也照样存在。
+         */
+        public static final ConfigInteger UNCACHED_HIGHLIGHT_TICKS = new ConfigInteger(
+                "uncachedHighlightTicks", 100, 0, 600,
+                "How long (in ticks) containers that failed to be cached stay highlighted in the world. 0 disables the highlight.")
+                .apply(KEY_CACHE_NEARBY);
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                CONTAINER_WHITELIST);
+                CONTAINER_WHITELIST, UNCACHED_HIGHLIGHT_TICKS);
     }
 
     public static class Restocks {

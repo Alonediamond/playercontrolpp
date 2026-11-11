@@ -105,6 +105,9 @@ public final class ShulkerBoxAccess {
         phaseTicks = cooldownTicks = 0;
         boxSlot = sourceSlot = -1;
         position = returnTarget = null;
+        placeClickPos = null;
+        placeFace = Direction.UP;
+        nudgeAttempts = 0;
         selectedSlot = InventoryCompat.getSelectedSlot(ctx.client.player.getInventory());
         result = StorageResult.ACTIVE;
         targets.clear();
