@@ -2,11 +2,18 @@ package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
+import com.alonediamond.playercontrolpp.config.CraftStationSource;
+import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.CraftingMenu;
@@ -17,6 +24,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -72,6 +81,9 @@ final class CraftingController {
     /** 用哪种工作站。 */
     private enum Station { CRAFTING_TABLE, STONECUTTER }
 
+    /** 工作站从哪里来：背包装备（QuickShulker）或世界里记录好的坐标。 */
+    private enum StationSource { INVENTORY, WORLD }
+
     /** 摆料方式：先试服务端的包，不行就自己点。 */
     private enum PlaceMode { PACKET, MANUAL }
 
@@ -123,20 +135,28 @@ final class CraftingController {
 
     private final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
-    private enum Stage { IDLE, OPEN, PREPARE, TAKE, CLOSE }
+    private enum Stage { IDLE, TRAVEL, OPEN, PREPARE, TAKE, CLOSE }
+
+    private static final int TRAVEL_TIMEOUT_TICKS = 400;
+    /** 距工作站多近才算到达（略大于交互距离，抵达后还要能右键到）。 */
+    private static final double TRAVEL_REACH_PADDING = 1.0;
 
     private Stage stage = Stage.IDLE;
     private Result terminal = Result.ACTIVE;
     private boolean active;
     private int cooldown;
     private int waitTicks;
+    private int travelTicks;
 
     private Item item;
     private int targetCount;
     private Item stonecutterInput;
     private Station station = Station.CRAFTING_TABLE;
-    /** 工作站的物品栏槽位。 */
+    /** 工作站的物品栏槽位（{@link StationSource#INVENTORY} 时有效）。 */
     private int stationSlot = -1;
+    /** 工作站的世界坐标（{@link StationSource#WORLD} 时有效）。 */
+    private BlockPos stationPos;
+    private StationSource source = StationSource.INVENTORY;
     /** 工作台用的配方；切石机为 {@code null}。 */
     private RecipePlan recipe;
     private boolean openSent;
@@ -163,7 +183,8 @@ final class CraftingController {
      * @param targetCount      要持有到多少个（绝对量，含缺失清单给它的预留量）
      * @param recipeType      原材料树上这一层的配方类型
      * @param stonecutterInput 切石机要用的输入物品（树上唯一的那个子材料）；没有就传 {@code null}
-     * @return false = 这次合成做不了（没有工作站 / 没有可用配方 / 配方类型不支持），调用方按"只收集原材料"处理
+     * @return false = 这次合成做不了（没有工作站 / 没有可用配方 / 配方类型不支持 / 背包容不下），
+     *         调用方按"只收集原材料"处理
      */
     public boolean start(Minecraft mc, Item item, int targetCount, String recipeType, Item stonecutterInput) {
         if (mc.player == null || mc.level == null || item == null) return false;
@@ -177,15 +198,32 @@ final class CraftingController {
 
         if (!pickStation(mc, recipeType)) return false;
 
-        this.stage = Stage.OPEN;
+        // 背包必须放得下这次要用的原材料：合成会把材料从盒里/背包里摆到合成格上，
+        // 但没有空位时"先取出散装"这一步就会失败。这里提前拦下来，调用方去存盒或跳过。
+        if (!hasRoomForIngredients(mc)) {
+            Playercontrolpp.LOGGER.info("[craft] skipping {}: inventory has no room for ingredients", item);
+            return false;
+        }
+
+        this.stage = this.source == StationSource.WORLD && !canReachStation(mc)
+                ? Stage.TRAVEL
+                : Stage.OPEN;
         this.terminal = Result.ACTIVE;
         this.active = true;
         this.cooldown = 0;
         this.waitTicks = 0;
+        this.travelTicks = 0;
         this.openSent = false;
         this.replaceAttempts = 0;
         this.packetUsable = true;
         resetPlacement();
+
+        if (this.stage == Stage.TRAVEL) {
+            // 世界坐标模式：先把玩家送到工作站旁边。寻路会打断 Baritone 的其它进程，
+            // 但合成本来就是独占流程，取消挖矿/建造由调用方负责。
+            stationPos = this.stationPos;
+            BaritoneIntegration.getInstance().pathTo(stationPos);
+        }
         return true;
     }
 
@@ -207,6 +245,7 @@ final class CraftingController {
         if (this.cooldown > 0) { this.cooldown--; return Result.ACTIVE; }
 
         switch (this.stage) {
+            case TRAVEL -> doTravel(mc);
             case OPEN -> doOpen(mc);
             case PREPARE -> doPrepare(mc);
             case TAKE -> doTake(mc);
@@ -221,6 +260,31 @@ final class CraftingController {
     }
 
     // ---- 阶段实现 ----
+
+    /**
+     * 世界坐标模式：等 Baritone 走到工作站旁边。
+     *
+     * <p>到达判据用"方块外框到眼睛的距离"，与服务端接受右键的范围一致；
+     * 寻路自己停了但没走到、或超时，都按失败处理，让调用方去收集原材料。
+     */
+    private void doTravel(Minecraft mc) {
+        if (this.stationPos == null) { fail(mc, "no world workstation position"); return; }
+        if (canReachStation(mc)) {
+            BaritoneIntegration.getInstance().cancelPathing();
+            this.stage = Stage.OPEN;
+            this.cooldown = ACTION_COOLDOWN;
+            return;
+        }
+
+        this.travelTicks++;
+        boolean stopped = !BaritoneIntegration.getInstance().isPathing();
+        if ((stopped && this.travelTicks > OPEN_WAIT_TICKS) || this.travelTicks > TRAVEL_TIMEOUT_TICKS) {
+            BaritoneIntegration.getInstance().cancelPathing();
+            fail(mc, "could not reach the world workstation at " + this.stationPos.toShortString());
+            return;
+        }
+        this.cooldown = 1;
+    }
 
     private void doOpen(Minecraft mc) {
         if (this.openSent) {
@@ -244,10 +308,16 @@ final class CraftingController {
         }
 
         // 还没发包：这时才需要先把别的容器关掉——QuickShulker 是按玩家自己的物品栏菜单
-        // 解析槽位的，开着箱子时同一个索引指向完全不同的槽位。
+        // 解析槽位的，开着箱子时同一个索引指向完全不同的槽位。世界坐标路径同样要求先关界面，
+        // 否则右键会落到已打开的容器上。
         if (mc.player.containerMenu != mc.player.inventoryMenu) {
             mc.player.closeContainer();
             this.cooldown = ACTION_COOLDOWN;
+            return;
+        }
+
+        if (this.source == StationSource.WORLD) {
+            openWorldStation(mc);
             return;
         }
 
@@ -266,6 +336,32 @@ final class CraftingController {
         }
         log("opened " + this.station + " for " + this.item + " (inventory slot " + this.stationSlot
                 + " -> menu slot " + menuSlot + ")");
+        this.openSent = true;
+        this.waitTicks = 0;
+        this.cooldown = ACTION_COOLDOWN;
+    }
+
+    /** 世界坐标路径：对着工作站方块的最近面发右键。 */
+    private void openWorldStation(Minecraft mc) {
+        if (this.stationPos == null) { fail(mc, "no world workstation position"); return; }
+        if (!canReachStation(mc)) { fail(mc, "world workstation out of reach"); return; }
+
+        // 方块可能已经被拆掉或被换成别的东西：开之前确认还是同一种工作站。
+        var expectedBlock = this.station == Station.STONECUTTER
+                ? net.minecraft.world.level.block.Blocks.STONECUTTER
+                : net.minecraft.world.level.block.Blocks.CRAFTING_TABLE;
+        if (!mc.level.getBlockState(this.stationPos).is(expectedBlock)) {
+            fail(mc, "world workstation is gone or changed at " + this.stationPos.toShortString());
+            return;
+        }
+
+        Direction face = com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener
+                .nearestFace(mc.player.getEyePosition(), this.stationPos);
+        Vec3 hit = Vec3.atCenterOf(this.stationPos).add(
+                face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+        mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND,
+                new BlockHitResult(hit, face, this.stationPos, false));
+        log("opened world " + this.station + " at " + this.stationPos.toShortString() + " for " + this.item);
         this.openSent = true;
         this.waitTicks = 0;
         this.cooldown = ACTION_COOLDOWN;
@@ -514,6 +610,9 @@ final class CraftingController {
     /**
      * 按树给出的配方类型挑工作站，挑不到就回退到另一种（作者确认允许回退）。
      *
+     * <p>每种工作站按配置决定从哪来：背包（QuickShulker）或世界坐标。自动模式下先背包、
+     * 后世界坐标——装了 QuickShulker 的玩家不必为此多走路，没装的玩家也能靠标记的坐标工作。
+     *
      * @return false = 两种工作站都没得用，或没有能用的配方
      */
     private boolean pickStation(Minecraft mc, String recipeType) {
@@ -526,14 +625,26 @@ final class CraftingController {
     }
 
     private boolean tryStation(Minecraft mc, Item stationItem, boolean stonecutter) {
+        // 1) 背包里的工作站（需要 QuickShulker 才能就地打开）。
+        if (this.source != StationSource.WORLD && tryInventoryStation(mc, stationItem, stonecutter)) return true;
+        // 2) 世界坐标里记录的工作站（不装 QuickShulker 也能用）。
+        if (this.source != StationSource.INVENTORY) return tryWorldStation(mc, stationItem, stonecutter);
+        return false;
+    }
+
+    private boolean tryInventoryStation(Minecraft mc, Item stationItem, boolean stonecutter) {
         int slot = findInInventory(mc, stationItem);
         if (slot < 0) return false;
+        // 已装 QuickShulker 才可能就地打开手上的工作站。
+        if (!this.quickShulker.isLoaded()) return false;
 
         if (stonecutter) {
             // 切石机的配方要等输入物品进了输入格才存在，这里只确认"有站 + 有输入材料"。
             if (this.stonecutterInput == null || findInInventory(mc, this.stonecutterInput) < 0) return false;
             this.station = Station.STONECUTTER;
             this.stationSlot = slot;
+            this.stationPos = null;
+            this.source = StationSource.INVENTORY;
             this.recipe = null;
             return true;
         }
@@ -542,8 +653,107 @@ final class CraftingController {
         if (plan == null) return false;
         this.station = Station.CRAFTING_TABLE;
         this.stationSlot = slot;
+        this.stationPos = null;
+        this.source = StationSource.INVENTORY;
         this.recipe = plan;
         return true;
+    }
+
+    /**
+     * 世界坐标工作站：找玩家记录过、且当前维度里最近的那一个。
+     *
+     * <p>切石机同样要求背包里有输入材料——右键打开的只是工作站，原料还是要从身上摆过去。
+     */
+    private boolean tryWorldStation(Minecraft mc, Item stationItem, boolean stonecutter) {
+        CraftStationManager.Kind kind = stonecutter
+                ? CraftStationManager.Kind.STONECUTTER
+                : CraftStationManager.Kind.CRAFTING_TABLE;
+        BlockPos pos = CraftStationManager.getInstance().nearest(
+                mc.level, mc.player.blockPosition(), kind);
+        if (pos == null) return false;
+
+        if (stonecutter) {
+            if (this.stonecutterInput == null || findInInventory(mc, this.stonecutterInput) < 0) return false;
+            this.station = Station.STONECUTTER;
+            this.recipe = null;
+        } else {
+            RecipePlan plan = findCraftingRecipe(mc, this.item);
+            if (plan == null) return false;
+            this.station = Station.CRAFTING_TABLE;
+            this.recipe = plan;
+        }
+        this.stationSlot = -1;
+        this.stationPos = pos;
+        this.source = StationSource.WORLD;
+        log("using world workstation " + kind + " at " + pos.toShortString() + " for " + this.item);
+        return true;
+    }
+
+    /** @return 玩家离工作站够不够近，可以直接右键。 */
+    private boolean canReachStation(Minecraft mc) {
+        if (this.stationPos == null || mc.player == null) return false;
+        Vec3 eye = mc.player.getEyePosition();
+        BlockPos pos = this.stationPos;
+        // 与容器可达性同一口径：眼睛到方块外框的距离，而不是到中心。
+        double dx = Math.max(Math.abs(eye.x - (pos.getX() + 0.5)) - 0.5, 0.0);
+        double dy = Math.max(Math.abs(eye.y - (pos.getY() + 0.5)) - 0.5, 0.0);
+        double dz = Math.max(Math.abs(eye.z - (pos.getZ() + 0.5)) - 0.5, 0.0);
+        double reach = PlayerUtil.blockReach(mc.player) + TRAVEL_REACH_PADDING;
+        return dx * dx + dy * dy + dz * dz <= reach * reach;
+    }
+
+    /**
+     * 背包放不放得下这次合成要用的原材料。
+     *
+     * <p>摆料时材料可能散落在多个槽位，且摆完之后还要能腾出产物位置。这里按
+     * "每种原料至少占一格"估算最低需求，再额外留一格给产物；已经堆叠在背包里的
+     * 材料可以合并，所以只数还缺几格。
+     */
+    private boolean hasRoomForIngredients(Minecraft mc) {
+        if (this.recipe == null && this.station == Station.CRAFTING_TABLE) return true;
+
+        Map<Item, Integer> needed = ingredientsNeeded(mc);
+        if (needed.isEmpty()) return true;
+
+        int emptySlots = 0;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (mc.player.getInventory().getItem(i).isEmpty()) emptySlots++;
+        }
+        // 已经有一部分散装在背包里的材料可以合并进现有堆，不必占新格。
+        int missingSlots = 0;
+        for (Map.Entry<Item, Integer> entry : needed.entrySet()) {
+            if (ItemUtil.countLoose(mc.player, entry.getKey()) <= 0) missingSlots++;
+        }
+        return emptySlots >= missingSlots + 1;   // +1 是给产物留的位置
+    }
+
+    /**
+     * @return 这次合成（一次摆料）每种原料要几个。
+     *
+     * <p>切石机只需输入材料；工作台按配方图案统计。数量按"能做几批"的保守值 1 批算——
+     * 这里只做空间预检，不是精确配比。
+     */
+    private Map<Item, Integer> ingredientsNeeded(Minecraft mc) {
+        Map<Item, Integer> needed = new java.util.LinkedHashMap<>();
+        if (this.station == Station.STONECUTTER) {
+            if (this.stonecutterInput != null) needed.put(this.stonecutterInput, 1);
+            return needed;
+        }
+        if (this.recipe == null) return needed;
+        for (List<ItemStack> candidates : this.recipe.grid) {
+            if (candidates.isEmpty()) continue;
+            Item chosen = null;
+            for (ItemStack candidate : candidates) {
+                if (ItemUtil.countLoose(mc.player, candidate.getItem()) > 0
+                        || ItemUtil.countEverywhere(mc.player, candidate.getItem()) > 0) {
+                    chosen = candidate.getItem();
+                    break;
+                }
+            }
+            if (chosen == null && !candidates.isEmpty()) chosen = candidates.get(0).getItem();
+            if (chosen != null) needed.merge(chosen, 1, Integer::sum);
+        }
+        return needed;
     }
 
     /** @return 物品栏里第一个 {@code wanted} 的槽位；没有则 -1。 */

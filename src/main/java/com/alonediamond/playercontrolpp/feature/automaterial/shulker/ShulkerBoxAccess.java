@@ -27,6 +27,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import java.util.*;
@@ -34,7 +35,11 @@ import java.util.*;
 /** 潜影盒存取周期。借盒、打开、转移、回收均有独立状态和超时；归还由主流程处理。 */
 public final class ShulkerBoxAccess {
     public enum StorageResult { ACTIVE, DONE, ABORTED, INVENTORY_FULL, FAILED }
-    private enum Phase { TAKE, TAKE_WAIT, READY, FIND, PLACE, PLACE_WAIT, OPEN, OPEN_WAIT, TRANSFER, CLOSE, MINE, PICKUP }
+    /** 找不到放置位时最多侧移几次。次数多了会让玩家离原位越来越远，反而更难回到箱子边。 */
+    private static final int MAX_NUDGE_ATTEMPTS = 2;
+    /** 每次侧移按住方向键多少 tick（约半秒，够走一格）。 */
+    private static final int NUDGE_HOLD_TICKS = 10;
+    private enum Phase { TAKE, TAKE_WAIT, READY, FIND, NUDGE, NUDGE_WAIT, PLACE, PLACE_WAIT, OPEN, OPEN_WAIT, TRANSFER, CLOSE, MINE, PICKUP }
     private Phase phase;
     private enum Operation { STORE, EXTRACT }
     private Operation operation;
@@ -45,6 +50,11 @@ public final class ShulkerBoxAccess {
     private boolean placed;
     private int phaseTicks, cooldownTicks, boxSlot, selectedSlot, sourceSlot;
     private BlockPos position, returnTarget;
+    /** 放置时实际点击的方块与面；{@link #position} 是放下去之后盒子占据的格子。 */
+    private BlockPos placeClickPos;
+    private Direction placeFace = Direction.UP;
+    /** 因为找不到位置而侧移重试过几次。 */
+    private int nudgeAttempts;
     private ItemStack identity = ItemStack.EMPTY;
     private final Set<Integer> existingBoxes = new HashSet<>();
     private final Set<Integer> triedBoxes = new HashSet<>();
@@ -145,8 +155,21 @@ public final class ShulkerBoxAccess {
                 enter(useQuickShulker ? Phase.OPEN : Phase.FIND, 0);
             }
             case FIND -> {
-                position = findPosition(mc);
-                if (position == null) return fail(ctx, "shulker_no_position");
+                Placement placement = findPlacement(mc);
+                if (placement == null) {
+                    // 玩家站在两格交界、贴墙或脚下没实体方块时，原地怎么找都没有合法位置。
+                    // 按配置先侧移一格再试；重试次数有限，避免一直挪来挪去。
+                    if (Configs.BaritoneSettings.ALLOW_NUDGE_FOR_PLACEMENT.getBooleanValue()
+                            && nudgeAttempts < MAX_NUDGE_ATTEMPTS) {
+                        nudgeAttempts++;
+                        enter(Phase.NUDGE, 0);
+                        return StorageResult.ACTIVE;
+                    }
+                    return fail(ctx, "shulker_no_position");
+                }
+                position = placement.pos();
+                placeClickPos = placement.clicked();
+                placeFace = placement.face();
                 if (boxSlot >= PlayerUtil.HOTBAR_SIZE) {
                     int menuSlot = PlayerUtil.menuSlotOf(mc.player.inventoryMenu, mc.player.getInventory(), boxSlot);
                     SlotActionCompat.swapWithHotbar(mc, mc.player.inventoryMenu.containerId, menuSlot, selectedSlot);
@@ -156,11 +179,25 @@ public final class ShulkerBoxAccess {
                 InventoryCompat.setSelectedSlot(mc.player.getInventory(), boxSlot);
                 enter(Phase.PLACE, 3);
             }
+            case NUDGE -> {
+                // 朝旁边（优先左右，其次前后）挑一个能走的方向，按住移动键半秒。
+                Direction side = pickNudgeDirection(mc);
+                if (side == null) return fail(ctx, "shulker_no_position");
+                SimulatedInput.hold(sideKey(mc, side), this);
+                enter(Phase.NUDGE_WAIT, NUDGE_HOLD_TICKS);
+            }
+            case NUDGE_WAIT -> {
+                releaseKeys();
+                enter(Phase.FIND, 4);
+            }
             case PLACE -> {
-                if (!mc.level.getBlockState(position).isAir()) return fail(ctx, "shulker_place_failed");
-                BlockPos support = position.below();
+                // 目标格允许是可替换方块（草、雪层……），放置会把它顶掉。
+                if (!isOpenSpace(mc, position)) return fail(ctx, "shulker_place_failed");
+                Vec3 hitPos = Vec3.atCenterOf(placeClickPos == null ? position.below() : placeClickPos)
+                        .add(placeFace.getStepX() * 0.5, placeFace.getStepY() * 0.5, placeFace.getStepZ() * 0.5);
+                BlockPos clicked = placeClickPos == null ? position.below() : placeClickPos;
                 mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND,
-                        new BlockHitResult(Vec3.atCenterOf(support).add(0, 0.5, 0), Direction.UP, support, false));
+                        new BlockHitResult(hitPos, placeFace, clicked, false));
                 enter(Phase.PLACE_WAIT, 5);
             }
             case PLACE_WAIT -> {
@@ -310,15 +347,143 @@ public final class ShulkerBoxAccess {
         return -1;
     }
 
-    private BlockPos findPosition(Minecraft mc) {
+    /**
+     * 一个候选放置位。
+     *
+     * @param pos     放下去之后潜影盒占据的格子
+     * @param clicked 要右键的那个方块
+     * @param face    在那个方块上点击的面；{@code pos} 正好是 {@code clicked.relative(face)}
+     */
+    private record Placement(BlockPos pos, BlockPos clicked, Direction face) {}
+
+    /**
+     * 找一个能放下潜影盒、并且放完还打得开的位置。
+     *
+     * <p>旧实现只看脚步方块的四个水平邻居，玩家站在两格交界处、贴墙、或脚下没有坚实方块时就会失败——
+     * 玩家不是一个点，而是一个 0.6×1.8 的碰撞箱，位置判定必须按碰撞箱算。
+     *
+     * <p>候选范围：以玩家为中心、配置半径内、脚下方块上下各一格的立方体。逐个检查：
+     * <ol>
+     *   <li>目标格与上方一格都是空气/可替换方块；</li>
+     *   <li>不与玩家碰撞箱相交（盒子放下去后玩家仍能站着，而不是把自己埋进去）；</li>
+     *   <li>下方是坚实的面；否则找一个相邻的实心方块作为点击面；</li>
+     *   <li>眼睛到点击面中心在交互距离内；</li>
+     *   <li>放完后能打开——潜影盒的盒盖会朝点击的面翻开，所以盖上那一层也必须是空的。</li>
+     * </ol>
+     *
+     * <p>评分：优先正前方（玩家朝向）、其次距离近。
+     *
+     * @return 选中的位置；没有合法位置时 {@code null}
+     */
+    private Placement findPlacement(Minecraft mc) {
         BlockPos feet = mc.player.blockPosition();
-        for (Direction dir : Direction.Plane.HORIZONTAL) {
-            BlockPos candidate = feet.relative(dir);
-            if (mc.level.getBlockState(candidate).isAir() && mc.level.getBlockState(candidate.above()).isAir()
-                    && mc.level.getBlockState(candidate.below()).isFaceSturdy(mc.level, candidate.below(), Direction.UP)
-                    && mc.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(candidate)) <= PlayerUtil.blockReachSq(mc.player)) return candidate;
+        int radius = Math.max(1, Configs.BaritoneSettings.SHULKER_PLACE_RADIUS.getIntegerValue());
+        double reachSq = PlayerUtil.blockReachSq(mc.player);
+        Vec3 eye = mc.player.getEyePosition();
+        AABB playerBox = mc.player.getBoundingBox().inflate(0.05);
+        Direction facing = mc.player.getDirection();
+
+        Placement best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    BlockPos candidate = feet.offset(dx, dy, dz);
+                    // 玩家自己站的那一格放不了；目标格与上方一格都要空。
+                    if (candidate.equals(feet) || !isPlacementSpotFree(mc, candidate)) continue;
+
+                    // 放下去之后盒子会占一格，玩家必须还站得下。
+                    if (new AABB(candidate).intersects(playerBox)) continue;
+
+                    Direction clickFace = findClickableFace(mc, candidate);
+                    if (clickFace == null) continue;
+
+                    BlockPos clicked = candidate.relative(clickFace.getOpposite());
+                    Vec3 hitPos = Vec3.atCenterOf(clicked).add(
+                            clickFace.getStepX() * 0.5, clickFace.getStepY() * 0.5, clickFace.getStepZ() * 0.5);
+                    double distSq = eye.distanceToSqr(hitPos);
+                    if (distSq > reachSq) continue;
+
+                    // 盒子会朝点击面翻开：那个方向必须是空的，否则开不了。
+                    BlockPos lidSpace = candidate.relative(clickFace);
+                    if (!isOpenSpace(mc, lidSpace) || lidSpace.equals(feet)) continue;
+
+                    double score = score(candidate, facing, feet, distSq);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = new Placement(candidate, clicked, clickFace);
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /** 目标格与上方一格都是空气/可替换，且视角射线能打到它。 */
+    private static boolean isPlacementSpotFree(Minecraft mc, BlockPos pos) {
+        return isOpenSpace(mc, pos) && isOpenSpace(mc, pos.above());
+    }
+
+    private static boolean isOpenSpace(Minecraft mc, BlockPos pos) {
+        var state = mc.level.getBlockState(pos);
+        return state.isAir() || state.canBeReplaced();
+    }
+
+    /**
+     * 找不到放置位时往哪边走一格。
+     *
+     * <p>优先左右（多半是卡在两格交界或贴着墙），其次前后。要求相邻格可站立：
+     * 目标格下方或同高度有落脚点，且脚下这一格本身不阻挡。
+     *
+     * @return 移动方向；四周都走不了时 {@code null}
+     */
+    private static Direction pickNudgeDirection(Minecraft mc) {
+        Direction facing = mc.player.getDirection();
+        Direction left = facing.getCounterClockWise();
+        Direction right = facing.getClockWise();
+        for (Direction dir : new Direction[]{left, right, facing, facing.getOpposite()}) {
+            BlockPos next = mc.player.blockPosition().relative(dir);
+            if (isOpenSpace(mc, next) && isOpenSpace(mc, next.above())) return dir;
         }
         return null;
+    }
+
+    /** 世界方向 → 对应移动键。左右是相对朝向的，所以用 X 分量判断侧移。 */
+    private static net.minecraft.client.KeyMapping sideKey(Minecraft mc, Direction dir) {
+        Direction facing = mc.player.getDirection();
+        if (dir == facing) return mc.options.keyUp;
+        if (dir == facing.getOpposite()) return mc.options.keyDown;
+        if (dir == facing.getClockWise()) return mc.options.keyRight;
+        return mc.options.keyLeft;
+    }
+
+    /**
+     * 找一个能右键出放置动作的面：下方坚实就用 UP，否则找六个方向里第一个实心的邻居。
+     *
+     * @return 点击面；四周都没有可附着方块时 {@code null}
+     */
+    private static Direction findClickableFace(Minecraft mc, BlockPos pos) {
+        BlockPos below = pos.below();
+        if (mc.level.getBlockState(below).isFaceSturdy(mc.level, below, Direction.UP)) return Direction.UP;
+        for (Direction dir : Direction.values()) {
+            BlockPos neighbor = pos.relative(dir);
+            // 点击这个邻居的 dir.getOpposite() 面，方块会被放到 pos 上。
+            if (mc.level.getBlockState(neighbor).isFaceSturdy(mc.level, neighbor, dir.getOpposite())) {
+                return dir.getOpposite();
+            }
+        }
+        return null;
+    }
+
+    /** 越小越优先：正前方 → 同高度 → 距离近。 */
+    private static double score(BlockPos candidate, Direction facing, BlockPos feet, double distSq) {
+        double score = distSq;
+        if (candidate.getY() != feet.getY()) score += 2.0;
+        BlockPos delta = candidate.subtract(feet);
+        if (delta.getX() == facing.getStepX() && delta.getZ() == facing.getStepZ() && delta.getY() == 0) {
+            score -= 4.0;   // 正前方优先
+        }
+        return score;
     }
 
     private void rememberBoxes(Minecraft mc) {

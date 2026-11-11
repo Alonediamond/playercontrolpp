@@ -8,7 +8,13 @@ import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGathere
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 
-/** 执行当前容器的一次取物；选择规则与点击事务独立，目标推进交回主状态机。 */
+/**
+ * 执行当前容器的一次取物；选择规则与点击事务独立，目标推进交回主状态机。
+ *
+ * <p>一次开箱里会一直取到 {@link ContainerMaterialCollector} 返回 {@code null} 为止——
+ * 它每次都在<b>全部缺料</b>里挑，所以一个装着多种所需材料的箱子，开一次就能取完。
+ * 取空之后把箱子记进 {@link GatherContext#drainedContainers}，后续搜索不会再打开它。
+ */
 public final class ItemTransferExecutor {
     private final ShulkerBoxAccess shulkerAccess;
     private final TransferSession transfers = new TransferSession();
@@ -34,13 +40,19 @@ public final class ItemTransferExecutor {
                 return;
             }
             var result = transfers.attempt(selection.slot(), slot -> SlotTransfer.toPlayer(mc, slot, selection.amount()));
-            ctx.transferCooldown = Configs.BaritoneSettings.CLICK_COOLDOWN.getIntegerValue();
+            // 同一个容器内的两次点击之间用单独的间隔：它不受寻路影响，可以比跨容器更短。
+            ctx.transferCooldown = Configs.BaritoneSettings.INTRA_CONTAINER_CLICK_DELAY.getIntegerValue();
             if (result == TransferSession.Result.UNCHANGED && PlayerUtil.isInventoryFull(mc.player)) task.onInventoryFull();
             return;
         }
-        if (ctx.currentContainerTarget != null) ctx.exhaustedPositions.add(ctx.currentContainerTarget);
+
+        // 这个容器里已经没有任何还缺的东西了：记成"已取空"，之后无论换到哪一件材料都不再打开它。
+        if (ctx.currentContainerTarget != null) {
+            ctx.drainedContainers.add(ctx.currentContainerTarget);
+            ctx.exhaustedPositions.add(ctx.currentContainerTarget);
+        }
         mc.player.closeContainer();
-        ctx.transferCooldown = 6;
+        ctx.transferCooldown = Configs.BaritoneSettings.CONTAINER_CLOSE_DELAY.getIntegerValue();
         task.setState(State.VERIFYING);
     }
 }

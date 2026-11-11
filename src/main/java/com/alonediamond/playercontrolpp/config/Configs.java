@@ -108,12 +108,24 @@ public class Configs implements IConfigHandler {
                 KeybindSettings.PRESS_ALLOWEXTRA)
                 .apply(KEY_HOTKEYS);
 
+        /** 对着方块按下，记录该工作台坐标；再按同一个方块取消记录。 */
+        public static final ConfigHotkey MARK_CRAFTING_TABLE = new ConfigHotkey(
+                "markCraftingTable", "",
+                KeybindSettings.PRESS_ALLOWEXTRA)
+                .apply(KEY_HOTKEYS);
+
+        /** 对着方块按下，记录该切石机坐标；再按同一个方块取消记录。 */
+        public static final ConfigHotkey MARK_STONECUTTER = new ConfigHotkey(
+                "markStonecutter", "",
+                KeybindSettings.PRESS_ALLOWEXTRA)
+                .apply(KEY_HOTKEYS);
+
         /** 热键集合的唯一真源。 */
         public static final ImmutableList<IHotkey> HOTKEY_LIST = ImmutableList.of(
                 OPEN_CONFIG_GUI, AUTO_FORWARD, QUICK_TURN, RECORDING_TOGGLE,
                 BARITONE_AUTO_GATHER, AUTO_CACHE_NEARBY_CONTAINERS,
                 CACHE_SCHEMATIC_SELECTION_CONTAINERS, WATER_FILL_TOGGLE, MARK_CONTAINER,
-                ONE_CLICK_BUILD_RESTOCK);
+                ONE_CLICK_BUILD_RESTOCK, MARK_CRAFTING_TABLE, MARK_STONECUTTER);
 
         /** 同一批热键当普通配置看；由上面推导而来，两个列表不会走偏。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.copyOf(HOTKEY_LIST);
@@ -216,16 +228,95 @@ public class Configs implements IConfigHandler {
                 "How to store materials into shulker boxes.\nSimulate: place/open/mine the shulker box.\nQuickShulker: open directly from inventory via QuickShulker API.")
                 .apply(KEY_BARITONE);
 
+        /**
+         * 关掉容器界面后等多少 tick 再继续。
+         *
+         * <p>关界面与随后的搜索/寻路都是独立的包，服务端还在处理"界面关闭"时就去开下一个容器，
+         * 有概率被当成"界面已关"丢掉。延迟越高越稳，越低越快。
+         */
+        public static final ConfigInteger CONTAINER_CLOSE_DELAY = new ConfigInteger(
+                "containerCloseDelay", 8, 0, 40,
+                "Ticks to wait after closing a container before moving on. Raise this if clicks are dropped on a laggy server.")
+                .apply(KEY_BARITONE);
+
+        /**
+         * 同一个容器里两次取物点击之间的间隔。
+         *
+         * <p>与跨容器的 {@link #CLICK_COOLDOWN} 分开：同一菜单内连续点击不受寻路影响，
+         * 可以更激进；多人服务器同步慢时调大。
+         */
+        public static final ConfigInteger INTRA_CONTAINER_CLICK_DELAY = new ConfigInteger(
+                "intraContainerClickDelay", 1, 0, 20,
+                "Ticks between two item transfers inside the same open container. Separate from clickCooldown so one container can be drained quickly.")
+                .apply(KEY_BARITONE);
+
+        /**
+         * 追溯时世界挖掘停滞多久换来源。
+         *
+         * <p>旧版固定 1200 tick（一分钟），挖不到时会长时间空转。调小更早换变体/换来源。
+         */
+        public static final ConfigInteger MINING_STALL_TICKS = new ConfigInteger(
+                "miningStallTicks", 200, 40, 1200,
+                "How many ticks Baritone may mine without the target material increasing before the raw-material trace switches to another source or variant.")
+                .apply(KEY_BARITONE);
+
+        /** 等价变体（木板/原木/圆石族）按什么顺序挑。 */
+        public static final ConfigOptionList RAW_MATERIAL_VARIANT_MODE = new ConfigOptionList(
+                "rawMaterialVariantMode", VariantMode.CACHE_COUNT,
+                "How to pick between equivalent raw materials (any plank type, any log type, cobblestone family...).\nCache Count: use the variant with the most matches in ChestTracker's cache.\nTree Default: keep whatever LitematList's recipe tree picked.")
+                .apply(KEY_BARITONE);
+
+        /** 模拟模式放置潜影盒时的搜索半径（以玩家为中心）。 */
+        public static final ConfigInteger SHULKER_PLACE_RADIUS = new ConfigInteger(
+                "shulkerPlaceRadius", 3, 1, 5,
+                "Radius (in blocks) searched for a place to put down a shulker box when storing materials.")
+                .apply(KEY_BARITONE);
+
+        /** 找不到放置位时是否允许让玩家/Baritone 先侧移一格再试。 */
+        public static final ConfigBoolean ALLOW_NUDGE_FOR_PLACEMENT = new ConfigBoolean(
+                "allowNudgeForPlacement", true,
+                "When no legal spot to place a shulker box is found, briefly step aside (one block) and try again. Off: stop with a message instead.")
+                .apply(KEY_BARITONE);
+
+        /** 自动合成用哪种工作站来源。 */
+        public static final ConfigOptionList CRAFT_STATION_SOURCE = new ConfigOptionList(
+                "craftStationSource", CraftStationSource.AUTO,
+                "Where the auto-crafter gets its crafting table / stonecutter.\nAuto: from the inventory via QuickShulker first, then the marked world position.\nInventory Only: QuickShulker only.\nWorld Position Only: walk to the position marked with the hotkeys.")
+                .apply(KEY_BARITONE);
+
+        /** 记录的工作台坐标，格式同标记容器：dimension x y z。 */
+        public static final ConfigStringList CRAFTING_TABLE_POSITIONS = new ConfigStringList(
+                "craftingTablePositions", ImmutableList.of(),
+                "Marked crafting table positions for auto-crafting. Each entry: dimension x y z. Use the Mark Crafting Table hotkey to record one.")
+                .apply(KEY_BARITONE);
+
+        /** 记录的切石机坐标，格式同上。 */
+        public static final ConfigStringList STONECUTTER_POSITIONS = new ConfigStringList(
+                "stonecutterPositions", ImmutableList.of(),
+                "Marked stonecutter positions for auto-crafting. Each entry: dimension x y z. Use the Mark Stonecutter hotkey to record one.")
+                .apply(KEY_BARITONE);
+
+        /** 未缓存容器高亮持续多少 tick；0 = 关闭。 */
+        public static final ConfigInteger UNCACHED_HIGHLIGHT_TICKS = new ConfigInteger(
+                "uncachedHighlightTicks", 100, 0, 600,
+                "How long (in ticks) containers that failed to be cached stay highlighted in the world. 0 disables the highlight.")
+                .apply(KEY_BARITONE);
+
         public static final ConfigStringList GLOBAL_IGNORE_LIST = new ConfigStringList(
                 "globalIgnoreList", withWaterBucket(ALL_SHULKER_BOX_IDS),
                 "Item IDs to ignore during auto-gathering. Edit via the GUI button or click to open the list editor.")
                 .apply(KEY_BARITONE);
 
-        /** 按清单、转移、潜影盒、追溯、忽略项的顺序展示备货设置。 */
+        /** 按清单、转移、潜影盒、追溯、合成站点、忽略项的顺序展示备货设置。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                MATERIAL_LIST_SOURCE, CLICK_COOLDOWN, SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
+                MATERIAL_LIST_SOURCE, CLICK_COOLDOWN, INTRA_CONTAINER_CLICK_DELAY, CONTAINER_CLOSE_DELAY,
+                SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
                 AUTO_STORE_TO_SHULKER, SHULKER_STORAGE_MODE,
-                RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH, ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST);
+                SHULKER_PLACE_RADIUS, ALLOW_NUDGE_FOR_PLACEMENT,
+                RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH, RAW_MATERIAL_VARIANT_MODE, MINING_STALL_TICKS,
+                CRAFT_STATION_SOURCE, CRAFTING_TABLE_POSITIONS, STONECUTTER_POSITIONS,
+                UNCACHED_HIGHLIGHT_TICKS,
+                ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST);
     }
 
     public static class CacheNearbySettings {

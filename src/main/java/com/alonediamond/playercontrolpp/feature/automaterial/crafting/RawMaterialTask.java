@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
 import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
 
@@ -107,6 +108,12 @@ public final class RawMaterialTask {
     private final BaritoneIntegration baritone = BaritoneIntegration.getInstance();
     private final ShulkerBoxAccess shulkerAccess;
     private final CraftingController crafting = new CraftingController();
+    /** 缓存查询：等价变体选择要数每种变体在缓存里有多少个容器。 */
+    private final CachedContainerSource cachedContainers = new CachedContainerSource();
+    /** 每种物品在缓存里的容器数，单轮内只查一次。 */
+    private final Map<Item, Integer> variantCacheCounts = new HashMap<>();
+    /** 已经提示过"无法获得"的物品，同一轮不重复刷屏。 */
+    private final Set<Item> unobtainableWarned = new HashSet<>();
 
     public RawMaterialTask(ShulkerBoxAccess shulkerAccess) {
         this.shulkerAccess = shulkerAccess;
@@ -291,7 +298,8 @@ public final class RawMaterialTask {
 
             int childNeed = scaleCount(childNode.count(), frame.need, frame.node.count());
             // 可动用富余 = 持有量 − 这个物品自己要留给清单的量；合成只能吃富余。
-            int surplus = ctx.countHeld(childItem) - ctx.targetFor(childItem);
+            // 中间产物有多木材变体时，持有量要按整组等价物算：白桦木板同样能进合成格。
+            int surplus = heldFor(ctx, childItem) - ctx.targetFor(childItem);
             if (surplus >= childNeed) {
                 frame.nextChild++;
                 continue;
@@ -304,17 +312,31 @@ public final class RawMaterialTask {
         startCraft(ctx, tsm, frame);
     }
 
+    /**
+     * 中间产物的持有量。
+     *
+     * <p>等价变体（任意木板、任意原木、圆石族）在配方里可以互相替代，所以"够不够"要按整组算；
+     * 清单上的物品永远只算它自己，避免把"清单要橡木木板"和"背包里的白桦木板"混为一谈。
+     */
+    private static int heldFor(GatherContext ctx, Item item) {
+        if (ctx.isMissing(item)) return ctx.countHeld(item);
+        return MaterialVariants.heldInFamily(item, ctx::countHeld);
+    }
+
     private void dispatchGather(GatherContext ctx, AutoMaterialGatherer tsm, Item item,
                                 RawNode node, int need, boolean isRoot) {
-        remember(ctx, item);
-        this.dispatchedItem = item;
+        // 叶子节点才做等价替换（原木、圆石、煤炭……）。有子配方的节点（木板这种中间产物）
+        // 保持原样：它的子材料会在自己派发时各自替换，从上层替换反而会让子树对不上。
+        Item actual = node != null && node.children().isEmpty() ? chooseVariant(ctx, item) : item;
+        remember(ctx, actual);
+        this.dispatchedItem = actual;
         this.dispatchedNode = node;
         this.dispatchedNeed = need;
         this.dispatchedIsRoot = isRoot;
-        this.dispatchedTarget = absoluteTarget(ctx, item, need, isRoot);
+        this.dispatchedTarget = absoluteTarget(ctx, actual, need, isRoot);
         this.stage = Stage.DISPATCHED;
 
-        ctx.currentTargetItem = item;
+        ctx.currentTargetItem = actual;
         ctx.targetNeededTotal = this.dispatchedTarget;
 
         ctx.currentPosIndex = 0;
@@ -324,6 +346,32 @@ public final class RawMaterialTask {
         ctx.adjacentContainerTargets = null;
         ctx.adjacentTryIndex = 0;
         tsm.setState(State.SEARCHING);
+    }
+
+    /**
+     * 按配置为叶子材料挑等价变体：默认选缓存里数量最多的那种。
+     *
+     * <p>结果按物品缓存一轮，同一种材料被多次派发时不重复查缓存库。
+     */
+    private Item chooseVariant(GatherContext ctx, Item item) {
+        if (item == null || ctx.client == null || ctx.client.player == null) return item;
+        if (!MaterialVariants.hasFamily(item)) return item;
+        return MaterialVariants.choose(item, candidate -> countInCache(ctx, candidate));
+    }
+
+    /** @return 缓存库里装着该物品的容器数量；查不到时 0。 */
+    private int countInCache(GatherContext ctx, Item item) {
+        Integer cached = this.variantCacheCounts.get(item);
+        if (cached != null) return Math.max(0, cached);
+
+        int count = 0;
+        CachedContainerSource.Scope scope = this.cachedContainers.scope(0);
+        if (scope.error() == null && ctx.client.player != null) {
+            count = this.cachedContainers.find(
+                    item, ctx.client.player.blockPosition(), scope.range(), false, false).size();
+        }
+        this.variantCacheCounts.put(item, count);
+        return count;
     }
 
     private void startCraft(GatherContext ctx, AutoMaterialGatherer tsm, Frame frame) {
@@ -540,7 +588,15 @@ public final class RawMaterialTask {
     }
 
     /**
-     * 子材料在缓存里没找到之后的处置顺序：先看能不能挖，再看向下分解，都不行才整条链失败。
+     * 子材料在缓存里没找到之后的处置顺序。
+     *
+     * <p>顺序按"哪条路更容易拿到"排：
+     * <ol>
+     *   <li><b>能挖就先挖</b>：只有显式白名单里的物品才走这条（原木、圆石、矿石……）；</li>
+     *   <li><b>再往下分解</b>：木板这类"不能挖、但有配方"的中间产物走这条，
+     *       于是玩家要活塞时会去找原木而不是去挖木板；</li>
+     *   <li>两条都走不通：提示"无法获得"并跳过，不再空等。</li>
+     * </ol>
      *
      * @param allowMine false = 刚从挖矿回来（挖不到），不要再挖一次
      */
@@ -549,7 +605,7 @@ public final class RawMaterialTask {
         boolean isRoot = this.dispatchedIsRoot;
         this.dispatchedItem = null;
 
-        if (allowMine && canMineHere() && !MiningSources.blocksFor(item).isEmpty()) {
+        if (allowMine && canMineHere() && MiningSources.isNaturallyObtainable(item)) {
             startMining(ctx, tsm, item, this.dispatchedNeed, node, isRoot);
             return;
         }
@@ -567,6 +623,13 @@ public final class RawMaterialTask {
             log("descend {} need={} batches={}", name(item), this.dispatchedNeed, batches);
             this.stage = Stage.GATHER;
             return;
+        }
+
+        // 既挖不到、也没有本模组支持的配方（熔炼/锻造/生物掉落）：明确告诉玩家为什么跳过，
+        // 而不是只留一句"追溯失败"。同一轮里同一种材料只说一次。
+        if (this.unobtainableWarned.add(item)) {
+            MessageUtil.sendActionBar(ctx.client,
+                    "playercontrolpp.message.baritone.raw_material_unobtainable", name(item));
         }
         failChain(ctx, tsm, item);
     }
@@ -621,7 +684,9 @@ public final class RawMaterialTask {
         if (have > this.mineLastCount) {
             this.mineLastCount = have;
             this.mineStallTicks = 0;
-        } else if (++this.mineStallTicks > 1200) {
+        } else if (++this.mineStallTicks > Configs.BaritoneSettings.MINING_STALL_TICKS.getIntegerValue()) {
+            // 挖不到东西：取消这一次挖掘，按"这一项挖不到"换下一个来源/变体。
+            // 阈值可配置——固定等一分钟在"根本不存在这种方块"时纯属浪费。
             this.baritone.cancelMining();
             afterGatherFailed(ctx, tsm, item, false);
         }
@@ -650,6 +715,8 @@ public final class RawMaterialTask {
         this.mineStallTicks = 0;
         this.unpackItem = null;
         this.craftingWarned = false;
+        this.variantCacheCounts.clear();
+        this.unobtainableWarned.clear();
     }
 
     /** 溯源层数：配置里指定了就用它；-1 = 跟随 LitematList 界面上的层数，读不到用它的默认值。 */

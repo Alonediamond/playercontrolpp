@@ -27,7 +27,7 @@ public final class ContainerOpener {
     /** 同一个方块尝试几次后才去试它的邻居。 */
     private static final int MAX_OPEN_ATTEMPTS = 3;
     /** 第几次尝试时先跳一下，以防视线被挡。 */
-    //private static final int JUMP_ON_ATTEMPT = 2;
+    //private static final int JUMP_ON_ATTEMPT = 2;//感觉跳一下很奇怪，暂时注释了
     /** 一个容器坐标上总共试过几个不同方块后彻底放弃。 */
     private static final int MAX_CHEST_RETRIES = 3;
     /** 点击后等容器界面的 tick 数。 */
@@ -124,7 +124,7 @@ public final class ContainerOpener {
         } else {
             ctx.openAttemptCount++;
             if (ctx.openAttemptCount < MAX_OPEN_ATTEMPTS) {
-                //boolean jump = (ctx.openAttemptCount == JUMP_ON_ATTEMPT);
+                //boolean jump = (ctx.openAttemptCount == JUMP_ON_ATTEMPT);//感觉跳一下很奇怪，暂时注释了
                 openContainerWithRetry(ctx.currentContainerTarget, ctx.openAttemptCount, ctx);
             } else {
                 retryAdjacentOrFail(ctx, tsm, pathing);

@@ -27,8 +27,11 @@ import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.RECORDING_
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.WATER_FILL_TOGGLE;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.BARITONE_AUTO_GATHER;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.MARK_CONTAINER;
+import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.MARK_CRAFTING_TABLE;
+import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.MARK_STONECUTTER;
 import static com.alonediamond.playercontrolpp.config.Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK;
 
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftStationManager;
 import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
 
 public class KeybindCallbacks {
@@ -45,6 +48,8 @@ public class KeybindCallbacks {
         WATER_FILL_TOGGLE.getKeybind().setCallback(new WaterFillToggleCallback());
         MARK_CONTAINER.getKeybind().setCallback(new MarkContainerCallback());
         ONE_CLICK_BUILD_RESTOCK.getKeybind().setCallback(new OneClickBuildRestockCallback());
+        MARK_CRAFTING_TABLE.getKeybind().setCallback(new MarkStationCallback(CraftStationManager.Kind.CRAFTING_TABLE));
+        MARK_STONECUTTER.getKeybind().setCallback(new MarkStationCallback(CraftStationManager.Kind.STONECUTTER));
 
         // 路径热键的回调由 RouteManager 在路径被创建或加载时挂上——那是它们唯一存在的时刻。
         // 这里早先还有第二个循环，但它跑在 loadRoutes() 之前，遍历的永远是空列表。
@@ -174,6 +179,22 @@ public class KeybindCallbacks {
         public boolean onKeyAction(KeyAction action, IKeybind key) {
             if (action != KeyAction.PRESS) return false;
             AutoRestockFeature.onOneClickBuild();
+            return true;
+        }
+    }
+
+    /** 记录 / 取消记录工作台或切石机坐标。 */
+    private static class MarkStationCallback implements IHotkeyCallback {
+        private final CraftStationManager.Kind kind;
+
+        private MarkStationCallback(CraftStationManager.Kind kind) {
+            this.kind = kind;
+        }
+
+        @Override
+        public boolean onKeyAction(KeyAction action, IKeybind key) {
+            if (action != KeyAction.PRESS) return false;
+            CraftStationManager.getInstance().mark(this.kind);
             return true;
         }
     }

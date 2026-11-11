@@ -182,6 +182,14 @@ public final class AutoMaterialGatherer implements ClientFeature {
     private void nextItem() {
         transferExecutor.reset();
 
+        // 已经满足的条目直接跳过：搜索会把所有缺料合并成一次访问，这里不必再为已齐的东西
+        // 单独跑一轮"搜索 → 发现没缺口 → 推进"。一次循环推进到底，避免多余的状态往返。
+        while (currentItemIndex < ctx.missingItems.size()) {
+            MaterialItemEntry candidate = ctx.missingItems.get(currentItemIndex);
+            if (ctx.countHeld(candidate.item) < candidate.neededCount) break;
+            currentItemIndex++;
+        }
+
         if (currentItemIndex >= ctx.missingItems.size()) {
             setState(State.COMPLETED);
             return;
@@ -510,6 +518,9 @@ public final class AutoMaterialGatherer implements ClientFeature {
      *
      * <p>同样分两层：追溯途中的子材料交给追溯任务决定"去挖还是继续往下分解"；
      * 顶层物品则先按配置尝试追溯原材料，实在不行才跳过。
+     *
+     * <p>搜索会合并所有缺料的容器，所以"找不到"意味着缓存里没有装着这件物品的箱子；
+     * 它不影响其它缺料继续从缓存里取——那些箱子已经在本轮被访问过或被排除了。
      */
     public void onCurrentTargetUnavailable() {
         if (rawMaterialTask.isActive()) {
