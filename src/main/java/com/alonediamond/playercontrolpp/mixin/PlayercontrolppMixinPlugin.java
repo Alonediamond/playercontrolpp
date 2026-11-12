@@ -37,6 +37,17 @@ public class PlayercontrolppMixinPlugin implements IMixinConfigPlugin {
     //$$ private static final boolean SCREEN_METHOD_ON_GUI = false;
     //#endif
 
+    /**
+     * 自定义渲染管线从 1.21.11 起才用得上（更早的版本拿不到
+     * {@code RenderType.CompositeState}，见 {@code HighlightPipelines} 的说明），
+     * 打开 {@code RenderType.create} 的 Invoker 也就只在那些版本注入。
+     */
+    //#if MC >= 12111
+    private static final boolean CUSTOM_RENDER_PIPELINES = true;
+    //#else
+    //$$ private static final boolean CUSTOM_RENDER_PIPELINES = false;
+    //#endif
+
     private static boolean litematicaLoaded;
     private static boolean baritoneLoaded;
     private static boolean chestTrackerLoaded;
@@ -67,6 +78,7 @@ public class PlayercontrolppMixinPlugin implements IMixinConfigPlugin {
         // setScreen 归属类的版本分叉（不是可选联动，但同样在类变换期做掉判断）。
         if (name.contains(".compat.screen.MinecraftSetScreenMixin")) return !SCREEN_METHOD_ON_GUI;
         if (name.contains(".compat.screen.GuiSetScreenMixin")) return SCREEN_METHOD_ON_GUI;
+        if (name.contains(".client.MixinRenderTypeAccessor")) return CUSTOM_RENDER_PIPELINES;
         if (name.contains(".compat.litematica.")) return litematicaLoaded;
         if (name.contains(".compat.baritone.")) return baritoneLoaded;
         if (name.contains(".compat.chesttracker.")) return chestTrackerLoaded;

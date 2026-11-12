@@ -19,7 +19,6 @@ import net.minecraft.client.renderer.rendertype.PreparedRenderType;
 //#endif
 //#if MC >= 12111
 import net.minecraft.client.renderer.rendertype.RenderType;
-import net.minecraft.client.renderer.rendertype.RenderTypes;
 //#else
 //$$ import net.minecraft.client.renderer.RenderType;
 //#endif
@@ -204,13 +203,9 @@ public final class WorldBoxRenderer {
     }
     //#endif
 
-    /** 高亮用的 RenderType。所有版本上都是原版"调试四边形"管线。 */
+    /** 高亮用的渲染类型，由 {@link HighlightPipelines} 提供（自定义管线）。 */
     private static RenderType worldType() {
-        //#if MC >= 12111
-        return RenderTypes.debugQuads();
-        //#else
-        //$$ return RenderType.debugQuads();
-        //#endif
+        return HighlightPipelines.boxType();
     }
 
     /** 26.2 起访问器从 getMainCamera() 改名成 mainCamera()。 */
