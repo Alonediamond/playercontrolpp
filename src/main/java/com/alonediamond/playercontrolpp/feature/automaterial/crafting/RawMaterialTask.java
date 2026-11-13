@@ -12,6 +12,7 @@ import com.alonediamond.playercontrolpp.config.RawMaterialMode;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialPlan.Frame;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
@@ -33,7 +34,7 @@ import java.util.*;
  *
  * <h3>子材料的采集复用主状态机</h3>
  * 每一层的子材料并不自己写一套"搜索→寻路→开箱→取物"，而是把
- * {@code ctx.currentTargetItem / targetNeededTotal} 临时指向它，然后交给主状态机的
+ * {@code ctx.setTarget(item, total)} 临时指向它，然后交给主状态机的
  * {@code SEARCHING…VERIFYING} 跑；采完（或确认拿不到）由主状态机回调
  * {@link #onSubItemDone} / {@link #onSubItemUnavailable} 回到计划上来。
  *
@@ -54,40 +55,6 @@ public final class RawMaterialTask {
      * 但也要有上限，免得在"取不出来"的盒子上反复开关。
      */
     private static final int MAX_UNPACKS_PER_FRAME = 4;
-
-    /**
-     * 计划里的一帧：把 {@code item} 从它的子材料做出 {@code need} 个。
-     *
-     * <p>{@code need} 恒不超过物品的堆叠上限：一帧就是"一批"。顶层物品的缺口按堆叠上限
-     * 切成若干批（整组在前、余数在后）；往下分解出来的子材料同样切段。同一批分解出来的
-     * 若干分帧共用一个 {@code parent}，只有最后一段的 {@code advanceParent} 为 true——
-     * 它最后弹出，由它把父帧的 {@code nextChild} 往前推一格，父帧才不会把"一个子材料"
-     * 数成好几次。
-     */
-    private static final class Frame {
-        final Item item;
-        final RawNode node;
-        /** 这一批要做多少个，恒 ≤ 物品堆叠上限。 */
-        final int need;
-        /** 绝对终点：持有量到它就收工（顶层＝清单需求总量；子材料＝清单预留量＋这一批要消耗的量）。 */
-        final int targetTotal;
-        /** null = 顶层物品的批次；非 null = 从父帧某个子材料分解出来的。 */
-        final Frame parent;
-        /** 弹出时是否推进父帧：同一个子材料切成多段时，只有最后一段负责推进。 */
-        final boolean advanceParent;
-        int nextChild;
-        /** 为这一帧开过几次盒子取料。每个子材料最多各一次，且总数有上限，避免来回开关盒子。 */
-        int unpackAttempts;
-
-        Frame(Item item, RawNode node, int need, int targetTotal, Frame parent, boolean advanceParent) {
-            this.item = item;
-            this.node = node;
-            this.need = need;
-            this.targetTotal = targetTotal;
-            this.parent = parent;
-            this.advanceParent = advanceParent;
-        }
-    }
 
     private enum Stage {
         IDLE,
@@ -115,7 +82,7 @@ public final class RawMaterialTask {
     }
 
     private Stage stage = Stage.IDLE;
-    private final Deque<Frame> frames = new ArrayDeque<>();
+    private final RawMaterialPlan plan = new RawMaterialPlan();
 
     /** 本次追溯的顶层物品；失败时记进 ctx.tracedItems，避免反复重试。 */
     private Item rootItem;
@@ -195,7 +162,7 @@ public final class RawMaterialTask {
         // 一组一组地做：把缺口按堆叠上限切成若干批（整组在前、余数在后）压进计划栈。
         // 这样一次只为"一组"备料——需要 10 组活塞时，不会把几十组原材料一次塞进背包，
         // 更不会因为背包放不下而卡死在"取不出来"上。
-        int batches = pushBatches(item, root, need, total, null);
+        int batches = plan.pushBatches(item, root, need, total, null);
         log("trace {} need={} target={} batches={}", name(item), need, total, batches);
         this.stage = Stage.GATHER;
         MessageUtil.sendActionBar(ctx.client,
@@ -237,11 +204,11 @@ public final class RawMaterialTask {
         this.dispatchedItem = null;
         this.dispatchedNode = null;
 
-        if (wasRoot || this.frames.isEmpty()) {
+        if (wasRoot || this.plan.isEmpty()) {
             finish(ctx, tsm);
             return;
         }
-        Frame frame = this.frames.peek();
+        Frame frame = this.plan.current();
         if (frame != null) frame.nextChild++;
         this.stage = Stage.GATHER;
     }
@@ -255,7 +222,7 @@ public final class RawMaterialTask {
      */
     public void onUnpackFinished(GatherContext ctx, AutoMaterialGatherer tsm) {
         this.unpackItem = null;
-        if (this.frames.isEmpty()) {
+        if (this.plan.isEmpty()) {
             if (this.dispatchedItem == null) finish(ctx, tsm);
             return;
         }
@@ -276,7 +243,7 @@ public final class RawMaterialTask {
     // ---- 计划推进 ----
 
     private void gatherTick(GatherContext ctx, AutoMaterialGatherer tsm) {
-        Frame frame = this.frames.peek();
+        Frame frame = this.plan.current();
         if (frame == null) {
             finish(ctx, tsm);
             return;
@@ -300,7 +267,7 @@ public final class RawMaterialTask {
 
             remember(ctx, childItem);
 
-            int childNeed = scaleCount(childNode.count(), frame.need, frame.node.count());
+            int childNeed = RawMaterialPlan.scaleCount(childNode.count(), frame.need, frame.node.count());
             // 可动用富余 = 持有量 − 这个物品自己要留给清单的量；合成只能吃富余。
             int surplus = ctx.countHeld(childItem) - ctx.targetFor(childItem);
             if (surplus >= childNeed) {
@@ -325,8 +292,7 @@ public final class RawMaterialTask {
         this.dispatchedTarget = absoluteTarget(ctx, item, need, isRoot);
         this.stage = Stage.DISPATCHED;
 
-        ctx.currentTargetItem = item;
-        ctx.targetNeededTotal = this.dispatchedTarget;
+        ctx.setTarget(item, this.dispatchedTarget);
 
         ctx.currentPosIndex = 0;
         ctx.chestRetryCount = 0;
@@ -383,10 +349,10 @@ public final class RawMaterialTask {
             case ACTIVE -> { }
             case DONE -> popFrame(ctx, tsm);
             case FAILED -> {
-                Frame frame = this.frames.peek();
+                Frame frame = this.plan.current();
                 MessageUtil.sendActionBar(ctx.client,
                         "playercontrolpp.message.baritone.raw_material_craft_failed",
-                        name(frame != null ? frame.item : ctx.currentTargetItem));
+                        name(frame != null ? frame.item : ctx.targetItem()));
                 this.crafting.cancel(ctx.client);
                 popFrame(ctx, tsm);
             }
@@ -397,8 +363,7 @@ public final class RawMaterialTask {
                 Item root = this.rootItem;
                 reset();
                 if (root != null) {
-                    ctx.currentTargetItem = root;
-                    ctx.targetNeededTotal = ctx.targetFor(root);
+                    ctx.setTarget(root, ctx.targetFor(root));
 
                 }
                 tsm.onInventoryFull();
@@ -417,7 +382,7 @@ public final class RawMaterialTask {
         for (RawNode child : frame.node.children()) {
             Item item = resolveItem(child.itemId());
             if (item == null) continue;
-            int need = scaleCount(child.count(), frame.need, frame.node.count());
+            int need = RawMaterialPlan.scaleCount(child.count(), frame.need, frame.node.count());
             if (need <= 0) continue;
             int loose = ItemUtil.countLoose(ctx.client.player, item);
             if (loose < need && ctx.countHeld(item) >= need) {
@@ -452,39 +417,11 @@ public final class RawMaterialTask {
         return false;
     }
 
-    /**
-     * 把 {@code need} 个物品按它的堆叠上限切成若干批压进计划栈，一批 ≤ 一组。
-     *
-     * <p>先切段、再从后往前压：第一段最后压入、位于栈顶最先执行，最后一段最后弹出。
-     * 同一批分解出来的若干分帧共用一个 {@code parent}，只由最后一段
-     * （{@code advanceParent = true}）负责推进父帧的游标。
-     *
-     * @param targetTotal 这些帧共同的绝对终点（顶层＝清单需求总量；子材料＝预留量＋要消耗的量）
-     * @param parent      null = 顶层物品的批次；非 null = 某个帧的子材料向下分解
-     * @return 切出来的批次数（供日志用）
-     */
-    private int pushBatches(Item item, RawNode node, int need, int targetTotal, Frame parent) {
-        int maxStack = Math.max(1, item.getDefaultMaxStackSize());
-        int count = (Math.max(1, need) + maxStack - 1) / maxStack;
-        int[] chunks = new int[count];
-        int remaining = Math.max(1, need);
-        for (int i = 0; i < count; i++) {
-            chunks[i] = Math.min(maxStack, remaining);
-            remaining -= chunks[i];
-        }
-        for (int i = count - 1; i >= 0; i--) {
-            this.frames.push(new Frame(item, node, chunks[i], targetTotal, parent,
-                    parent != null && i == count - 1));
-        }
-        return count;
-    }
-
     private void popFrame(GatherContext ctx, AutoMaterialGatherer tsm) {
-        Frame done = this.frames.poll();
-        if (this.frames.isEmpty()) { finish(ctx, tsm); return; }
-        // 只有父子关系（分解出来的子材料）才推进父帧游标，顶层批次之间互不相干；
-        // 一个子材料切成多段时，只有最后一段负责推进——前面几段弹完，父帧要原地等。
-        if (done != null && done.advanceParent && done.parent != null) done.parent.nextChild++;
+        if (plan.finishFrame()) {
+            finish(ctx, tsm);
+            return;
+        }
         this.stage = Stage.GATHER;
     }
 
@@ -501,11 +438,10 @@ public final class RawMaterialTask {
 
         reset();
 
-        // 追踪途中 currentTargetItem 一直指向最后派出去的那个子材料，
+        // 追溯期间的当前目标是最后派出去的子材料，
         // 交还控制权之前必须还原成顶层物品，否则"这一项够了吗"会检查错对象。
         if (root != null) {
-            ctx.currentTargetItem = root;
-            ctx.targetNeededTotal = ctx.targetFor(root);
+            ctx.setTarget(root, ctx.targetFor(root));
 
         }
         if (unfinished) {
@@ -573,7 +509,7 @@ public final class RawMaterialTask {
             return;
         }
         if (node != null && !node.children().isEmpty() && isSupportedRecipe(node.recipeType())) {
-            Frame parent = this.frames.peek();      // 正在等的那个帧（它的子材料失败了）
+            Frame parent = this.plan.current();      // 正在等的那个帧（它的子材料失败了）
             if (parent == null) {
                 // 计划栈空着却还有采集在跑，只能是状态错乱：按拿不到收场，别把帧悬在那儿。
                 failChain(ctx, tsm, item);
@@ -581,7 +517,7 @@ public final class RawMaterialTask {
             }
             // 子材料也一组一组地做：这一批要的量同样按堆叠上限切段，每段自己凑料、自己合成，
             // 最后一段弹出时才把父帧的这个子材料算作到手。
-            int batches = pushBatches(item, node, this.dispatchedNeed,
+            int batches = plan.pushBatches(item, node, this.dispatchedNeed,
                     absoluteTarget(ctx, item, this.dispatchedNeed, false), parent);
             log("descend {} need={} batches={}", name(item), this.dispatchedNeed, batches);
             this.stage = Stage.GATHER;
@@ -677,7 +613,7 @@ public final class RawMaterialTask {
 
     private void reset() {
         this.stage = Stage.IDLE;
-        this.frames.clear();
+        this.plan.clear();
         this.rootItem = null;
         this.dispatchedItem = null;
         this.dispatchedNode = null;
@@ -709,19 +645,6 @@ public final class RawMaterialTask {
         return "crafting_shaped".equals(recipeType)
                 || "crafting_shapeless".equals(recipeType)
                 || "stonecutting".equals(recipeType);
-    }
-
-    /**
-     * 把树上的数量按"我们实际还需要多少个"等比缩放。
-     *
-     * <p>树里的数量是"从零做出 {@code node.count()} 个"的绝对值，所以
-     * {@code 子材料数 × 实际需要 / 本层总数} 就是这次真正要的子材料数（向上取整，
-     * 与 LitematList 自己的取整口径一致）。
-     */
-    private static int scaleCount(int childCount, int need, int parentCount) {
-        if (parentCount <= 0) return childCount;
-        long scaled = ((long) childCount * need + parentCount - 1) / parentCount;
-        return (int) Math.min(Integer.MAX_VALUE, Math.max(0, scaled));
     }
 
     private static Item firstChildItem(RawNode node) {

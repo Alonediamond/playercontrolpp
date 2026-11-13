@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.highlight;
+package com.alonediamond.playercontrolpp.render;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -58,10 +58,7 @@ import java.util.OptionalDouble;
  *       {@code drawFromBuffer} 拆成需要显式 {@code RenderPass} 的重载。</li>
  * </ul>
  *
- * <p>想换成自定义 {@code RenderPipeline}（比如穿墙、发光、描边宽度）时，只需替换
- * {@link #worldType()}：26.x 里 {@code RenderType.create} 是包内可见的，需要配一个
- * {@code @Invoker} mixin 才能拿到；<b>当前选择原版管线是因为参数完全一致，
- * 自己注册一条一模一样的只会多一份维护成本。</b>
+ * <p>管线创建与降级由 {@link HighlightPipelines} 负责，本类只处理几何、矩阵和提交。
  */
 public final class WorldBoxRenderer {
     /** 实体框相对方块表面的外扩量：太小会和箱子贴图打架，太大就不贴边了。 */
@@ -76,12 +73,9 @@ public final class WorldBoxRenderer {
      * 画一组方块。
      *
      * @param boxes   方块坐标
-     * @param red     0–1
-     * @param green   0–1
-     * @param blue    0–1
-     * @param alpha   0–1，实体框的不透明度；光晕层按 {@link #HALO_ALPHA_SCALE} 变淡
+     * @param style   颜色与实体框透明度；光晕层按 {@link #HALO_ALPHA_SCALE} 变淡
      */
-    public static void renderBoxes(Collection<BlockPos> boxes, float red, float green, float blue, float alpha) {
+    public static void renderBoxes(Collection<BlockPos> boxes, BoxStyle style) {
         if (boxes.isEmpty()) return;
 
         Minecraft mc = Minecraft.getInstance();
@@ -106,9 +100,9 @@ public final class WorldBoxRenderer {
         //#endif
         try {
             //#if MC >= 260200
-            submitStaged(mc, boxes, cam, red, green, blue, alpha);
+            submitStaged(mc, boxes, cam, style.red(), style.green(), style.blue(), style.alpha());
             //#else
-            //$$ submitBatched(mc, boxes, cam, red, green, blue, alpha);
+            //$$ submitBatched(mc, boxes, cam, style.red(), style.green(), style.blue(), style.alpha());
             //#endif
         } finally {
             stack.popMatrix();

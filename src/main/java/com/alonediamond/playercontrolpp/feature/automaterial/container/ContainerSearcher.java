@@ -16,12 +16,12 @@ public final class ContainerSearcher {
         if (PlayerUtil.isInventoryFull(ctx.client.player)) { task.onInventoryFull(); return; }
         var scope = source.scope(0);
         if (scope.error() != null) { task.setState(State.STOPPED, scope.error()); return; }
-        int gap = ctx.targetNeededTotal - ctx.countHeld(ctx.currentTargetItem);
+        int gap = ctx.targetTotal() - ctx.countHeld(ctx.targetItem());
         if (gap <= 0) { task.onCurrentTargetSatisfied(); return; }
         boolean fullFirst = gap > Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue();
         boolean includeBoxes = fullFirst || Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue();
         ctx.foundPositions.clear();
-        for (var pos : source.find(ctx.currentTargetItem, ctx.client.player.blockPosition(), scope.range(), fullFirst, includeBoxes)) {
+        for (var pos : source.find(ctx.targetItem(), ctx.client.player.blockPosition(), scope.range(), fullFirst, includeBoxes)) {
             if (!ctx.exhaustedPositions.contains(pos)) ctx.foundPositions.add(pos);
         }
         if (ctx.foundPositions.isEmpty()) { task.onCurrentTargetUnavailable(); return; }

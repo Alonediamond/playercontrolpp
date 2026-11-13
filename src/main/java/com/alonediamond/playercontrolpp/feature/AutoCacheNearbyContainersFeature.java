@@ -1,5 +1,8 @@
 package com.alonediamond.playercontrolpp.feature;
 
+import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
+import com.alonediamond.playercontrolpp.interaction.ContainerOpenWait;
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
@@ -9,15 +12,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -68,7 +65,7 @@ public class AutoCacheNearbyContainersFeature {
     private static State state = State.SCANNING;
     private static BlockPos currentTarget;
     private static int stateTimer;
-    private static int contentTimer;
+    private static final ContainerOpenWait openWait = new ContainerOpenWait(OPEN_WAIT_TICKS, CONTENT_WAIT_TICKS);
     private static int autoStopCountdown;
 
     /**
@@ -128,7 +125,6 @@ public class AutoCacheNearbyContainersFeature {
         currentTarget = null;
         state = State.SCANNING;
         stateTimer = 0;
-        contentTimer = 0;
         autoStopCountdown = 0;
         // 状态清零时同步撤掉 GUI 屏蔽；开着的情况下下一 tick 会立刻续租。
         ContainerGuiSuppressor.expire();
@@ -201,24 +197,16 @@ public class AutoCacheNearbyContainersFeature {
 
     private static void beginOpen(Minecraft mc, BlockPos target) {
         currentTarget = target;
-        stateTimer = OPEN_WAIT_TICKS;
-        contentTimer = CONTENT_WAIT_TICKS;
+        openWait.begin();
         state = State.OPENING_CONTAINER;
         openContainer(mc, target);
     }
 
     private static boolean tickOpeningContainer(Minecraft mc) {
-        // 界面被屏蔽时 Screen 恒为 null，判据换成「菜单已打开」——菜单赋值与 setScreen
-        // 都发生在服务端回包的同一时刻（MenuScreens.fromPacket），只是前者不依赖 Screen。
-        if (mc.player.containerMenu != mc.player.inventoryMenu) {
-            markVisited();
-
-            // 菜单已开，但物品内容是另一个包。等到看见东西、或宽限用完再落库，
-            // 否则会把还没同步的容器记成空的。
-            if (!menuHasContent(mc) && --contentTimer > 0) {
-                return false;
-            }
-
+        // 菜单一出现就保留已访问记录，沿用内容宽限期间的记账时机。
+        if (ContainerMenus.isOpen(mc)) markVisited();
+        ContainerOpenWait.Result result = openWait.tick(mc);
+        if (result == ContainerOpenWait.Result.READY) {
             // 界面被吞了，ChestTracker 的关界面钩子没有 Screen 可读——内容一到就直写缓存库。
             saveContainerToChestTracker(mc);
             closeGuiIfOpen(mc);
@@ -234,7 +222,7 @@ public class AutoCacheNearbyContainersFeature {
             return true; // 延迟为 0 时同一 tick 直接扫下一个
         }
 
-        if (--stateTimer <= 0) {
+        if (result == ContainerOpenWait.Result.TIMED_OUT) {
             // 一直没开成——也标记掉，免得永远重试同一个。
             markVisited();
             currentTarget = null;
@@ -278,16 +266,6 @@ public class AutoCacheNearbyContainersFeature {
         if (currentTarget != null) {
             visitedContainers.add(currentTarget);
         }
-    }
-
-    /** @return 当前打开的容器菜单里，属于容器那一侧的槽位是否已经有物品了。 */
-    private static boolean menuHasContent(Minecraft mc) {
-        for (Slot slot : mc.player.containerMenu.slots) {
-            if (!(slot.container instanceof Inventory) && !slot.getItem().isEmpty()) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -363,36 +341,10 @@ public class AutoCacheNearbyContainersFeature {
 
     private static void openContainer(Minecraft mc, BlockPos target) {
         if (mc.player == null || mc.gameMode == null) return;
-
-        Direction face = getNearestFace(mc.player.getEyePosition(), target);
-        Vec3 hitPos = new Vec3(
-                target.getX() + 0.5 + face.getStepX() * 0.5,
-                target.getY() + 0.5 + face.getStepY() * 0.5,
-                target.getZ() + 0.5 + face.getStepZ() * 0.5
-        );
-
-        BlockHitResult hitResult = new BlockHitResult(hitPos, face, target, false);
-        mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
-    }
-
-    private static Direction getNearestFace(Vec3 playerEye, BlockPos target) {
-        Vec3 center = Vec3.atCenterOf(target);
-        double dx = playerEye.x - center.x;
-        double dy = playerEye.y - center.y;
-        double dz = playerEye.z - center.z;
-
-        double ax = Math.abs(dx);
-        double ay = Math.abs(dy);
-        double az = Math.abs(dz);
-
-        if (ax >= ay && ax >= az) return dx > 0 ? Direction.EAST : Direction.WEST;
-        if (ay >= ax && ay >= az) return dy > 0 ? Direction.UP : Direction.DOWN;
-        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
+        BlockInteraction.useNearestFace(mc, target);
     }
 
     private static void closeGuiIfOpen(Minecraft mc) {
-        if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
-            mc.player.closeContainer();
-        }
+        ContainerMenus.close(mc);
     }
 }

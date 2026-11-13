@@ -1,9 +1,9 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.restock;
 
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.SlotTransfer;
+import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
@@ -21,8 +21,6 @@ import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
@@ -123,15 +121,6 @@ public class AutoRestockFeature implements ClientFeature {
         SHULKER_OPEN, SHULKER_TAKE, FINISHING
     }
 
-    /**
-     * 本轮要凑齐的一种材料。
-     *
-     * @param item   要收集的物品
-     * @param target 玩家最终应在 36 格主物品栏里<em>散装</em>持有多少个。全部用「目标值」表达而不是
-     *               「还差多少」，这样每次判断「还需要吗」都是重新看一遍物品栏，不会有计数漂移。
-     */
-    private record Need(Item item, int target) {}
-
     private State state = State.IDLE;
     private boolean active;
 
@@ -160,10 +149,7 @@ public class AutoRestockFeature implements ClientFeature {
     private final MarkedContainerManager containerManager = MarkedContainerManager.getInstance();
 
     // 单次续料的临时状态
-    /** 玩家还缺的材料。 */
-    private final List<Need> needs = new ArrayList<>();
-    /** 蓝图仍列为缺失的所有材料类型，不管当前够不够。 */
-    private final List<Item> schematicWanted = new ArrayList<>();
+    private final RestockMaterials materials = new RestockMaterials();
     private final List<BlockPos> containerQueue = new ArrayList<>();
     /** 值得打开的潜影盒所在的物品栏槽位（0-35）。 */
     private final List<Integer> shulkerQueue = new ArrayList<>();
@@ -304,8 +290,7 @@ public class AutoRestockFeature implements ClientFeature {
         containerTripDone = false;
         cycleGained = 0;
         noGainCycles = 0;
-        needs.clear();
-        schematicWanted.clear();
+        materials.clear();
         containerQueue.clear();
         shulkerQueue.clear();
         containerIndex = 0;
@@ -344,8 +329,7 @@ public class AutoRestockFeature implements ClientFeature {
 
     /** 读 Litematica 材料清单，决定怎么补上缺口。 */
     private void doAnalyze(Minecraft mc) {
-        needs.clear();
-        schematicWanted.clear();
+        materials.clear();
         containerQueue.clear();
         shulkerQueue.clear();
         containerIndex = 0;
@@ -359,7 +343,7 @@ public class AutoRestockFeature implements ClientFeature {
             return;
         }
 
-        if (needs.isEmpty()) {
+        if (materials.needs().isEmpty()) {
             handlePauseWithoutShortage(mc);
             return;
         }
@@ -386,7 +370,7 @@ public class AutoRestockFeature implements ClientFeature {
      * 「玩家眼睁睁看着背包里有料、功能却停了」的区别。
      */
     private void handlePauseWithoutShortage(Minecraft mc) {
-        int promoted = promoteToHotbar(mc, schematicWanted);
+        int promoted = promoteToHotbar(mc, materials.wantedItems());
         if (promoted > 0) {
             noGainCycles = 0;
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.hotbar_promoted", promoted);
@@ -404,7 +388,7 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     /**
-     * 从 Litematica 材料清单填充 {@link #needs} 与 {@link #schematicWanted}。
+     * 从 Litematica 材料清单建立本轮散装需求与快捷栏整理目标。
      *
      * <p>{@code MaterialListEntry.getCountMissing()} 数的是<em>世界里</em>还差多少方块，
      * 且在清单创建时就定死了——{@code updateAvailableCounts()} 只刷新 {@code countAvailable}。
@@ -423,23 +407,7 @@ public class AutoRestockFeature implements ClientFeature {
 
             int stacks = Math.max(1, Configs.Restocks.RESTOCK_STACKS_PER_ITEM.getIntegerValue());
 
-            for (LitematicaIntegration.MaterialEntry entry : entries) {
-                if (entry.ignored()) continue;
-
-                ItemStack stack = entry.stack();
-                int countMissing = entry.countMissing();
-                if (stack.isEmpty() || countMissing <= 0) continue;
-
-                Item item = stack.getItem();
-                schematicWanted.add(item);
-
-                // 整张蓝图通常要的远超一个背包，所以只补到几组而不是追着总数跑——
-                // 否则一种材料就把所有格子填满，其余材料永远收不到。
-                int target = Math.min(countMissing, Math.max(1, stack.getMaxStackSize()) * stacks);
-                if (looseCount(mc, item) < target) {
-                    needs.add(new Need(item, target));
-                }
-            }
+            materials.replaceWith(entries, stacks, item -> looseCount(mc, item));
             return true;
 
         } catch (Exception e) {
@@ -457,7 +425,7 @@ public class AutoRestockFeature implements ClientFeature {
             var scope = source.scope(Configs.Restocks.RESTOCK_CONTAINER_MAX_DISTANCE.getIntegerValue());
             if (scope.error() != null) { stop(scope.error()); return; }
             Set<BlockPos> found = new HashSet<>();
-            for (Need need : needs) {
+            for (RestockMaterials.Need need : materials.needs()) {
                 if (looseCount(mc, need.item()) >= need.target()) continue;
                 found.addAll(source.find(need.item(), mc.player.blockPosition(), scope.range(), false,
                         shulkerModeEnabled() && quickShulker.isLoaded()));
@@ -485,7 +453,7 @@ public class AutoRestockFeature implements ClientFeature {
         containerIndex = 0;
 
         MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.gathering",
-                needs.size(), containerQueue.size());
+                materials.needs().size(), containerQueue.size());
 
         navigateToCurrentContainer(mc);
     }
@@ -578,22 +546,8 @@ public class AutoRestockFeature implements ClientFeature {
     /** 只发 useItemOn 包，不动重试计数。 */
     private void tryOpenContainerClick(Minecraft mc) {
         try {
-            Vec3 eye = mc.player.getEyePosition();
-            double dx = currentContainerTarget.getX() + 0.5 - eye.x;
-            double dy = currentContainerTarget.getY() + 0.5 - eye.y;
-            double dz = currentContainerTarget.getZ() + 0.5 - eye.z;
-            double distH = Math.sqrt(dx * dx + dz * dz);
-            mc.player.setYRot((float) Math.toDegrees(Math.atan2(-dx, dz)));
-            mc.player.setYHeadRot((float) Math.toDegrees(Math.atan2(-dx, dz)));
-            mc.player.setXRot((float) Math.toDegrees(-Math.atan2(dy, distH)));
-
-            Direction face = ContainerOpener.nearestFace(eye, currentContainerTarget);
-            Vec3 hitPos = new Vec3(
-                    currentContainerTarget.getX() + 0.5 + face.getStepX() * 0.5,
-                    currentContainerTarget.getY() + 0.5 + face.getStepY() * 0.5,
-                    currentContainerTarget.getZ() + 0.5 + face.getStepZ() * 0.5);
-            BlockHitResult hitResult = new BlockHitResult(hitPos, face, currentContainerTarget, false);
-            mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
+            BlockInteraction.lookAt(mc.player, currentContainerTarget);
+            BlockInteraction.useNearestFace(mc, currentContainerTarget);
 
             openCooldown = OPEN_WAIT_TICKS;
             dryTicks = 0;
@@ -779,7 +733,7 @@ public class AutoRestockFeature implements ClientFeature {
      * 在最后一个容器关掉之后一两 tick 才跑，保证「挪材料上快捷栏」看到的物品栏与服务端一致。
      */
     private void tickFinishing(Minecraft mc) {
-        promoteToHotbar(mc, schematicWanted);
+        promoteToHotbar(mc, materials.wantedItems());
         resumeOrRelaunch(mc);
     }
 
@@ -827,42 +781,15 @@ public class AutoRestockFeature implements ClientFeature {
      * @return 物品栏真的多出东西了才返回 true。
      */
     private boolean takeOneNeeded(Minecraft mc, AbstractContainerMenu menu) {
-        Slot best = null;
-        Item bestItem = null;
-        double bestRatio = Double.MAX_VALUE;
-
-        for (Slot slot : menu.slots) {
-            if (slot.container == mc.player.getInventory()) continue;
-            ItemStack stack = slot.getItem();
-            if (stack.isEmpty()) continue;
-            // 装着东西的潜影盒是储物，交给 takeShulkerBox() 处理；空盒子只是普通建筑材料。
-            if (ItemUtil.isShulkerBox(stack) && !ItemUtil.contentsOf(stack).isEmpty()) continue;
-
-            for (Need need : needs) {
-                if (!ItemUtil.is(stack, need.item())) continue;
-                int have = looseCount(mc, need.item());
-                if (have < need.target()) {
-                    double ratio = (double) have / need.target();
-                    if (ratio < bestRatio) {
-                        bestRatio = ratio;
-                        best = slot;
-                        bestItem = need.item();
-                    }
-                }
-                break;
-            }
-        }
-
-        if (best == null) return false;
+        RestockMaterials.Selection selection = materials.selectLooseStack(menu.slots,
+                slot -> slot.container != mc.player.getInventory(), item -> looseCount(mc, item));
+        if (selection == null) return false;
 
         try {
-            int before = looseCount(mc, bestItem);
-            int gap = 0;
-            for (Need need : needs) if (need.item() == bestItem) gap = Math.max(gap, need.target() - before);
-            SlotTransfer.toPlayer(mc, best, gap);
-            // handleContainerInput 会同步把移动应用到客户端菜单上，所以这是真的确认，
-            // 不是「假设点击生效了」。
-            if (looseCount(mc, bestItem) > before) {
+            int before = looseCount(mc, selection.item());
+            SlotTransfer.toPlayer(mc, selection.slot(), materials.gapFor(selection.item(), before));
+            // 此处检查客户端预测的进展，后续仍按原有间隔等待服务端同步。
+            if (looseCount(mc, selection.item()) > before) {
                 cycleGained++;
                 return true;
             }
@@ -948,21 +875,11 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     private boolean anythingStillNeeded(Minecraft mc) {
-        for (Need need : needs) {
-            if (looseCount(mc, need.item()) < need.target()) return true;
-        }
-        return false;
+        return materials.anyMissing(item -> looseCount(mc, item));
     }
 
     private boolean shulkerHoldsSomethingNeeded(Minecraft mc, ItemStack shulkerBox) {
-        for (ItemStack inner : ItemUtil.contentsOf(shulkerBox)) {
-            for (Need need : needs) {
-                if (ItemUtil.is(inner, need.item()) && looseCount(mc, need.item()) < need.target()) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return materials.boxContainsMissing(shulkerBox, item -> looseCount(mc, item));
     }
 
     /**
@@ -972,14 +889,7 @@ public class AutoRestockFeature implements ClientFeature {
      * 一盒石头会被读成「石头充足」，而建造那边其实一个都放不出来。
      */
     private int looseCount(Minecraft mc, Item item) {
-        if (mc.player == null) return 0;
-        Inventory inv = mc.player.getInventory();
-        int count = 0;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            ItemStack stack = inv.getItem(i);
-            if (ItemUtil.is(stack, item)) count += stack.getCount();
-        }
-        return count;
+        return ItemUtil.countLoose(mc.player, item);
     }
 
     private static int hotbarCount(Inventory inv, Item item) {
@@ -992,10 +902,6 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     private boolean isInventoryFull(Minecraft mc) {
-        if (mc.player == null) return true;
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
-            if (mc.player.getInventory().getItem(i).isEmpty()) return false;
-        }
-        return true;
+        return PlayerUtil.isInventoryFull(mc.player);
     }
 }

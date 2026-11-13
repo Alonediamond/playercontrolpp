@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerMaterialCollector;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialPlanRegression;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -59,6 +60,8 @@ public final class MaterialCollectorRegression {
         check(result.slot() == dirtBox, "同一容器其他缺失材料也按满盒优先");
         check(ContainerMaterialCollector.select(needs, item -> 0, List.of(loose), s -> false, 864, true) == null, "不可操作槽位被排除");
         checks += TransferSessionRegression.run();
+        checks += SharedAutomationRegression.run();
+        checks += RawMaterialPlanRegression.run();
         System.out.println("Material collector regression: " + checks + " checks passed");
     }
     private static ContainerMaterialCollector.Selection select(Item item, int total, int held, List<Slot> slots, int threshold, boolean mixed) {

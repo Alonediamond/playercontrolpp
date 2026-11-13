@@ -1,5 +1,8 @@
 package com.alonediamond.playercontrolpp.feature;
 
+import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
+import com.alonediamond.playercontrolpp.interaction.ContainerOpenWait;
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
@@ -10,16 +13,11 @@ import com.alonediamond.playercontrolpp.util.PlayerUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
-import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -106,7 +104,7 @@ public final class SchematicSelectionContainerCacheFeature {
 
     private static BlockPos currentTarget;
     private static int stateTimer;
-    private static int contentTimer;
+    private static final ContainerOpenWait openWait = new ContainerOpenWait(OPEN_WAIT_TICKS, CONTENT_WAIT_TICKS);
     private static int pendingCount;
     private static int cachedCount;
     private static int failedCount;
@@ -207,7 +205,6 @@ public final class SchematicSelectionContainerCacheFeature {
         deferredRetryTimer = 0;
         currentTarget = null;
         stateTimer = 0;
-        contentTimer = 0;
         pendingCount = 0;
         cachedCount = 0;
         failedCount = 0;
@@ -279,8 +276,7 @@ public final class SchematicSelectionContainerCacheFeature {
         BlockPos target = takeNearestReachable(client);
         if (target != null) {
             currentTarget = target;
-            stateTimer = OPEN_WAIT_TICKS;
-            contentTimer = CONTENT_WAIT_TICKS;
+            openWait.begin();
             state = State.OPENING;
             sendOpenClick(client, target);
             return false; // 等服务端回包
@@ -310,22 +306,15 @@ public final class SchematicSelectionContainerCacheFeature {
     }
 
     private static boolean tickOpening(Minecraft client) {
-        // 界面被 ContainerGuiSuppressor 吞掉时 Screen 恒为 null，判据只用菜单状态。
-        boolean menuOpen = client.player.containerMenu != client.player.inventoryMenu;
-
-        if (menuOpen) {
-            // 界面已开，但物品内容是另一个包。等到看见东西、或宽限用完再落库，
-            // 避免把还没同步的容器记成空容器。
-            if (!menuHasContent(client) && --contentTimer > 0) {
-                return false;
-            }
+        ContainerOpenWait.Result result = openWait.tick(client);
+        if (result == ContainerOpenWait.Result.READY) {
             boolean saved = saveContainerToChestTracker(client);
             closeGuiIfOpen(client);
             complete(client, saved);
             return state == State.SEEKING; // 延迟为 0 时同一 tick 直接开下一个
         }
 
-        if (--stateTimer <= 0) {
+        if (result == ContainerOpenWait.Result.TIMED_OUT) {
             complete(client, false);
             return true; // 没开成，也没消耗往返，立刻找下一个
         }
@@ -520,7 +509,7 @@ public final class SchematicSelectionContainerCacheFeature {
                         if (bucket == null) continue;
 
                         for (BlockPos pos : bucket) {
-                            double distSq = distanceToBlockSq(eye, pos);
+                            double distSq = BlockInteraction.distanceToBlockSq(eye, pos);
                             if (distSq <= reachSq && distSq < bestDistSq) {
                                 bestDistSq = distSq;
                                 best = pos;
@@ -549,18 +538,6 @@ public final class SchematicSelectionContainerCacheFeature {
     }
 
     /**
-     * 眼睛到方块外框的最短距离平方。
-     *
-     * <p>用外框而不是方块中心，判定与服务端接受右键的范围一致；用中心会白白少半格多。
-     */
-    private static double distanceToBlockSq(Vec3 eye, BlockPos pos) {
-        double dx = Math.max(Math.abs(eye.x - (pos.getX() + 0.5)) - 0.5, 0.0);
-        double dy = Math.max(Math.abs(eye.y - (pos.getY() + 0.5)) - 0.5, 0.0);
-        double dz = Math.max(Math.abs(eye.z - (pos.getZ() + 0.5)) - 0.5, 0.0);
-        return dx * dx + dy * dy + dz * dz;
-    }
-
-    /**
      * 打包区段坐标：x/z 各 22 位、y 20 位，与原版 {@code SectionPos.asLong} 同一套划分。
      * 22 位足够覆盖世界边界（±3000 万格 ÷ 16 ≈ ±188 万区段）而不会撞键。
      */
@@ -573,40 +550,7 @@ public final class SchematicSelectionContainerCacheFeature {
     /** 朝最靠近玩家的那个面发右键，隔空开箱，避免打到相邻方块。 */
     private static void sendOpenClick(Minecraft client, BlockPos position) {
         if (client.gameMode == null) return;
-
-        Vec3 eye = client.player.getEyePosition();
-        Vec3 center = Vec3.atCenterOf(position);
-        double dx = eye.x - center.x;
-        double dy = eye.y - center.y;
-        double dz = eye.z - center.z;
-        double ax = Math.abs(dx);
-        double ay = Math.abs(dy);
-        double az = Math.abs(dz);
-
-        Direction face;
-        if (ax >= ay && ax >= az) {
-            face = dx > 0 ? Direction.EAST : Direction.WEST;
-        } else if (ay >= az) {
-            face = dy > 0 ? Direction.UP : Direction.DOWN;
-        } else {
-            face = dz > 0 ? Direction.SOUTH : Direction.NORTH;
-        }
-
-        Vec3 hitPos = new Vec3(
-                center.x + face.getStepX() * 0.5,
-                center.y + face.getStepY() * 0.5,
-                center.z + face.getStepZ() * 0.5);
-        client.gameMode.useItemOn(client.player, InteractionHand.MAIN_HAND,
-                new BlockHitResult(hitPos, face, position, false));
-    }
-
-    private static boolean menuHasContent(Minecraft client) {
-        for (Slot slot : client.player.containerMenu.slots) {
-            if (!(slot.container instanceof Inventory) && !slot.getItem().isEmpty()) {
-                return true;
-            }
-        }
-        return false;
+        BlockInteraction.useNearestFace(client, position);
     }
 
     private static boolean saveContainerToChestTracker(Minecraft client) {
@@ -619,9 +563,7 @@ public final class SchematicSelectionContainerCacheFeature {
     }
 
     private static void closeGuiIfOpen(Minecraft client) {
-        if (client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
-            client.player.closeContainer();
-        }
+        ContainerMenus.close(client);
         ChestTrackerIntegration.getInstance().clearInteractionTracker();
     }
 

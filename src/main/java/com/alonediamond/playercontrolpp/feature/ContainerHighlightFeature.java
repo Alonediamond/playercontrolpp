@@ -1,7 +1,8 @@
 package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.feature.highlight.WorldBoxRenderer;
+import com.alonediamond.playercontrolpp.render.WorldBoxRenderer;
+import com.alonediamond.playercontrolpp.render.BoxStyle;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 
@@ -20,12 +21,8 @@ import java.util.Set;
  * <p>高亮是"一次性"的：持续指定 tick 数后自动消失。
  */
 public final class ContainerHighlightFeature implements ClientFeature {
-    /** 高亮颜色（橙色）。 */
-    private static final float RED = 1.0F;
-    private static final float GREEN = 0.45F;
-    private static final float BLUE = 0.10F;
-    /** 实心框的不透明度：看得清，又不遮住箱子本身的贴图。 */
-    private static final float ALPHA = 0.35F;
+    /** 橙色半透明框，保留容器贴图的可见度。 */
+    private static final BoxStyle STYLE = new BoxStyle(1.0F, 0.45F, 0.10F, 0.35F);
 
     private static final ContainerHighlightFeature INSTANCE = new ContainerHighlightFeature();
 
@@ -80,7 +77,7 @@ public final class ContainerHighlightFeature implements ClientFeature {
     public void renderWorld() {
         if (positions.isEmpty() || remainingTicks <= 0) return;
         // 拷一份再遍历：渲染期间高亮列表可能被 tick 清空（换维度、超时）。
-        WorldBoxRenderer.renderBoxes(new ArrayList<>(positions), RED, GREEN, BLUE, ALPHA);
+        WorldBoxRenderer.renderBoxes(new ArrayList<>(positions), STYLE);
     }
 
     /** 配置项读取集中在这里。 */

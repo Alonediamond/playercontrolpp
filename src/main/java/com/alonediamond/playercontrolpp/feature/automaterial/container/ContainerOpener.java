@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.navigation.BaritonePathingController;
@@ -11,10 +12,7 @@ import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,16 +24,12 @@ public final class ContainerOpener {
 
     /** 同一个方块尝试几次后才去试它的邻居。 */
     private static final int MAX_OPEN_ATTEMPTS = 3;
-    /** 第几次尝试时先跳一下，以防视线被挡。 */
-    //private static final int JUMP_ON_ATTEMPT = 2;//感觉跳一下很奇怪，暂时注释了
     /** 一个容器坐标上总共试过几个不同方块后彻底放弃。 */
     private static final int MAX_CHEST_RETRIES = 3;
     /** 点击后等容器界面的 tick 数。 */
     private static final int OPEN_WAIT_TICKS = 10;
     /** 右键回退路径用的较短等待，它反应更快。 */
     private static final int FALLBACK_WAIT_TICKS = 6;
-    /** 归还杂盒时，点完"塞回容器"到关闭界面之间的 tick 数。 */
-    private static final int MIXED_BOX_RETURN_CLOSE_TICKS = 6;
 
     /** 打开 {@code target} 处的容器。OPENING_CONTAINER 转换的入口。 */
     public void openContainerAt(BlockPos target, GatherContext ctx) {
@@ -53,31 +47,9 @@ public final class ContainerOpener {
         // 上一次尝试的回退路径按下的键现在已经过期了。
         releaseKeys();
 
-        /*if (jumpBeforeClick && ctx.client.player != null) {
-            ctx.client.player.jumpFromGround();
-        }*/
-
         try {
-            Vec3 playerEye = ctx.client.player.getEyePosition();
-            double dx = target.getX() + 0.5 - playerEye.x;
-            double dy = target.getY() + 0.5 - playerEye.y;
-            double dz = target.getZ() + 0.5 - playerEye.z;
-            double distH = Math.sqrt(dx * dx + dz * dz);
-            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-            float pitch = (float) Math.toDegrees(-Math.atan2(dy, distH));
-            ctx.client.player.setYRot(yaw);
-            ctx.client.player.setYHeadRot(yaw);
-            ctx.client.player.setXRot(pitch);
-
-            Direction face = getNearestContainerFace(target, ctx);
-            Vec3 hitPos = new Vec3(
-                    target.getX() + 0.5 + face.getStepX() * 0.5,
-                    target.getY() + 0.5 + face.getStepY() * 0.5,
-                    target.getZ() + 0.5 + face.getStepZ() * 0.5
-            );
-
-            BlockHitResult hitResult = new BlockHitResult(hitPos, face, target, false);
-            ctx.client.gameMode.useItemOn(ctx.client.player, InteractionHand.MAIN_HAND, hitResult);
+            BlockInteraction.lookAt(ctx.client.player, target);
+            BlockInteraction.useNearestFace(ctx.client, target);
 
             ctx.transferCooldown = OPEN_WAIT_TICKS;
             ctx.containerJustOpened = true;
@@ -105,7 +77,7 @@ public final class ContainerOpener {
         // 点击已经有了结果（成或不成），两种情况都不再按住右键。
         releaseKeys();
 
-        // 需求1：这一趟开的容器只是用来把杂盒塞回去的。
+        // 归还借盒时跳过取料判断，沿用归还流程的重试规则。
         if (ctx.mixedBoxReturnSlot >= 0) {
             MixedBoxReturn.opened(ctx, tsm, this);
             return;
@@ -126,7 +98,6 @@ public final class ContainerOpener {
         } else {
             ctx.openAttemptCount++;
             if (ctx.openAttemptCount < MAX_OPEN_ATTEMPTS) {
-                //boolean jump = (ctx.openAttemptCount == JUMP_ON_ATTEMPT);//感觉跳一下很奇怪，暂时注释了
                 openContainerWithRetry(ctx.currentContainerTarget, ctx.openAttemptCount, ctx);
             } else {
                 retryAdjacentOrFail(ctx, tsm, pathing);
@@ -184,27 +155,6 @@ public final class ContainerOpener {
         if (mc != null && mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
             mc.player.closeContainer();
         }
-    }
-
-    private Direction getNearestContainerFace(BlockPos target, GatherContext ctx) {
-        if (ctx.client.player == null) return Direction.UP;
-        return nearestFace(ctx.client.player.getEyePosition(), target);
-    }
-
-    /** @return {@code target} 上最正对 {@code eye} 的那个面。 */
-    public static Direction nearestFace(Vec3 eye, BlockPos target) {
-        Vec3 center = Vec3.atCenterOf(target);
-        double dx = eye.x - center.x;
-        double dy = eye.y - center.y;
-        double dz = eye.z - center.z;
-
-        double ax = Math.abs(dx);
-        double ay = Math.abs(dy);
-        double az = Math.abs(dz);
-
-        if (ax >= ay && ax >= az) return dx > 0 ? Direction.EAST : Direction.WEST;
-        if (ay >= ax && ay >= az) return dy > 0 ? Direction.UP : Direction.DOWN;
-        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     /** 目标本身加它的六个邻居——覆盖双箱和轻微瞄偏。 */

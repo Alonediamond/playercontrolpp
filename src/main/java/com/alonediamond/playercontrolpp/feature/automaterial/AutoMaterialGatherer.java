@@ -159,9 +159,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
                 setState(State.STOPPED);
                 return;
             }
-            ctx.missingItems.clear();
-            ctx.missingItems.addAll(result.items());
-            ctx.missingItems.sort((a, b) -> Integer.compare(b.neededCount, a.neededCount));
+            ctx.requirements.replaceWith(result.items());
             currentItemIndex = 0;
             if (startInitialStorage()) return;
             // NEXT_ITEM 会跳过已满足条目，满包且材料已齐也能正常结束。
@@ -174,37 +172,35 @@ public final class AutoMaterialGatherer implements ClientFeature {
     }
 
     private boolean isCurrentItemSatisfied() {
-        if (ctx.currentTargetItem == null) return false;
-        return ctx.countHeld(ctx.currentTargetItem) >= ctx.targetNeededTotal;
+        if (ctx.targetItem() == null) return false;
+        return ctx.countHeld(ctx.targetItem()) >= ctx.targetTotal();
     }
 
     /** 换到下一个缺失物品，或者结束。 */
     private void nextItem() {
         transferExecutor.reset();
 
-        // 已经满足的条目直接跳过：搜索会把所有缺料合并成一次访问，这里不必再为已齐的东西
-        // 单独跑一轮"搜索 → 发现没缺口 → 推进"。一次循环推进到底，避免多余的状态往返。
-        while (currentItemIndex < ctx.missingItems.size()) {
-            MaterialItemEntry candidate = ctx.missingItems.get(currentItemIndex);
+        // 开箱时可能顺带取齐其他条目，直接跳过它们，避免重复搜索。
+        while (currentItemIndex < ctx.requirements.entries().size()) {
+            MaterialItemEntry candidate = ctx.requirements.entries().get(currentItemIndex);
             if (ctx.countHeld(candidate.item) < candidate.neededCount) break;
             currentItemIndex++;
         }
 
-        if (currentItemIndex >= ctx.missingItems.size()) {
+        if (currentItemIndex >= ctx.requirements.entries().size()) {
             setState(State.COMPLETED);
             return;
         }
 
-        MaterialItemEntry entry = ctx.missingItems.get(currentItemIndex);
-        ctx.currentTargetItem = entry.item;
-        ctx.targetNeededTotal = entry.neededCount;
+        MaterialItemEntry entry = ctx.requirements.entries().get(currentItemIndex);
+        ctx.setTarget(entry.item, entry.neededCount);
         ctx.currentPosIndex = 0;
         ctx.chestRetryCount = 0;
         ctx.foundPositions.clear();
         // 对上一件物品空手的容器，对这一件可能还有货。
         ctx.exhaustedPositions.clear();
 
-        if (ctx.countHeld(ctx.currentTargetItem) >= ctx.targetNeededTotal) {
+        if (ctx.countHeld(ctx.targetItem()) >= ctx.targetTotal()) {
             onCurrentTargetSatisfied();
             return;
         }
@@ -215,7 +211,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
     /** 关闭容器后重新数一遍，然后决定推进还是换下一个位置。 */
     private void verifyTransfer() {
 
-        if (ctx.countHeld(ctx.currentTargetItem) >= ctx.targetNeededTotal) {
+        if (ctx.countHeld(ctx.targetItem()) >= ctx.targetTotal()) {
             onCurrentTargetSatisfied();
             return;
         }
@@ -279,7 +275,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
             case NEXT_ITEM:
                 break;
             case COMPLETED:
-                long missing = ctx.missingItems.stream().filter(entry -> ctx.countHeld(entry.item) < entry.neededCount).count();
+                long missing = ctx.requirements.entries().stream().filter(entry -> ctx.countHeld(entry.item) < entry.neededCount).count();
                 if (missing > 0) MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.incomplete", missing);
                 else MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.completed");
                 active = false;
@@ -332,46 +328,8 @@ public final class AutoMaterialGatherer implements ClientFeature {
             return;
         }
 
-        // ---- 追溯失败后的"把散落的原材料收进潜影盒" ----
-        if (pendingTraceStorage) {
-            pendingTraceStorage = false;
-            clearMixedBoxReturn();
-            ctx.mixedBoxReturnClosing = false;
-            pathingController.cancelPathing();
-            containerOpener.closeAnyContainer(ctx.client);
-            voluntaryStorage = true;
-            if (shulkerAccess.startStorage(ctx, true)) {
-                return;
-            }
-            voluntaryStorage = false;
-        }
-
-        // ---- 存盒后的同步与核对（独立于 isActive() 运行）----
-        if (pendingStorageDone) {
-            if (storageSyncTicks < STORAGE_SYNC_TICKS) {
-                storageSyncTicks++;
-                return;
-            }
-            pendingStorageDone = false;
-            storageSyncTicks = 0;
-            if (requiredStorageStartCount >= 0) {
-                int before = requiredStorageStartCount;
-                requiredStorageStartCount = -1;
-                if (shulkerAccess.countStorableMaterials(ctx) >= before) {
-                    setState(State.STOPPED, "playercontrolpp.message.baritone.inventory_full");
-                    return;
-                }
-            }
-
-            // 开盒取物之后：盒子是从容器里拿出来的就先还回去。
-            if (ctx.mixedBoxReturnSlot >= 0) {
-                MixedBoxReturn.start(ctx, this, containerOpener);
-                return;
-            }
-
-            resumeAfterStorage();
-            return;
-        }
+        if (tickRequestedStorage()) return;
+        if (tickStorageSynchronization()) return;
 
         // ---- 原材料追溯子系统：只在它需要拿主意时接管，派出去采集时让路给下面的状态 ----
         if (rawMaterialTask.isActive() && rawMaterialTask.ownsFlow()) {
@@ -379,24 +337,9 @@ public final class AutoMaterialGatherer implements ClientFeature {
             return;
         }
 
-        // ---- 杂盒归还：点完"塞回容器"之后的收尾 ----
-        if (ctx.mixedBoxReturnClosing) {
-            if (ctx.transferCooldown > 0) {
-                ctx.transferCooldown--;
-                return;
-            }
-            MixedBoxReturn.verify(ctx, this);
-            return;
-        }
+        if (tickMixedBoxReturn()) return;
 
-        // ---- 开容器冷却 ----
-        if (ctx.transferCooldown > 0) {
-            ctx.transferCooldown--;
-            if (ctx.containerJustOpened && ctx.transferCooldown <= 0) {
-                ctx.containerJustOpened = false;
-                containerOpener.checkOpenResult(ctx, this, pathingController);
-            }
-        }
+        tickContainerCooldown();
 
         switch (state) {
             case IDLE:
@@ -445,6 +388,71 @@ public final class AutoMaterialGatherer implements ClientFeature {
         }
     }
 
+    /** 追溯失败请求的可选整理优先于普通采集，未启动时同 tick 继续后续流程。 */
+    private boolean tickRequestedStorage() {
+        if (!pendingTraceStorage) return false;
+        pendingTraceStorage = false;
+        clearMixedBoxReturn();
+        ctx.mixedBoxReturnClosing = false;
+        pathingController.cancelPathing();
+        containerOpener.closeAnyContainer(ctx.client);
+        voluntaryStorage = true;
+        if (shulkerAccess.startStorage(ctx, true)) {
+            return true;
+        }
+        voluntaryStorage = false;
+        return false;
+    }
+
+    /** 盒子已关闭后才核对库存，避免把客户端预测当成最终结果。 */
+    private boolean tickStorageSynchronization() {
+        if (!pendingStorageDone) return false;
+        if (storageSyncTicks < STORAGE_SYNC_TICKS) {
+            storageSyncTicks++;
+            return true;
+        }
+        pendingStorageDone = false;
+        storageSyncTicks = 0;
+        if (requiredStorageStartCount >= 0) {
+            int before = requiredStorageStartCount;
+            requiredStorageStartCount = -1;
+            if (shulkerAccess.countStorableMaterials(ctx) >= before) {
+                setState(State.STOPPED, "playercontrolpp.message.baritone.inventory_full");
+                return true;
+            }
+        }
+
+        // 开盒取物之后：盒子是从容器里拿出来的就先还回去。
+        if (ctx.mixedBoxReturnSlot >= 0) {
+            MixedBoxReturn.start(ctx, this, containerOpener);
+            return true;
+        }
+
+        resumeAfterStorage();
+        return true;
+    }
+
+    private boolean tickMixedBoxReturn() {
+        if (!ctx.mixedBoxReturnClosing) return false;
+        if (ctx.transferCooldown > 0) {
+            ctx.transferCooldown--;
+            return true;
+        }
+        MixedBoxReturn.verify(ctx, this);
+        return true;
+    }
+
+    /** 冷却结束可在本 tick 转入取物；调用后仍继续执行主状态。 */
+    private void tickContainerCooldown() {
+        if (ctx.transferCooldown > 0) {
+            ctx.transferCooldown--;
+            if (ctx.containerJustOpened && ctx.transferCooldown <= 0) {
+                ctx.containerJustOpened = false;
+                containerOpener.checkOpenResult(ctx, this, pathingController);
+            }
+        }
+    }
+
     /**
      * 启动前的可选整理，只执行一次，失败时保留材料并继续普通备货。
      */
@@ -485,7 +493,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
         if (!shulkerAccess.hasStorableMaterials(ctx)) return;
         this.pendingTraceStorage = true;
         // 追溯以"放弃这个物品"收场时（索引早就推进过了），存完直接走下一个物品：
-        // 这时的 ctx.currentTargetItem 还是刚失败的那个，拿它重判会把这个物品再搜一遍，
+        // 这时的 ctx.targetItem() 还是刚失败的那个，拿它重判会把这个物品再搜一遍，
         // 甚至把索引多推一格。
         this.resumeNextItemAfterStorage = resumeNextItem;
     }
@@ -519,8 +527,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
      * <p>同样分两层：追溯途中的子材料交给追溯任务决定"去挖还是继续往下分解"；
      * 顶层物品则先按配置尝试追溯原材料，实在不行才跳过。
      *
-     * <p>搜索会合并所有缺料的容器，所以"找不到"意味着缓存里没有装着这件物品的箱子；
-     * 它不影响其它缺料继续从缓存里取——那些箱子已经在本轮被访问过或被排除了。
+     * <p>搜索针对当前物品；打开容器后仍会顺带收集其他缺料。排除集合随当前物品切换而清空。
      */
     public void onCurrentTargetUnavailable() {
         if (rawMaterialTask.isActive()) {
@@ -544,16 +551,16 @@ public final class AutoMaterialGatherer implements ClientFeature {
         RawMaterialMode mode =
                 (RawMaterialMode) Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue();
         if (mode == RawMaterialMode.DISABLED) return false;
-        if (ctx.currentTargetItem == null) return false;
+        if (ctx.targetItem() == null) return false;
         // 追溯过一次还是凑不齐的物品不再重试，否则"搜不到 → 追溯 → 仍不够 → 再搜"会打转。
-        if (ctx.tracedItems.contains(ctx.currentTargetItem)) return false;
+        if (ctx.tracedItems.contains(ctx.targetItem())) return false;
 
-        int gap = ctx.targetNeededTotal - ctx.countHeld(ctx.currentTargetItem);
+        int gap = ctx.targetTotal() - ctx.countHeld(ctx.targetItem());
         if (gap <= 0) return false;
 
         if (!checkRawMaterialPrerequisites()) return false;
 
-        return rawMaterialTask.start(ctx, this, ctx.currentTargetItem, gap);
+        return rawMaterialTask.start(ctx, this, ctx.targetItem(), gap);
     }
 
     /**
@@ -595,7 +602,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
             onInventoryFull();
             return;
         }
-        if (ctx.currentTargetItem == null) {
+        if (ctx.targetItem() == null) {
             setState(State.NEXT_ITEM);
             return;
         }

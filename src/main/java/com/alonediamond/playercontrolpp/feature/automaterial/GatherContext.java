@@ -1,6 +1,8 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialRequirements;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialTarget;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
 import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
 
@@ -36,9 +38,8 @@ public final class GatherContext {
     public Minecraft client;
 
     // 材料清单数据
-    public final List<MaterialItemEntry> missingItems = new ArrayList<>();
-    public Item currentTargetItem;
-    public int targetNeededTotal;
+    public final MaterialRequirements requirements = new MaterialRequirements();
+    private MaterialTarget target;
 
     // 箱子搜索数据
     public final List<BlockPos> foundPositions = new ArrayList<>();
@@ -108,61 +109,29 @@ public final class GatherContext {
     public List<BlockPos> adjacentContainerTargets;
     public int adjacentTryIndex;
 
-    /**
-     * @return 这一次采集关心的所有条目：缺失清单（常规备货），再加上"当前采集目标"。
-     *
-     * <p>原材料追溯派出去的子材料不在清单上，但容器开箱判据、取物匹配、整盒判断、
-     * 存盒排除全都要把它当成目标，否则容器会被判成"没有需要的东西"而被反复开关
-     * （v1.9 修复的实际故障）。清单为空、或当前目标在清单上且这次要的不比清单多时
-     * 直接返回清单本身，不额外分配；只有"追溯要的量超过了清单给它的目标量"时才补一条
-     * 按这次目标量算的条目——否则取物拿到清单量就停手，合成永远差料。
-     */
-    public java.util.List<MaterialItemEntry> wantedEntries() {
-        if (currentTargetItem == null) {
-            return missingItems;
-        }
-        MaterialItemEntry existing = missingEntry(currentTargetItem);
-        // 清单上已经有这一项、而且这次要的不比清单给它的目标量多：直接用清单本身。
-        if (existing != null && targetNeededTotal <= existing.neededCount) {
-            return missingItems;
-        }
-        // 当前目标不在清单上（追溯派出去的中间材料），或虽然在家清单上、但这次要的更多
-        // （清单预留量 + 合成要消耗的量）：临时补一条按这次目标量算的条目。
-        // 少了这一步，取物会在拿到清单量时就停手，合成永远差料。
-        List<MaterialItemEntry> entries = new ArrayList<>(missingItems);
-        entries.removeIf(entry -> entry.item == currentTargetItem);
-        entries.add(new MaterialItemEntry(currentTargetItem, targetNeededTotal, currentTargetItem.getDefaultMaxStackSize()));
-        return entries;
+    public void setTarget(Item item, int neededTotal) {
+        target = new MaterialTarget(item, neededTotal);
     }
 
-    /** @return 这个物品是不是本次采集关心的对象（清单上的，或当前正在追的那个子材料）。 */
+    public Item targetItem() {
+        return target == null ? null : target.item();
+    }
+
+    public int targetTotal() {
+        return target == null ? 0 : target.neededTotal();
+    }
+
+    public List<MaterialItemEntry> wantedEntries() {
+        return requirements.includingTarget(targetItem(), targetTotal());
+    }
+
     public boolean isWantedNow(Item item) {
-        return item != null && (item == currentTargetItem || isMissing(item));
+        return item != null && (item == targetItem() || requirements.contains(item));
     }
 
-    /** @return 缺失清单里 {@code item} 的条目；不在清单上时 {@code null}。 */
-    public MaterialItemEntry missingEntry(Item item) {
-        if (item == null) return null;
-        for (MaterialItemEntry entry : missingItems) {
-            if (entry.item == item) return entry;
-        }
-        return null;
-    }
-
-    /** @return {@code item} 是否在缺失清单上。 */
-    public boolean isMissing(Item item) {
-        return missingEntry(item) != null;
-    }
-
-    /**
-     * @return 缺失清单给 {@code item} 定的需求总量；不在清单上时 0。
-     *
-     * <p>原材料追溯的"预留额度"规则靠它：合成只能动用"持有量 − 这个目标量"的富余，
-     * 这样清单上已经备齐的东西不会被合成步骤吃掉。
-     */
+    /** 清单预留量不随追溯子材料的临时目标变化。 */
     public int targetFor(Item item) {
-        MaterialItemEntry entry = missingEntry(item);
-        return entry != null ? entry.neededCount : 0;
+        return requirements.targetFor(item);
     }
 
     /**
@@ -175,9 +144,8 @@ public final class GatherContext {
         mixedBoxOriginSlot = -1;
         mixedBoxIdentity = ItemStack.EMPTY;
         storageAfterExtraction = false;
-        missingItems.clear();
-        currentTargetItem = null;
-        targetNeededTotal = 0;
+        requirements.clear();
+        target = null;
 
         foundPositions.clear();
         currentPosIndex = 0;

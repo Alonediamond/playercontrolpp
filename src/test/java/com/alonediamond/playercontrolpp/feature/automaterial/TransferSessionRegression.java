@@ -1,6 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
-import com.alonediamond.playercontrolpp.feature.automaterial.container.TransferSession;
+import com.alonediamond.playercontrolpp.inventory.TransferSession;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;

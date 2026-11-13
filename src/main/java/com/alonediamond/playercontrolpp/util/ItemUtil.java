@@ -106,8 +106,4 @@ public final class ItemUtil {
         return count;
     }
 
-    public static boolean isShuklerBoxFull(ItemStack shulkerBox) {
-        List<ItemStack> itemStacks = contentsOf(shulkerBox);
-        return itemStacks.size() >= 27;
-    }
 }

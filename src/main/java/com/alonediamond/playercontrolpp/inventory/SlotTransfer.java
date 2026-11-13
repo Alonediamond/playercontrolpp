@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial.container;
+package com.alonediamond.playercontrolpp.inventory;
 
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import net.minecraft.client.Minecraft;

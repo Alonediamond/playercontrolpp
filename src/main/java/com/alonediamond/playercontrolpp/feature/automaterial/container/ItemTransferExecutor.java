@@ -1,5 +1,7 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
+import com.alonediamond.playercontrolpp.inventory.TransferSession;
+import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
@@ -13,7 +15,7 @@ import com.alonediamond.playercontrolpp.util.PlayerUtil;
  *
  * <p>一次开箱里会一直取到 {@link ContainerMaterialCollector} 返回 {@code null} 为止——
  * 它每次都在<b>全部缺料</b>里挑，所以一个装着多种所需材料的箱子，开一次就能取完。
- * 取空之后把箱子记进 {@link GatherContext#drainedContainers}，后续搜索不会再打开它。
+ * 取空后只对当前目标排除该容器，换目标时仍可获取其中的其他材料。
  */
 public final class ItemTransferExecutor {
     private final ShulkerBoxAccess shulkerAccess;

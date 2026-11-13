@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.inventory.InventoryCounts;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 
 import com.alonediamond.playercontrolpp.config.Configs;
@@ -17,7 +18,9 @@ public final class ContainerMaterialCollector {
     public record Selection(Slot slot, int amount, boolean unpack) {}
 
     public static Selection select(GatherContext ctx, List<Slot> slots, Predicate<Slot> canAttempt) {
-        return select(ctx.wantedEntries(), ctx::countHeld, slots,
+        InventoryCounts counts = InventoryCounts.capture(
+                ctx.client.player.getInventory()::getItem, ctx.extractionBoxSlots);
+        return select(ctx.wantedEntries(), counts::owned, slots,
                 slot -> slot.container != ctx.client.player.getInventory() && slot.mayPickup(ctx.client.player)
                         && canAttempt.test(slot),
                 Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue(),

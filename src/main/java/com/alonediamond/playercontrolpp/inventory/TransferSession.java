@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial.container;
+package com.alonediamond.playercontrolpp.inventory;
 
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;

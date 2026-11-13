@@ -3,7 +3,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial.material;
 import net.minecraft.world.item.Item;
 
 /**
- * Litematica 材料清单里还需要收集的单个条目。
+ * 备货清单中的单种物品；neededCount 是需求总量，尚未扣除当前库存。
  */
 public final class MaterialItemEntry {
     public final Item item;

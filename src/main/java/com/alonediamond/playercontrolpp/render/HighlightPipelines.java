@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.highlight;
+package com.alonediamond.playercontrolpp.render;
 
 import com.alonediamond.playercontrolpp.mixin.client.MixinRenderTypeAccessor;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
