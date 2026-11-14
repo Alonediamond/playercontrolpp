@@ -28,11 +28,19 @@ PlayerControl++ builds on MaLiLib to add practical client-side utilities. Press 
 | **Cache Containers in a Schematic Selection (requires Chest Tracker and Litematica)** | The area-wide version of nearby caching: select a region, then walk through it to cache the containers within reach |
 | **Auto Water Fill (requires Litematica)** | Waterlogs blocks that should contain water according to your schematic but do not yet. Especially handy for technical builds and redstone contraptions |
 | **Render-layer Sync (requires Litematica)** | Advances the schematic's render layer after each route traversal, helping you work through a build layer by layer |
+| **Automatic Schematic Material Gathering (requires Baritone, Chest Tracker, and Litematica)** | Finds cached containers, travels to them, and collects the schematic's materials. The current container or workstation can be highlighted in the world |
+| **Manual Material Queue (requires Baritone and Chest Tracker)** | Search for items and arrange batches of additional quantities. Earlier batch targets stay reserved, and a failed batch can be resumed |
+| **Build Restocking and Layer Building (requires Baritone and Litematica)** | Refills loose materials when building pauses for supplies. Layer building can be off, upward, or downward |
 
-> Available features and configuration options depend on the optional mods you have installed.
-> Compatible material-list managers and pathfinding mods can unlock additional tools not listed here,
-> such as collecting building supplies from chests to match your schematic, whole shulker boxes at a time.
-> Explore the settings to see what your setup supports.
+### Gathering, Crafting, and Layer Building
+
+- Tracing raw materials for schematic gathering requires LitematList as the list source and an uploaded list. Tracing for the manual queue only requires LitematList to be loaded; no uploaded list is needed. Crafting preserves schematic requirements and earlier queue targets instead of treating them as spare materials.
+- For each batch, recipe selection uses a beam width of 32 and estimates costs up to three recipe layers deep. It considers materials already held, cached stock within range, recipes, and known mineable sources. The estimate ranks candidates; actual container contents are checked when opened.
+- Batches are planned as they run, so only the current batch's ingredients are gathered. Automatic workstation selection falls back between inventory and marked world positions of the same type; it does not switch between crafting table and stonecutter recipes, whose ingredient counts may differ. Stonecutting input is placed one unit at a time to preserve reserved materials.
+- World material search tries only block positions known to Baritone near the player. The default radius is 64 blocks, with a total limit of 1,200 ticks per item. No known position does not mean the material is absent from the world.
+- Layer building is off by default. Upward and downward modes require Litematica's single Y layer mode and a valid schematic range. Unloaded chunks delay completion; changing the layer or schematic settings during a run stops it.
+
+Without Baritone, the gathering, crafting, restocking, and material queue pages are hidden. Routes and route hotkeys remain available separately.
 
 ---
 
@@ -51,6 +59,7 @@ PlayerControl++ builds on MaLiLib to add practical client-side utilities. Press 
 |---|---|
 | Litematica | Container caching within an area selection, automatic waterlogging, and render-layer sync |
 | Chest Tracker | Container contents caching |
+| Baritone | Gathering navigation, world material search, and build restocking |
 | QuickShulker | Opening shulker boxes directly from your inventory |
 | LitematList | Manage multiple schematic material lists: upload, merge, replace, and ignore materials. Its lists can also be used for automatic material gathering |
 | Mod Menu | Access to the configuration screen from the mod list |

@@ -31,11 +31,37 @@ public final class RawMaterialPlanRegression {
         plan.clear();
         check(plan.isEmpty(), "取消后清空整份计划");
 
+        check(plan.pushBatches(Items.PISTON, root, Integer.MAX_VALUE, Integer.MAX_VALUE, null) == 33_554_432,
+                "巨大需求只登记批次数，不一次分配数千万帧");
+        check(plan.current().need == 64 && plan.current().remainingAfter == Integer.MAX_VALUE - 64,
+                "惰性批次只保存当前数量和余量");
+        check(plan.finishFrame(true) && plan.isEmpty(), "外部补齐后直接结束剩余批次");
+
+        plan.pushBatches(Items.STICKY_PISTON, root, 2, 2, null);
+        RawMaterialPlan.Frame outer = plan.current();
+        outer.allocation = new RecipeAllocation(null, java.util.Map.of(Items.PISTON, 2, Items.SLIME_BALL, 2), 2, 0);
+        plan.pushBatches(Items.PISTON, root, 2, 66, outer);
+        RawMaterialPlan.Frame inner = plan.current();
+        inner.allocation = new RecipeAllocation(null, java.util.Map.of(Items.OAK_PLANKS, 6, Items.COBBLESTONE, 8), 2, 0);
+        check(RawMaterialPlan.reservedFor(inner, Items.SLIME_BALL, 5) == 7,
+                "合成活塞时同时保留外层粘性活塞已备的粘液球");
+        check(RawMaterialPlan.reservedFor(inner, Items.PISTON, 64) == 64,
+                "正在生产的活塞不把父帧消费量重复计为预留");
+        plan.pushBatches(Items.OAK_PLANKS, child, 6, 6, inner);
+        check(RawMaterialPlan.reservedFor(plan.current(), Items.COBBLESTONE, 3) == 11,
+                "继续追溯木板时保护活塞帧的圆石及清单预留");
+        plan.clear();
+
         check(RawMaterialPlan.scaleCount(3, 1, 2) == 2, "子材料数向上取整");
         check(RawMaterialPlan.scaleCount(8, 4, 4) == 8, "完整批次保持原数量");
         check(RawMaterialPlan.scaleCount(7, 3, 0) == 7, "父节点数量无效时保留来源数量");
         check(RawMaterialPlan.scaleCount(Integer.MAX_VALUE, Integer.MAX_VALUE, 1) == Integer.MAX_VALUE,
                 "大数量使用 long 中间值并封顶");
+        int nestedTarget = RecipeAllocation.target(20, 10);
+        check(nestedTarget == 30 && RawMaterialPlan.missingToProduce(nestedTarget, 25) == 5,
+                "嵌套子材料只追溯总目标减现有库存的五件缺口");
+        check(RawMaterialPlan.missingToProduce(nestedTarget, 35) == 0,
+                "已有材料超过子目标时不重复追溯");
         return checks;
     }
 

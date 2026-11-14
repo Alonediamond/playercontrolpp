@@ -3,6 +3,7 @@ package com.alonediamond.playercontrolpp.compat;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 
 //#if MC >= 260000
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -61,6 +62,15 @@ public final class DrawCtx {
         this.delegate.centeredText(font, text, centerX, y, color);
         //#else
         //$$ this.delegate.drawCenteredString(font, text, centerX, y, color);
+        //#endif
+    }
+
+    /** 在界面列表中绘制物品图标。 */
+    public void item(ItemStack stack, int x, int y) {
+        //#if MC >= 260000
+        this.delegate.item(stack, x, y);
+        //#else
+        //$$ this.delegate.renderItem(stack, x, y);
         //#endif
     }
 

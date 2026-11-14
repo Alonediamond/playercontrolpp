@@ -118,6 +118,9 @@ final class CraftingController {
     private CraftStationSource mode = CraftStationSource.AUTO;
     /** 工作台用的配方；切石机为 {@code null}。 */
     private Plan recipe;
+    private Plan plannedRecipe;
+    private java.util.function.IntSupplier outputCount;
+    private int lastOutputCount;
     private boolean openSent;
     private int replaceAttempts;
 
@@ -145,12 +148,16 @@ final class CraftingController {
      * @return false = 这次合成做不了（没有工作站 / 没有可用配方 / 配方类型不支持 / 背包容不下），
      *         调用方按"只收集原材料"处理
      */
-    public boolean start(Minecraft mc, Item item, int targetCount, String recipeType, Item stonecutterInput) {
+    public boolean start(Minecraft mc, Item item, int targetCount, String recipeType, Item stonecutterInput,
+                         Plan plannedRecipe, java.util.function.IntSupplier outputCount) {
         if (mc.player == null || mc.level == null || item == null) return false;
 
         this.item = item;
         this.targetCount = targetCount;
         this.stonecutterInput = stonecutterInput;
+        this.plannedRecipe = plannedRecipe;
+        this.outputCount = outputCount;
+        this.lastOutputCount = outputCount.getAsInt();
         // 每次合成重新读一次配置：玩家可能在备货运行期间改了工作站来源。
         this.mode = (CraftStationSource) Configs.BaritoneSettings.CRAFT_STATION_SOURCE.getOptionListValue();
         this.source = StationSource.INVENTORY;
@@ -171,7 +178,8 @@ final class CraftingController {
         this.travelTicks = 0;
         this.openSent = false;
         this.replaceAttempts = 0;
-        this.packetUsable = true;
+        // 已固定变种及批次数量时由手动摆料精确执行；原版摆料包会擅自取用清单预留量。
+        this.packetUsable = plannedRecipe == null;
         resetPlacement();
 
         if (this.stage == Stage.TRAVEL) {
@@ -453,7 +461,8 @@ final class CraftingController {
                 fail(mc, "stonecutter input missing (" + this.stonecutterInput + ")");
                 return;
             }
-            SlotActionCompat.quickMove(mc, menu.containerId, menuSlot);
+            // 先放一个输入即可确定菜单配方；整堆快移会把清单预留一并切完。
+            transfer(mc, menu, menuSlot, STONECUTTER_INPUT_SLOT, 1);
             this.placeTicks = 0;
             this.cooldown = ACTION_COOLDOWN;
             return;
@@ -498,20 +507,18 @@ final class CraftingController {
             return;
         }
 
-        if (ItemUtil.countEverywhere(mc.player, this.item) >= this.targetCount) {
+        int produced = outputCount.getAsInt();
+        if (produced > lastOutputCount) { lastOutputCount = produced; replaceAttempts = 0; }
+        if (produced >= this.targetCount) {
             this.stage = Stage.CLOSE;
             this.cooldown = ACTION_COOLDOWN;
             return;
         }
-        // 产物拿不出来就别再合成更多了：先把界面关掉，让主状态机去腾空间。
-        if (PlayerUtil.isInventoryFull(mc.player)) {
-            finish(Result.INVENTORY_FULL);
-            return;
-        }
-
         int resultIndex = this.station == Station.CRAFTING_TABLE ? CRAFT_RESULT_SLOT : STONECUTTER_RESULT_SLOT;
         Slot resultSlot = menu.getSlot(resultIndex);
         if (resultSlot != null && resultSlot.hasItem()) {
+            if (!ItemUtil.is(resultSlot.getItem(), item)) { fail(mc, "unexpected crafting result"); return; }
+            if (!hasOutputSpace(mc, resultSlot.getItem())) { finish(Result.INVENTORY_FULL); return; }
             SlotActionCompat.quickMove(mc, menu.containerId, resultIndex);
             this.cooldown = 2;
             return;
@@ -563,7 +570,7 @@ final class CraftingController {
     // ---- 选站 / 配方 ----
 
     /**
-     * 按树给出的配方类型挑工作站，挑不到就回退到另一种（作者确认允许回退）。
+     * 按已经备料的配方类型挑工作站；换工作站可能改变投入数量，不能临时替换配方。
      *
      * <p>每种工作站按配置决定从哪来：背包（QuickShulker）或世界坐标。自动模式下先背包、
      * 后世界坐标——装了 QuickShulker 的玩家不必为此多走路，没装的玩家也能靠标记的坐标工作。
@@ -573,10 +580,7 @@ final class CraftingController {
     private boolean pickStation(Minecraft mc, String recipeType) {
         boolean preferStonecutter = "stonecutting".equals(recipeType);
         Item preferred = preferStonecutter ? Items.STONECUTTER : Items.CRAFTING_TABLE;
-        Item fallback = preferStonecutter ? Items.CRAFTING_TABLE : Items.STONECUTTER;
-
-        if (tryStation(mc, preferred, preferStonecutter)) return true;
-        return tryStation(mc, fallback, !preferStonecutter);
+        return tryStation(mc, preferred, preferStonecutter);
     }
 
     private boolean tryStation(Minecraft mc, Item stationItem, boolean stonecutter) {
@@ -604,7 +608,7 @@ final class CraftingController {
             return true;
         }
 
-        Plan plan = CraftingRecipes.find(mc, this.item);
+        Plan plan = this.plannedRecipe != null ? this.plannedRecipe : CraftingRecipes.find(mc, this.item);
         if (plan == null) return false;
         this.station = Station.CRAFTING_TABLE;
         this.stationSlot = slot;
@@ -632,7 +636,7 @@ final class CraftingController {
             this.station = Station.STONECUTTER;
             this.recipe = null;
         } else {
-            Plan plan = CraftingRecipes.find(mc, this.item);
+            Plan plan = this.plannedRecipe != null ? this.plannedRecipe : CraftingRecipes.find(mc, this.item);
             if (plan == null) return false;
             this.station = Station.CRAFTING_TABLE;
             this.recipe = plan;
@@ -684,10 +688,11 @@ final class CraftingController {
 
         int crafts = 64;
         for (Map.Entry<Item, Integer> entry : perCraft.entrySet()) {
+            crafts = Math.min(crafts, entry.getKey().getDefaultMaxStackSize());
             crafts = Math.min(crafts, ItemUtil.countLoose(mc.player, entry.getKey()) / entry.getValue());
         }
-        int remaining = this.targetCount - ItemUtil.countEverywhere(mc.player, this.item);
-        return Math.max(0, Math.min(crafts, remaining));
+        int remaining = this.targetCount - outputCount.getAsInt();
+        return Math.max(0, Math.min(crafts, RecipeAllocation.craftsFor(remaining, recipe.outputCount())));
     }
 
     /** 往一个合成格里凑够 {@code amount} 个材料（不够就从下一个物品栏槽位接着拿）。 */
@@ -758,10 +763,23 @@ final class CraftingController {
         return null;
     }
 
-    private static boolean resultReady(AbstractContainerMenu menu, int slotIndex) {
+    private boolean resultReady(AbstractContainerMenu menu, int slotIndex) {
         Slot slot = menu.getSlot(slotIndex);
-        return slot != null && slot.hasItem();
+        return slot != null && slot.hasItem() && ItemUtil.is(slot.getItem(), item);
     }
+
+    private static boolean hasOutputSpace(Minecraft mc, ItemStack output) {
+        int remaining = output.getCount();
+        for (int index = 0; index < Inventory.INVENTORY_SIZE; index++) {
+            ItemStack stack = mc.player.getInventory().getItem(index);
+            if (stack.isEmpty()) return true;
+            if (ItemStack.isSameItemSameComponents(stack, output)) remaining -= stack.getMaxStackSize() - stack.getCount();
+            if (remaining <= 0) return true;
+        }
+        return false;
+    }
+
+    BlockPos targetPosition() { return active ? stationPos : null; }
 
     /** 只用于日志：把合成格里有什么打出来，排查"摆不进去"时一眼能看懂。 */
     private static String gridSummary(AbstractContainerMenu menu) {

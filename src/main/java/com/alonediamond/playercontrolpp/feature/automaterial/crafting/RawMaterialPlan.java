@@ -32,6 +32,13 @@ final class RawMaterialPlan {
         int nextChild;
         /** 为这一帧开过几次盒子取料。每个子材料最多各一次，且总数有上限，避免来回开关盒子。 */
         int unpackAttempts;
+        RecipeAllocation allocation;
+        java.util.List<java.util.Map.Entry<Item, Integer>> ingredients;
+        int batchTarget;
+        int remainingAfter;
+        boolean warmingRecipe;
+        boolean recipeWarmupComplete;
+        int recipeWaitTicks;
 
         Frame(Item item, RawNode node, int need, int targetTotal, Frame parent, boolean advanceParent) {
             this.item = item;
@@ -49,26 +56,45 @@ final class RawMaterialPlan {
 
     /** 只有一个子材料的最后一批完成后才推进父帧。返回 true 表示整份计划结束。 */
     boolean finishFrame() {
+        return finishFrame(false);
+    }
+
+    boolean finishFrame(boolean targetSatisfied) {
         Frame done = frames.poll();
+        if (done != null && done.remainingAfter > 0 && !targetSatisfied) {
+            pushSeries(done.item, done.node, done.remainingAfter, done.targetTotal, done.parent);
+            return false;
+        }
         if (frames.isEmpty()) return true;
-        if (done != null && done.advanceParent && done.parent != null) done.parent.nextChild++;
+        if (done != null && (done.advanceParent || targetSatisfied) && done.parent != null) done.parent.nextChild++;
         return false;
     }
 
     int pushBatches(Item item, RawNode node, int need, int targetTotal, Frame parent) {
         int maxStack = Math.max(1, item.getDefaultMaxStackSize());
-        int count = (Math.max(1, need) + maxStack - 1) / maxStack;
-        int[] chunks = new int[count];
-        int remaining = Math.max(1, need);
-        for (int i = 0; i < count; i++) {
-            chunks[i] = Math.min(maxStack, remaining);
-            remaining -= chunks[i];
-        }
-        for (int i = count - 1; i >= 0; i--) {
-            frames.push(new Frame(item, node, chunks[i], targetTotal, parent,
-                    parent != null && i == count - 1));
-        }
+        int count = (int) (((long) Math.max(1, need) + maxStack - 1) / maxStack);
+        // 后续批次在上一批完成时才建立，巨大数量也只占当前调用链的内存。
+        pushSeries(item, node, Math.max(1, need), targetTotal, parent);
         return count;
+    }
+
+    private void pushSeries(Item item, RawNode node, int remaining, int targetTotal, Frame parent) {
+        int amount = Math.min(Math.max(1, item.getDefaultMaxStackSize()), remaining);
+        Frame frame = new Frame(item, node, amount, targetTotal, parent, parent != null && remaining == amount);
+        frame.remainingAfter = remaining - amount;
+        frames.push(frame);
+    }
+
+    /** 已备好的祖先帧材料也须保留，当前正在生产的那个分支由它自己的目标负责。 */
+    static int reservedFor(Frame frame, Item item, int listReserve) {
+        int reserve = listReserve;
+        for (Frame branch = frame; branch != null && branch.parent != null; branch = branch.parent) {
+            Frame parent = branch.parent;
+            if (branch.item != item && parent.allocation != null) {
+                reserve = RecipeAllocation.target(reserve, parent.allocation.ingredients().getOrDefault(item, 0));
+            }
+        }
+        return reserve;
     }
 
     static int scaleCount(int childCount, int need, int parentCount) {
@@ -76,4 +102,6 @@ final class RawMaterialPlan {
         long scaled = ((long) childCount * need + parentCount - 1) / parentCount;
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, scaled));
     }
+
+    static int missingToProduce(int target, int held) { return Math.max(0, target - held); }
 }

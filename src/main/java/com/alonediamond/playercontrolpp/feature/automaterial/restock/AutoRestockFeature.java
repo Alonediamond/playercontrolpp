@@ -9,6 +9,8 @@ import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.config.BuildLayerMode;
+import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
 import com.alonediamond.playercontrolpp.config.RestockContainerSource;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.feature.ClientFeature;
@@ -123,6 +125,8 @@ public class AutoRestockFeature implements ClientFeature {
 
     private State state = State.IDLE;
     private boolean active;
+    private final LayerBuildController layers = new LayerBuildController();
+    private boolean waitingForLayerChunks;
 
     /** 当前状态再次执行前先原地等几 tick，让数据包和界面稳定下来。 */
     private int deferTicks;
@@ -206,6 +210,7 @@ public class AutoRestockFeature implements ClientFeature {
             return;
         }
 
+        ContainerHighlightFeature.getInstance().setGatherTarget(currentContainerTarget);
         if (deferTicks > 0) { deferTicks--; return; }
         if (transferCooldown > 0) { transferCooldown--; }
 
@@ -258,7 +263,13 @@ public class AutoRestockFeature implements ClientFeature {
         resetRunState();
 
         // 已经在跑的建造不去打扰——玩家可能是自己用 #litematica 起的，现在才想加上续料。
-        if (!baritone.isBuilderActive() && !baritone.startLitematicaBuild(0)) {
+        if (Configs.Restocks.BUILD_LAYER_MODE.getOptionListValue() != BuildLayerMode.OFF) {
+            if (!layers.start()) {
+                layers.reset();
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.layer_invalid");
+                return;
+            }
+        } else if (!baritone.isBuilderActive() && !baritone.startLitematicaBuild(0)) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_failed");
             return;
         }
@@ -285,6 +296,8 @@ public class AutoRestockFeature implements ClientFeature {
 
     /** 清掉一轮运行积累的全部状态，重启时不会继承旧计数。 */
     private void resetRunState() {
+        layers.reset();
+        waitingForLayerChunks = false;
         deferTicks = 0;
         builderCancelled = false;
         containerTripDone = false;
@@ -311,6 +324,27 @@ public class AutoRestockFeature implements ClientFeature {
     // ---- Monitoring ----
 
     private void tickMonitoring(Minecraft mc) {
+        if (layers.isActive()) {
+            switch (layers.tick(mc)) {
+                case COMPLETE -> { stop("playercontrolpp.message.restock.build_finished"); return; }
+                case CHANGED -> { stop("playercontrolpp.message.restock.layer_changed"); return; }
+                case STOPPED -> { stop("playercontrolpp.message.restock.layer_build_stopped"); return; }
+                case START_FAILED -> { stop("playercontrolpp.message.restock.layer_start_failed"); return; }
+                case ADVANCED -> {
+                    MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.layer_next", layers.layerY());
+                    deferTicks = BUILD_SETTLE;
+                    return;
+                }
+                case UNLOADED -> {
+                    if (!waitingForLayerChunks) MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.layer_unloaded");
+                    waitingForLayerChunks = true;
+                    return;
+                }
+                default -> { waitingForLayerChunks = false; }
+            }
+            // builder已结束时仍需等世界扫描确认；绝不把进程终止本身当成这一层建好。
+            if (!baritone.isBuilderActive() || !layers.canAnalyze()) return;
+        }
         // 建造进程在 onLostControl() 里丢掉蓝图，而它打完「Done building」日志后自己就会调这个。
         // 所以「刚才在跑、现在不在」意味着蓝图建完了（或被别的东西取消了）——两种情况本功能都无事可做。
         // 早先在这里干等，才导致玩家必须再按一次热键。
@@ -400,6 +434,11 @@ public class AutoRestockFeature implements ClientFeature {
      */
     private boolean readMaterialList(Minecraft mc) {
         try {
+            if (layers.isActive()) {
+                materials.replaceWith(layers.materialNeeds(), Math.max(1,
+                        Configs.Restocks.RESTOCK_STACKS_PER_ITEM.getIntegerValue()), item -> looseCount(mc, item));
+                return true;
+            }
             if (litematica.getMaterialList() == null) return false;
 
             List<LitematicaIntegration.MaterialEntry> entries = litematica.getMaterialListEntries(mc.player);
@@ -757,7 +796,7 @@ public class AutoRestockFeature implements ClientFeature {
         containerQueue.clear();
         shulkerQueue.clear();
 
-        if (!baritone.startLitematicaBuild(0)) {
+        if (!(layers.isActive() ? layers.relaunch() : baritone.startLitematicaBuild(0))) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.build_failed");
             stop(null);
             return;

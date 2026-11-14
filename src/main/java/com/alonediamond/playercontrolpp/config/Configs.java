@@ -11,6 +11,7 @@ import fi.dy.masa.malilib.config.ConfigUtils;
 import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigHandler;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
+import fi.dy.masa.malilib.config.options.ConfigColor;
 import fi.dy.masa.malilib.config.options.ConfigHotkey;
 import fi.dy.masa.malilib.config.options.ConfigInteger;
 import fi.dy.masa.malilib.config.options.ConfigOptionList;
@@ -196,12 +197,13 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_BARITONE);
 
         /**
-         * 缓存里没有的材料要不要追溯原材料并合成；
-         * 启用前提是备货数据来源选了「跟随LitematList清单」且那边已上传清单。
+         * 缓存里没有的材料要不要追溯原材料并合成。
+         * 投影备货需选 LitematList 来源并上传清单；手工队列只需 LitematList 已加载。
+         * 世界搜索仅使用配置半径内 Baritone 已知的方块位置。
          */
         public static final ConfigOptionList RAW_MATERIAL_CRAFT_MODE = new ConfigOptionList(
                 "rawMaterialCraftMode", RawMaterialMode.DISABLED,
-                "Whether to trace and craft missing materials from their raw materials when ChestTracker has none.\nDisabled: skip the material, as before.\nCache Only: gather the raw materials from cached containers.\nWorld Search: also let Baritone mine/find them in the world.\nRequires LitematList as the material list source, with a list uploaded there.")
+                "Whether to trace and craft missing materials when ChestTracker has none.\nDisabled: skip the material.\nCache Only: gather raw materials from cached containers.\nWorld Search: also mine Baritone-known blocks within the configured finite radius; no known position does not prove absence.\nSchematic gathering requires LitematList as the source with an uploaded list. Manual queue tracing only requires LitematList to be loaded.")
                 .apply(KEY_BARITONE);
 
         /**
@@ -260,6 +262,18 @@ public class Configs implements IConfigHandler {
                 "How many ticks Baritone may mine without the target material increasing before the raw-material trace switches to another source or variant.")
                 .apply(KEY_BARITONE);
 
+        /** 世界挖掘只搜索玩家附近的方块，避免追着远处来源跑。 */
+        public static final ConfigInteger MINING_SEARCH_RADIUS = new ConfigInteger(
+                "miningSearchRadius", 64, 16, 256,
+                "Maximum distance in blocks for world mining targets during raw-material tracing.")
+                .apply(KEY_BARITONE);
+
+        /** 单个物品挖掘的总时限，换方块来源时不重置。 */
+        public static final ConfigInteger MINING_ATTEMPT_TICKS = new ConfigInteger(
+                "miningAttemptTicks", 1200, 100, 12000,
+                "Total mining time in ticks for one item, including all block variants.")
+                .apply(KEY_BARITONE);
+
         /** 模拟模式放置潜影盒时的搜索半径（以玩家为中心）。 */
         public static final ConfigInteger SHULKER_PLACE_RADIUS = new ConfigInteger(
                 "shulkerPlaceRadius", 3, 1, 5,
@@ -296,7 +310,22 @@ public class Configs implements IConfigHandler {
                 "Item IDs to ignore during auto-gathering. Edit via the GUI button or click to open the list editor.")
                 .apply(KEY_BARITONE);
 
-        /** 按清单、转移、潜影盒、追溯、合成站点、忽略项的顺序展示备货设置。 */
+        /** 自动备货当前容器或工作站的世界高亮；旧配置没有此项时默认开启。 */
+        public static final ConfigBoolean GATHER_TARGET_HIGHLIGHT = new ConfigBoolean(
+                "gatherTargetHighlight", true,
+                "Highlight the current auto-gather container or workstation in the world.")
+                .apply(KEY_BARITONE);
+
+        public static final ConfigColor GATHER_TARGET_COLOR = new ConfigColor(
+                "gatherTargetColor", "#00BFFF")
+                .apply(KEY_BARITONE);
+
+        public static final ConfigInteger GATHER_TARGET_OPACITY = new ConfigInteger(
+                "gatherTargetOpacity", 35, 0, 100,
+                "Opacity of the current auto-gather target highlight, from 0 to 100 percent.")
+                .apply(KEY_BARITONE);
+
+        /** 磁盘键集合；GUI 按备货与追溯合成分开展示。新增项只追加，避免改动既有存储。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 MATERIAL_LIST_SOURCE, CLICK_COOLDOWN, INTRA_CONTAINER_CLICK_DELAY, CONTAINER_CLOSE_DELAY,
                 SHULKER_BOX_PRIORITY_THRESHOLD, RECOGNIZE_MIXED_SHULKER_BOX,
@@ -304,7 +333,9 @@ public class Configs implements IConfigHandler {
                 SHULKER_PLACE_RADIUS, ALLOW_NUDGE_FOR_PLACEMENT,
                 RAW_MATERIAL_CRAFT_MODE, RAW_MATERIAL_MAX_DEPTH, MINING_STALL_TICKS,
                 CRAFT_STATION_SOURCE, CRAFTING_TABLE_POSITIONS, STONECUTTER_POSITIONS,
-                ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST);
+                ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST,
+                GATHER_TARGET_HIGHLIGHT, GATHER_TARGET_COLOR, GATHER_TARGET_OPACITY,
+                MINING_SEARCH_RADIUS, MINING_ATTEMPT_TICKS);
     }
 
     public static class CacheNearbySettings {
@@ -354,9 +385,21 @@ public class Configs implements IConfigHandler {
                 "Marked container positions for auto-restock. Each entry: dimension x y z [off] (e.g. minecraft:overworld 10 64 -20). A trailing 'off' disables that container without deleting it. Use the Mark Container hotkey to add/remove, sneak + the hotkey to enable/disable, or edit this list directly.")
                 .apply(KEY_BARITONE);
 
+        /** 分层推进的方向；关闭时保持现有整张投影建造行为。 */
+        public static final ConfigOptionList BUILD_LAYER_MODE = new ConfigOptionList(
+                "buildLayerMode", BuildLayerMode.OFF,
+                "Build only the current Y layer, then advance upward or downward after the layer is confirmed complete. Off keeps normal whole-schematic building. Unloaded chunks do not advance the layer.")
+                .apply(KEY_BARITONE);
+
+        /** 完成判据连续成立的等待 tick，避免短暂的投影/区块状态触发误推进。 */
+        public static final ConfigInteger BUILD_LAYER_STABLE_TICKS = new ConfigInteger(
+                "buildLayerStableTicks", 20, 5, 200,
+                "How many consecutive ticks the current Y layer must be complete before advancing. Unloaded chunks do not count.")
+                .apply(KEY_BARITONE);
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 RESTOCK_CONTAINER_SOURCE, RESTOCK_SHULKER_MODE, RESTOCK_STACKS_PER_ITEM, RESTOCK_CONTAINER_MAX_DISTANCE,
-                MARKED_CONTAINERS);
+                MARKED_CONTAINERS, BUILD_LAYER_MODE, BUILD_LAYER_STABLE_TICKS);
     }
 
     private static ImmutableList<String> withWaterBucket(List<String> ids) {

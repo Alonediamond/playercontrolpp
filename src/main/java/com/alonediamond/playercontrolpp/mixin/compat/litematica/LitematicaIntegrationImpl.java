@@ -13,6 +13,7 @@ import fi.dy.masa.litematica.materials.MaterialListUtils;
 import fi.dy.masa.litematica.schematic.LitematicaSchematic;
 import fi.dy.masa.litematica.schematic.placement.SchematicPlacement;
 import fi.dy.masa.litematica.schematic.placement.SchematicPlacementManager;
+import fi.dy.masa.litematica.schematic.placement.SubRegionPlacement.RequiredEnabled;
 import fi.dy.masa.litematica.selection.AreaSelection;
 import fi.dy.masa.litematica.selection.Box;
 import fi.dy.masa.litematica.selection.SelectionManager;
@@ -22,6 +23,7 @@ import fi.dy.masa.malilib.util.StringUtils;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -32,8 +34,10 @@ import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Unique;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.OptionalInt;
 
 /**
  * {@link LitematicaIntegration} 的直连实现，由 MixinPlugin 在 Litematica 在场时注入，
@@ -99,6 +103,74 @@ public abstract class LitematicaIntegrationImpl {
             result.add(new PlacementBounds(origin, size.getX(), size.getY(), size.getZ()));
         }
         return result;
+    }
+
+    @Overwrite(remap = false)
+    public List<SelectionBounds> getPlacementRegionBounds(int schematicIndex) {
+        try {
+            List<SchematicPlacement> placements = allPlacements();
+            if (schematicIndex < 0 || schematicIndex >= placements.size()) return List.of();
+            SchematicPlacement placement = placements.get(schematicIndex);
+            if (!placement.isEnabled()) return List.of();
+            List<SelectionBounds> result = new ArrayList<>();
+            for (Box box : placement.getSubRegionBoxes(RequiredEnabled.PLACEMENT_ENABLED).values()) {
+                BlockPos first = box.getPos1();
+                BlockPos second = box.getPos2();
+                if (first == null || second == null) continue;
+                result.add(new SelectionBounds(
+                        new BlockPos(Math.min(first.getX(), second.getX()), Math.min(first.getY(), second.getY()),
+                                Math.min(first.getZ(), second.getZ())),
+                        new BlockPos(Math.max(first.getX(), second.getX()), Math.max(first.getY(), second.getY()),
+                                Math.max(first.getZ(), second.getZ()))));
+            }
+            result.sort(Comparator.comparingInt((SelectionBounds box) -> box.min().getX())
+                    .thenComparingInt(box -> box.min().getY()).thenComparingInt(box -> box.min().getZ())
+                    .thenComparingInt(box -> box.max().getX()).thenComparingInt(box -> box.max().getY())
+                    .thenComparingInt(box -> box.max().getZ()));
+            return List.copyOf(result);
+        } catch (Throwable e) {
+            Playercontrolpp.LOGGER.debug("Unable to read Litematica placement regions", e);
+            return List.of();
+        }
+    }
+
+    @Overwrite(remap = false)
+    public boolean isSchematicChunkLoaded(BlockPos pos) {
+        try {
+            var world = SchematicWorldHandler.getSchematicWorld();
+            return world != null && world.hasChunkAt(pos);
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    @Overwrite(remap = false)
+    public OptionalInt getSingleLayerY() {
+        try {
+            var range = DataManager.getRenderLayerRange();
+            if (range == null || range.getLayerMode() != LayerMode.SINGLE_LAYER
+                    || range.getAxis() != Direction.Axis.Y) {
+                return OptionalInt.empty();
+            }
+            //#if MC >= 260200
+            if (range.shouldFollowPlayer()) return OptionalInt.empty();
+            //#endif
+            return OptionalInt.of(range.getLayerSingle());
+        } catch (Throwable e) {
+            return OptionalInt.empty();
+        }
+    }
+
+    @Overwrite(remap = false)
+    public boolean setSingleLayerY(int worldY) {
+        try {
+            if (getSingleLayerY().isEmpty()) return false;
+            var range = DataManager.getRenderLayerRange();
+            range.setLayerSingle(worldY);
+            return range.getLayerSingle() == worldY;
+        } catch (Throwable e) {
+            return false;
+        }
     }
 
     /**

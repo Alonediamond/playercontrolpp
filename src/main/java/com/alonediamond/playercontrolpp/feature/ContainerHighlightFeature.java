@@ -12,13 +12,13 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * 在世界里高亮方块，用来指出"这些容器没能缓存成功"。
+ * 在世界里高亮失败的缓存容器和自动备货当前目标。
  *
  * <p>本类只管"哪些方块、亮多久"；怎么画在
  * {@link WorldBoxRenderer}（模组自己的世界渲染器，不经过 malilib）。
  * 渲染入口在 {@code MixinLevelRenderer}，原因见那个类。
  *
- * <p>高亮是"一次性"的：持续指定 tick 数后自动消失。
+ * <p>失败容器高亮按指定 tick 数自动消失；备货目标由业务每 tick 续期。
  */
 public final class ContainerHighlightFeature implements ClientFeature {
     /** 橙色半透明框，保留容器贴图的可见度。 */
@@ -30,6 +30,9 @@ public final class ContainerHighlightFeature implements ClientFeature {
     private final Set<BlockPos> positions = new LinkedHashSet<>();
     /** 剩余显示 tick。 */
     private int remainingTicks;
+    /** 备货方每 tick 续期，停机时即使漏掉显式清理也不会留下旧目标。 */
+    private BlockPos gatherTarget;
+    private int gatherTargetTicks;
 
     private ContainerHighlightFeature() {}
 
@@ -50,10 +53,20 @@ public final class ContainerHighlightFeature implements ClientFeature {
         remainingTicks = ticks;
     }
 
-    /** 清掉当前高亮（重新运行缓存任务、切换世界时用）。 */
+    /** 清掉失败容器高亮（重新运行缓存任务时用）。 */
     public void clear() {
         positions.clear();
         remainingTicks = 0;
+    }
+
+    /** 当前容器或工作站；备货运行时每 tick 调用，传 null 清除。 */
+    public void setGatherTarget(BlockPos pos) {
+        gatherTarget = pos == null ? null : pos.immutable();
+        gatherTargetTicks = pos == null ? 0 : 2;
+    }
+
+    public void clearGatherTarget() {
+        setGatherTarget(null);
     }
 
     /**
@@ -64,20 +77,31 @@ public final class ContainerHighlightFeature implements ClientFeature {
      */
     @Override
     public void onClientTick(Minecraft mc) {
-        if (remainingTicks <= 0) return;
-        if (--remainingTicks <= 0) positions.clear();
+        if (remainingTicks > 0 && --remainingTicks <= 0) positions.clear();
+        if (gatherTargetTicks > 0 && --gatherTargetTicks <= 0) gatherTarget = null;
     }
 
     @Override
     public void onWorldChange() {
         clear();
+        clearGatherTarget();
     }
 
     /** 由 {@code MixinLevelRenderer} 在渲染入口末尾调用。 */
     public void renderWorld() {
-        if (positions.isEmpty() || remainingTicks <= 0) return;
-        // 拷一份再遍历：渲染期间高亮列表可能被 tick 清空（换维度、超时）。
-        WorldBoxRenderer.renderBoxes(new ArrayList<>(positions), STYLE);
+        if (!positions.isEmpty() && remainingTicks > 0) {
+            // 拷一份再遍历：渲染期间高亮列表可能被 tick 清空（换维度、超时）。
+            WorldBoxRenderer.renderBoxes(new ArrayList<>(positions), STYLE);
+        }
+        if (gatherTarget != null && gatherTargetTicks > 0
+                && Configs.BaritoneSettings.GATHER_TARGET_HIGHLIGHT.getBooleanValue()) {
+            int color = Configs.BaritoneSettings.GATHER_TARGET_COLOR.getIntegerValue();
+            float opacity = Configs.BaritoneSettings.GATHER_TARGET_OPACITY.getIntegerValue() / 100.0F;
+            if (opacity <= 0.0F) return;
+            BoxStyle style = new BoxStyle(((color >> 16) & 0xFF) / 255.0F,
+                    ((color >> 8) & 0xFF) / 255.0F, (color & 0xFF) / 255.0F, opacity);
+            WorldBoxRenderer.renderBoxes(java.util.List.of(gatherTarget), style);
+        }
     }
 
     /** 配置项读取集中在这里。 */

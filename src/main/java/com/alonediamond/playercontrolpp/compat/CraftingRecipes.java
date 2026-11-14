@@ -46,14 +46,21 @@ public final class CraftingRecipes {
         private final List<List<ItemStack>> grid;
         /** shaped 图案宽度；shapeless / 未知按 3 处理（位置不影响匹配）。 */
         private final int width;
+        private final int outputCount;
 
-        Plan(Object handle, List<List<ItemStack>> grid, int width) {
+        public Plan(Object handle, List<List<ItemStack>> grid, int width, int outputCount) {
             this.handle = handle;
             this.grid = grid;
             this.width = Math.max(1, width);
+            this.outputCount = Math.max(1, outputCount);
         }
 
         public int width() { return width; }
+        public int outputCount() { return outputCount; }
+        /** 固定本批每格的变种；摆料和采集必须使用同一份选择。 */
+        public Plan select(List<List<ItemStack>> selected) {
+            return new Plan(handle, List.copyOf(selected), width, outputCount);
+        }
         public List<List<ItemStack>> ingredients() { return grid; }
         public List<ItemStack> ingredientsAt(int index) { return grid.get(index); }
 
@@ -70,12 +77,17 @@ public final class CraftingRecipes {
      * shaped / shapeless，避免把熔炉、切石机的条目当成工作台配方。
      */
     public static Plan find(Minecraft mc, Item item) {
+        List<Plan> plans = findAll(mc, item);
+        return plans.isEmpty() ? null : plans.get(0);
+    }
+
+    public static List<Plan> findAll(Minecraft mc, Item item) {
+        List<Plan> plans = new ArrayList<>();
         try {
             //#if MC >= 12102
             ContextMap contextMap = SlotDisplayContext.fromLevel(mc.level);
             for (RecipeCollection collection : mc.player.getRecipeBook().getCollections()) {
                 for (RecipeDisplayEntry entry : collection.getRecipes()) {
-                    if (entry.craftingRequirements().isEmpty()) continue;
                     RecipeDisplay display = entry.display();
                     if (!(display instanceof ShapedCraftingRecipeDisplay)
                             && !(display instanceof ShapelessCraftingRecipeDisplay)) {
@@ -84,7 +96,7 @@ public final class CraftingRecipes {
                     List<ItemStack> results = entry.resultItems(contextMap);
                     if (results.isEmpty() || !ItemUtil.is(results.get(0), item)) continue;
                     Plan plan = planFromDisplay(entry, contextMap);
-                    if (plan != null) return plan;
+                    if (plan != null) plans.add(plan);
                 }
             }
             //#else
@@ -99,14 +111,14 @@ public final class CraftingRecipes {
             //$$             grid.add(List.of(ingredient.getItems()));
             //$$         }
             //$$         int width = crafting instanceof ShapedRecipe shaped ? shaped.getWidth() : CRAFT_GRID_WIDTH;
-            //$$         return new Plan(holder, grid, width);
+            //$$         plans.add(new Plan(holder, grid, width, crafting.getResultItem(mc.level.registryAccess()).getCount()));
             //$$     }
             //$$ }
             //#endif
         } catch (Throwable e) {
             Playercontrolpp.LOGGER.debug("Unable to look up a crafting recipe for {}", item, e);
         }
-        return null;
+        return plans;
     }
 
     //#if MC >= 12102
@@ -129,7 +141,8 @@ public final class CraftingRecipes {
         for (SlotDisplay slot : layout) {
             grid.add(slot.resolveForStacks(contextMap));
         }
-        return new Plan(entry, grid, width);
+        List<ItemStack> results = entry.resultItems(contextMap);
+        return new Plan(entry, grid, width, results.isEmpty() ? 1 : results.get(0).getCount());
     }
 
     /** 让服务端按配方把材料摆进格子（1.21.2+ 用配方展示 id）。 */

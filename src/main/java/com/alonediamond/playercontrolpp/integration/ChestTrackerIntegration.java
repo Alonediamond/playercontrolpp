@@ -47,6 +47,11 @@ public class ChestTrackerIntegration {
         return Collections.emptyList();
     }
 
+    /** 选择配方用的快照；缓存只作成本估计，真正取料仍重新开箱核对。 */
+    public record Stock(Item item, int count, BlockPos position) {}
+
+    public List<Stock> stockSnapshot(BlockPos origin, int range, boolean includeBoxes) { return List.of(); }
+
     /** 把一个已同步的容器菜单直接写进箱子追踪当前加载的缓存库，不另建缓存库。 */
     public boolean cacheContainer(
             Level level,

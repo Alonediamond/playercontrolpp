@@ -18,6 +18,9 @@ import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueue;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
@@ -34,6 +37,9 @@ public final class AutoMaterialGatherer implements ClientFeature {
     }
     private State state = State.IDLE;
     private boolean active;
+    private boolean manualRun;
+    private final ManualMaterialQueue manualQueue =
+            ManualMaterialQueue.getInstance();
     private int currentItemIndex;
     private int requiredStorageStartCount = -1;
     /**
@@ -92,13 +98,20 @@ public final class AutoMaterialGatherer implements ClientFeature {
         }
     }
 
-    private boolean start() {
+    private boolean start() { return start(false, false); }
+
+    public boolean startManualQueue() { return start(true, false); }
+    public boolean resumeManualQueue() { return start(true, true); }
+
+    private boolean start(boolean manual, boolean resume) {
         ctx.client = Minecraft.getInstance();
         if (ctx.client.player == null || ctx.client.level == null) return false;
 
-        if (!areAllThreeModsPresent() || !LitematicaIntegration.getInstance().isLoaded()
+        if (active) return false;
+        if ((!manual && !LitematicaIntegration.getInstance().isLoaded())
                 || !BaritoneIntegration.getInstance().isLoaded() || !ChestTrackerIntegration.getInstance().isLoaded()) {
-            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.mods_missing");
+            MessageUtil.sendActionBar(ctx.client, manual ? "playercontrolpp.message.baritone.manual_mods_missing"
+                    : "playercontrolpp.message.baritone.mods_missing");
             return false;
         }
 
@@ -112,8 +125,14 @@ public final class AutoMaterialGatherer implements ClientFeature {
         containerOpener.closeAnyContainer(ctx.client);
 
         resetRunState();
-        active = true;
         ctx.reset();
+        manualRun = manual;
+        if (manual && !(resume ? manualQueue.resume(ctx::countHeld) : manualQueue.start(ctx::countHeld))) {
+            MessageUtil.sendActionBar(ctx.client, manualQueue.state() == ManualMaterialQueue.State.PAUSED
+                    ? "playercontrolpp.message.baritone.manual_paused" : "playercontrolpp.message.baritone.manual_empty");
+            return false;
+        }
+        active = true;
         state = State.IDLE;
 
         MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.started");
@@ -121,6 +140,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
     }
 
     public void stop() {
+        if (manualRun) manualQueue.stop();
         setState(State.STOPPED);
         MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.stopped");
     }
@@ -128,6 +148,15 @@ public final class AutoMaterialGatherer implements ClientFeature {
     @Override
     public void onClientTick(Minecraft mc) {
         ctx.client = mc;
+        if (active) {
+            BlockPos target = rawMaterialTask.targetPosition();
+            if (target == null && !rawMaterialTask.ownsFlow()) {
+                if (state == State.PATHING && ctx.currentPosIndex < ctx.foundPositions.size())
+                    target = ctx.foundPositions.get(ctx.currentPosIndex);
+                else target = ctx.currentContainerTarget;
+            }
+            ContainerHighlightFeature.getInstance().setGatherTarget(target);
+        }
         try {
             tickTask();
         } catch (Exception e) {
@@ -138,6 +167,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     @Override
     public void onWorldChange() {
+        manualQueue.stop();
         if (active) {
             stop();
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.world_change");
@@ -153,6 +183,14 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     private void analyze() {
         try {
+            if (manualRun) {
+                var batch = manualQueue.activeBatch();
+                if (batch == null) { setState(State.STOPPED); return; }
+                ctx.requirements.replaceWith(batch.targets());
+                currentItemIndex = 0;
+                if (!startInitialStorage()) setState(State.NEXT_ITEM);
+                return;
+            }
             var result = materialReader.read(ctx.client.player);
             if (result.error() != null) {
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone." + result.error());
@@ -188,6 +226,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
         }
 
         if (currentItemIndex >= ctx.requirements.entries().size()) {
+            if (manualRun && completeManualBatch()) return;
             setState(State.COMPLETED);
             return;
         }
@@ -206,6 +245,26 @@ public final class AutoMaterialGatherer implements ClientFeature {
         }
 
         setState(State.SEARCHING);
+    }
+
+    /** 只有整批满足才推进；失败批次保留原目标，供玩家补充缓存后恢复。 */
+    private boolean completeManualBatch() {
+        boolean missing = ctx.requirements.entries().stream().anyMatch(entry -> ctx.countHeld(entry.item) < entry.neededCount);
+        if (missing) {
+            manualQueue.failActiveBatch("incomplete");
+            setState(State.STOPPED, "playercontrolpp.message.baritone.manual_paused");
+            return true;
+        }
+        manualQueue.completeActiveBatch(ctx::countHeld);
+        if (manualQueue.state() == ManualMaterialQueue.State.PAUSED) {
+            setState(State.STOPPED, "playercontrolpp.message.baritone.manual_paused");
+            return true;
+        }
+        if (manualQueue.activeBatch() == null) return false;
+        resetRunState();
+        ctx.reset();
+        setState(State.ANALYZING);
+        return true;
     }
 
     /** 关闭容器后重新数一遍，然后决定推进还是换下一个位置。 */
@@ -289,6 +348,9 @@ public final class AutoMaterialGatherer implements ClientFeature {
                 ctx.adjacentTryIndex = 0;
                 break;
             case STOPPED:
+                if (manualRun && manualQueue.state() ==
+                        ManualMaterialQueue.State.RUNNING)
+                    manualQueue.failActiveBatch(reasonKey);
                 if (reasonKey != null) MessageUtil.sendActionBar(ctx.client, reasonKey);
                 active = false;
                 stopEverythingAndTasks();
@@ -308,6 +370,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     /** 整轮备货结束时的收尾：额外取消追溯任务（它可能正开着合成界面或让 Baritone 挖着矿）。 */
     private void stopEverythingAndTasks() {
+        ContainerHighlightFeature.getInstance().clearGatherTarget();
         stopEverything();
         rawMaterialTask.cancel(ctx.client);
         shulkerAccess.cancel(ctx.client);
@@ -572,6 +635,8 @@ public final class AutoMaterialGatherer implements ClientFeature {
         if (rawMaterialPrereqChecked) return rawMaterialPrereqOk;
         rawMaterialPrereqChecked = true;
 
+        if (!LitematListIntegration.getInstance().isLoaded()) return false;
+        if (manualRun) { rawMaterialPrereqOk = true; return true; }
         if (Configs.BaritoneSettings.MATERIAL_LIST_SOURCE.getOptionListValue() != MaterialSource.LITEMATLIST) {
             MessageUtil.sendActionBar(ctx.client,
                     "playercontrolpp.message.baritone.raw_material_needs_source");

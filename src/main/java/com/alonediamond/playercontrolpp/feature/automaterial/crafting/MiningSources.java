@@ -4,6 +4,9 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import net.minecraft.client.Minecraft;
+import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
+import com.alonediamond.playercontrolpp.config.Configs;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -47,13 +50,25 @@ final class MiningSources {
         return !blocksFor(item).isEmpty();
     }
 
+    /** 不推断维度生成规则；只在当前维度有限范围内确有方块证据时尝试。 */
+    static List<String> availableBlocks(Minecraft mc, Item item) {
+        if (mc.level == null || mc.player == null) return List.of();
+        int radius = Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue();
+        var known = BaritoneIntegration.getInstance().findKnownMiningSources(blocksFor(item), radius);
+        return blocksFor(item).stream().filter(block -> !known.getOrDefault(block, List.of()).isEmpty())
+                .sorted(java.util.Comparator.comparingDouble(block -> known.get(block).get(0)
+                        .distSqr(mc.player.blockPosition()))).toList();
+    }
+
+    static List<String> allBlockIds() { return SOURCES.values().stream().flatMap(List::stream).distinct().toList(); }
+
     private static Map<Item, List<String>> sources() {
         Map<Item, List<String>> map = new LinkedHashMap<>();
 
         // ---- 矿石 → 粗矿 / 宝石（正常挖掘直接掉落，不需要烧炼）----
         map.put(Items.RAW_IRON, List.of("minecraft:iron_ore", "minecraft:deepslate_iron_ore"));
         map.put(Items.RAW_GOLD, List.of(
-                "minecraft:gold_ore", "minecraft:deepslate_gold_ore", "minecraft:nether_gold_ore"));
+                "minecraft:gold_ore", "minecraft:deepslate_gold_ore"));
         map.put(Items.RAW_COPPER, List.of(
                 "minecraft:copper_ore", "minecraft:deepslate_copper_ore"));
         map.put(Items.COAL, List.of("minecraft:coal_ore", "minecraft:deepslate_coal_ore"));
@@ -69,7 +84,6 @@ final class MiningSources {
         map.put(Items.AMETHYST_SHARD, List.of("minecraft:amethyst_cluster"));
         map.put(Items.GLOWSTONE_DUST, List.of("minecraft:glowstone"));
         map.put(Items.STRING, List.of("minecraft:cobweb"));
-        map.put(Items.BONE_MEAL, List.of("minecraft:bone_block"));
         map.put(Items.COBBLESTONE, List.of("minecraft:stone"));
         map.put(Items.COBBLED_DEEPSLATE, List.of("minecraft:deepslate"));
         map.put(Items.DIRT, List.of("minecraft:dirt", "minecraft:grass_block"));
@@ -97,7 +111,7 @@ final class MiningSources {
                 "minecraft:moss_block", "minecraft:mud", "minecraft:packed_mud",
                 "minecraft:obsidian", "minecraft:crying_obsidian",
                 "minecraft:prismarine", "minecraft:dark_prismarine", "minecraft:sea_lantern",
-                "minecraft:terracotta", "minecraft:snow_block", "minecraft:ice")) {
+                "minecraft:terracotta")) {
             Item item = item(id);
             if (item != null) map.put(item, single(id));
         }

@@ -2,6 +2,9 @@ package com.alonediamond.playercontrolpp.integration;
 
 import net.minecraft.core.BlockPos;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * Baritone 联动的默认实现（stub）。真正的方法体在
  * {@code mixin/compat/baritone/BaritoneIntegrationImpl} 里，机制同 {@link LitematicaIntegration}。
@@ -34,6 +37,15 @@ public class BaritoneIntegration {
 
     /** 通过 BuilderProcess 启动一次 Litematica 蓝图建造，等价于输入 {@code #litematica}。 */
     public boolean startLitematicaBuild(int schematicIndex) { return false; }
+
+    /** 从投影世界截取指定 Y 层，建造目标严格限于这一层的已启用子区域。 */
+    public boolean startLitematicaLayerBuild(int schematicIndex, int worldY) { return false; }
+
+    /** 当前维度缓存及已加载区块内的来源位置；空结果只表示没有已知来源。 */
+    public List<BlockPos> findKnownMiningPositions(String blockId, int radius) { return List.of(); }
+
+    /** 一次扫描多个来源，供配方估价复用；每个来源最多返回 64 个最近位置。 */
+    public Map<String, List<BlockPos>> findKnownMiningSources(List<String> blockIds, int radius) { return Map.of(); }
 
     /** 清掉 BuilderProcess 的暂停标志，与 Baritone 的 {@code resume} 命令等效。 */
     public boolean resumeBuilder() { return false; }

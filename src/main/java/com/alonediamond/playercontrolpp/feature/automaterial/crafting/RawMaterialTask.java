@@ -17,6 +17,7 @@ import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Inventory;
@@ -99,11 +100,16 @@ public final class RawMaterialTask {
     private int mineStallTicks;
     /** 当前挖的是 {@link MiningSources#blocksFor} 返回列表里的第几个方块。 */
     private int mineSourceIndex;
+    private List<String> mineSources = List.of();
+    private BlockPos mineOrigin;
+    private int mineAttemptTicks;
     /** 正在从盒里取出的那个物品；只用于让日志/提示说得清楚。 */
     private Item unpackItem;
 
     /** 本次运行是否已经提示过"没有可用工作站"，同一条提示不刷屏。 */
     private boolean craftingWarned;
+
+    public BlockPos targetPosition() { return this.crafting.targetPosition(); }
 
     public boolean isActive() {
         return this.stage != Stage.IDLE;
@@ -146,7 +152,7 @@ public final class RawMaterialTask {
 
         if (root.children().isEmpty()) {
             // 溯源白名单里的材料本身没有配方（铁锭、木棍……）：只能去世界里挖。
-            if (MiningSources.blocksFor(item).isEmpty()) {
+            if (MiningSources.availableBlocks(ctx.client, item).isEmpty()) {
                 // 挖不到、也没配方可做（平滑石、玻璃、需要熔炼的矿石……）：明确告诉玩家，
                 // 而不是静默跳过。这样"为什么这个材料一直拿不到"有一个直接答案。
                 MessageUtil.sendActionBar(ctx.client,
@@ -256,32 +262,89 @@ public final class RawMaterialTask {
             return;
         }
 
-        List<RawNode> children = frame.node.children();
-        while (frame.nextChild < children.size()) {
-            RawNode childNode = children.get(frame.nextChild);
-            Item childItem = resolveItem(childNode.itemId());
-            if (childItem == null) {
-                frame.nextChild++;
-                continue;
+        if (frame.warmingRecipe && frame.nextChild > 0) {
+            RecipeAllocation unlocked = new RecipePlanner(ctx, item -> reservedFor(ctx, frame, item))
+                    .choose(frame.item, frame.batchTarget - ctx.countHeld(frame.item));
+            if (unlocked != null) {
+                frame.allocation = unlocked;
+                frame.ingredients = new ArrayList<>(unlocked.ingredients().entrySet());
+                frame.nextChild = 0;
+                frame.warmingRecipe = false;
+                frame.recipeWarmupComplete = true;
             }
-
+        }
+        if (frame.ingredients == null) {
+            frame.batchTarget = Math.min(frame.targetTotal, RecipeAllocation.target(ctx.countHeld(frame.item), frame.need));
+            if ("stonecutting".equals(frame.node.recipeType())) {
+                frame.ingredients = treeIngredients(frame);
+            } else {
+                RecipePlanner planner = new RecipePlanner(ctx, item -> reservedFor(ctx, frame, item));
+                frame.allocation = planner.choose(frame.item, frame.batchTarget - ctx.countHeld(frame.item));
+                if (frame.allocation != null) {
+                    frame.ingredients = new ArrayList<>(frame.allocation.ingredients().entrySet());
+                    log("batch {} target={} crafts={} inputs={} cost={}", name(frame.item), frame.batchTarget,
+                            frame.allocation.crafts(), frame.allocation.ingredients(), frame.allocation.cost());
+                }
+                else if (!frame.recipeWarmupComplete) {
+                    // 客户端配方书可能尚未解锁。先按树取料促成解锁，再重新读真实图案，绝不猜格子合成。
+                    frame.warmingRecipe = true;
+                    frame.ingredients = treeIngredients(frame);
+                    // 先拿当前可获得的材料触发解锁，避免在默认木材缺货时挡住红石等解锁材料。
+                    frame.ingredients.sort(Comparator.comparingDouble(entry ->
+                            planner.ingredientCost(entry.getKey(), entry.getValue())));
+                } else {
+                    if (++frame.recipeWaitTicks < 40) return;
+                    failChain(ctx, tsm, frame.item);
+                    return;
+                }
+            }
+        }
+        while (frame.nextChild < frame.ingredients.size()) {
+            var ingredient = frame.ingredients.get(frame.nextChild);
+            Item childItem = ingredient.getKey();
+            int childNeed = ingredient.getValue();
             remember(ctx, childItem);
-
-            int childNeed = RawMaterialPlan.scaleCount(childNode.count(), frame.need, frame.node.count());
-            // 可动用富余 = 持有量 − 这个物品自己要留给清单的量；合成只能吃富余。
-            int surplus = ctx.countHeld(childItem) - ctx.targetFor(childItem);
-            if (surplus >= childNeed) {
-                frame.nextChild++;
-                continue;
+            int target = RecipeAllocation.target(reservedFor(ctx, frame, childItem), childNeed);
+            if (ctx.countHeld(childItem) >= target) { frame.nextChild++; continue; }
+            RawNode childNode = null;
+            for (RawNode child : frame.node.children()) {
+                if (child.itemId().equals(name(childItem))) { childNode = child; break; }
             }
-
+            if (childNode == null) childNode = litematlist.getRawMaterialTree(childItem, childNeed, resolveDepth());
             dispatchGather(ctx, tsm, childItem, childNode, childNeed, false);
             return;
         }
-
+        // 子帧可能消耗了共同原料，开站前重新检查全部约束。
+        for (var ingredient : frame.ingredients) {
+            if (ctx.countHeld(ingredient.getKey()) < RecipeAllocation.target(
+                    reservedFor(ctx, frame, ingredient.getKey()), ingredient.getValue())) {
+                frame.nextChild = 0;
+                return;
+            }
+        }
+        if (frame.warmingRecipe) {
+            frame.warmingRecipe = false;
+            frame.recipeWarmupComplete = true;
+            frame.ingredients = null;
+            frame.nextChild = 0;
+            return;
+        }
         startCraft(ctx, tsm, frame);
     }
 
+    private static List<Map.Entry<Item, Integer>> treeIngredients(Frame frame) {
+        Map<Item, Integer> inputs = new LinkedHashMap<>();
+        for (RawNode child : frame.node.children()) {
+            Item item = resolveItem(child.itemId());
+            if (item != null) inputs.merge(item,
+                    RawMaterialPlan.scaleCount(child.count(), frame.need, frame.node.count()), RecipeAllocation::target);
+        }
+        return new ArrayList<>(inputs.entrySet());
+    }
+
+    private static int reservedFor(GatherContext ctx, Frame frame, Item item) {
+        return RawMaterialPlan.reservedFor(frame, item, ctx.targetFor(item));
+    }
     private void dispatchGather(GatherContext ctx, AutoMaterialGatherer tsm, Item item,
                                 RawNode node, int need, boolean isRoot) {
         remember(ctx, item);
@@ -289,7 +352,8 @@ public final class RawMaterialTask {
         this.dispatchedNode = node;
         this.dispatchedNeed = need;
         this.dispatchedIsRoot = isRoot;
-        this.dispatchedTarget = absoluteTarget(ctx, item, need, isRoot);
+        this.dispatchedTarget = isRoot ? absoluteTarget(ctx, item, need, true)
+                : RecipeAllocation.target(reservedFor(ctx, this.plan.current(), item), need);
         this.stage = Stage.DISPATCHED;
 
         ctx.setTarget(item, this.dispatchedTarget);
@@ -312,11 +376,11 @@ public final class RawMaterialTask {
             return;
         }
         // 只做"这一批"：到 held + need 就收手；targetTotal 是绝对终点（含清单预留量），封顶。
-        int target = Math.min(frame.targetTotal, held + frame.need);
+        int target = frame.batchTarget;
         // 合成消耗的是散装材料。子材料有可能在背包满时被自动存进了潜影盒，
         // 这时候先开盒把它们取出来，否则服务端摆料会因为"物品栏里没有"而失败。
         BoxedIngredient boxed = findBoxedIngredient(ctx, frame);
-        if (boxed != null && frame.unpackAttempts < MAX_UNPACKS_PER_FRAME) {
+        if (boxed != null && frame.unpackAttempts < Math.max(MAX_UNPACKS_PER_FRAME, frame.ingredients.size() * 2)) {
             frame.unpackAttempts++;
             if (requestUnpack(ctx, boxed)) {
                 this.unpackItem = boxed.item;
@@ -325,7 +389,8 @@ public final class RawMaterialTask {
             }
         }
 
-        if (this.crafting.start(ctx.client, frame.item, target, frame.node.recipeType(), input)) {
+        if (this.crafting.start(ctx.client, frame.item, target, frame.node.recipeType(), input,
+                frame.allocation == null ? null : frame.allocation.recipe(), () -> ctx.countHeld(frame.item))) {
             this.stage = Stage.CRAFT;
             MessageUtil.sendActionBar(ctx.client,
                     "playercontrolpp.message.baritone.raw_material_crafting", name(frame.item));
@@ -341,20 +406,24 @@ public final class RawMaterialTask {
                             : "playercontrolpp.message.baritone.raw_material_no_recipe",
                     name(frame.item));
         }
-        popFrame(ctx, tsm);
+        failChain(ctx, tsm, frame.item);
     }
 
     private void craftTick(GatherContext ctx, AutoMaterialGatherer tsm) {
         switch (this.crafting.tick(ctx.client)) {
             case ACTIVE -> { }
-            case DONE -> popFrame(ctx, tsm);
+            case DONE -> {
+                Frame frame = this.plan.current();
+                if (frame != null && ctx.countHeld(frame.item) >= frame.batchTarget) popFrame(ctx, tsm);
+                else failChain(ctx, tsm, frame == null ? rootItem : frame.item);
+            }
             case FAILED -> {
                 Frame frame = this.plan.current();
                 MessageUtil.sendActionBar(ctx.client,
                         "playercontrolpp.message.baritone.raw_material_craft_failed",
                         name(frame != null ? frame.item : ctx.targetItem()));
                 this.crafting.cancel(ctx.client);
-                popFrame(ctx, tsm);
+                failChain(ctx, tsm, frame == null ? rootItem : frame.item);
             }
             case INVENTORY_FULL -> {
                 // 界面先关掉，再把背包满交给主状态机（存盒 / 停机提示）。
@@ -379,10 +448,9 @@ public final class RawMaterialTask {
      */
     private static BoxedIngredient findBoxedIngredient(GatherContext ctx, Frame frame) {
         if (ctx.client.player == null) return null;
-        for (RawNode child : frame.node.children()) {
-            Item item = resolveItem(child.itemId());
-            if (item == null) continue;
-            int need = RawMaterialPlan.scaleCount(child.count(), frame.need, frame.node.count());
+        for (var child : frame.ingredients) {
+            Item item = child.getKey();
+            int need = child.getValue();
             if (need <= 0) continue;
             int loose = ItemUtil.countLoose(ctx.client.player, item);
             if (loose < need && ctx.countHeld(item) >= need) {
@@ -395,12 +463,11 @@ public final class RawMaterialTask {
     /**
      * 找背包里装着该材料的潜影盒，交给取盒子状态机把材料取出来（不归还，盒子本来就在背包里）。
      *
-     * <p>取料目标写"散装要凑到 {@code 清单预留量 + 这一层要用的量}"——合成消耗的是散装材料，
-     * 盒内剩下的那些不算数。
+     * <p>只需把本批消耗量取成散装；预留可继续放在自己的盒内，总持有量在开站前已校验。
      */
     private boolean requestUnpack(GatherContext ctx, BoxedIngredient boxed) {
         if (ctx.client.player == null) return false;
-        int desiredLoose = ctx.targetFor(boxed.item()) + boxed.need();
+        int desiredLoose = boxed.need();
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             ItemStack stack = ctx.client.player.getInventory().getItem(i);
             if (!ItemUtil.isShulkerBox(stack) || !ItemUtil.containsInside(stack, boxed.item())) continue;
@@ -418,7 +485,8 @@ public final class RawMaterialTask {
     }
 
     private void popFrame(GatherContext ctx, AutoMaterialGatherer tsm) {
-        if (plan.finishFrame()) {
+        Frame frame = plan.current();
+        if (plan.finishFrame(frame != null && ctx.countHeld(frame.item) >= frame.targetTotal)) {
             finish(ctx, tsm);
             return;
         }
@@ -460,7 +528,7 @@ public final class RawMaterialTask {
      */
     private static int absoluteTarget(GatherContext ctx, Item item, int need, boolean isRoot) {
         int reserved = ctx.targetFor(item);
-        return isRoot ? Math.max(reserved, need) : reserved + need;
+        return isRoot ? Math.max(reserved, need) : RecipeAllocation.target(reserved, need);
     }
 
     /** 整条链做不下去了：跳过顶层物品，并记下来免得反复重试。 */
@@ -504,7 +572,7 @@ public final class RawMaterialTask {
         boolean isRoot = this.dispatchedIsRoot;
         this.dispatchedItem = null;
 
-        if (allowMine && canMineHere() && MiningSources.isNaturallyObtainable(item)) {
+        if (allowMine && canMineHere() && !MiningSources.availableBlocks(ctx.client, item).isEmpty()) {
             startMining(ctx, tsm, item, this.dispatchedNeed, node, isRoot);
             return;
         }
@@ -517,8 +585,14 @@ public final class RawMaterialTask {
             }
             // 子材料也一组一组地做：这一批要的量同样按堆叠上限切段，每段自己凑料、自己合成，
             // 最后一段弹出时才把父帧的这个子材料算作到手。
-            int batches = plan.pushBatches(item, node, this.dispatchedNeed,
-                    absoluteTarget(ctx, item, this.dispatchedNeed, false), parent);
+            int remaining = RawMaterialPlan.missingToProduce(this.dispatchedTarget, ctx.countHeld(item));
+            if (remaining == 0) { parent.nextChild++; this.stage = Stage.GATHER; return; }
+            int depth = 0;
+            for (Frame ancestor = parent; ancestor != null; ancestor = ancestor.parent) {
+                if (ancestor.item == item) { failChain(ctx, tsm, item); return; }
+                if (++depth >= resolveDepth()) { failChain(ctx, tsm, item); return; }
+            }
+            int batches = plan.pushBatches(item, node, remaining, this.dispatchedTarget, parent);
             log("descend {} need={} batches={}", name(item), this.dispatchedNeed, batches);
             this.stage = Stage.GATHER;
             return;
@@ -537,7 +611,7 @@ public final class RawMaterialTask {
 
     private void startMining(GatherContext ctx, AutoMaterialGatherer tsm, Item item, int need,
                              RawNode node, boolean isRoot) {
-        List<String> blocks = MiningSources.blocksFor(item);
+        List<String> blocks = MiningSources.availableBlocks(ctx.client, item);
         if (blocks.isEmpty()) {
             failChain(ctx, tsm, item);
             return;
@@ -548,10 +622,14 @@ public final class RawMaterialTask {
         this.dispatchedNode = node;
         this.dispatchedNeed = need;
         this.dispatchedIsRoot = isRoot;
-        this.dispatchedTarget = absoluteTarget(ctx, item, need, isRoot);
+        this.dispatchedTarget = isRoot ? absoluteTarget(ctx, item, need, true)
+                : RecipeAllocation.target(reservedFor(ctx, this.plan.current(), item), need);
         this.mineLastCount = ctx.countHeld(item);
         this.mineStallTicks = 0;
         this.mineSourceIndex = 0;
+        this.mineSources = blocks;
+        this.mineOrigin = ctx.client.player.blockPosition();
+        this.mineAttemptTicks = 0;
         this.stage = Stage.MINING;
 
         // quantity 传 0（不限）：Baritone 数的是"掉落物是否匹配方块"，和我们真正要的物品不一定对得上
@@ -569,6 +647,13 @@ public final class RawMaterialTask {
         }
 
         int have = ctx.countHeld(item);
+        int radius = Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue();
+        if (++mineAttemptTicks > Configs.BaritoneSettings.MINING_ATTEMPT_TICKS.getIntegerValue()
+                || mineOrigin.distSqr(ctx.client.player.blockPosition()) > (long) radius * radius) {
+            this.baritone.cancelMining();
+            afterGatherFailed(ctx, tsm, item, false);
+            return;
+        }
         if (have >= this.dispatchedTarget) {
             this.baritone.cancelMining();
             onSubItemDone(ctx, tsm);
@@ -588,7 +673,7 @@ public final class RawMaterialTask {
             // 挖不到东西：先换同一物品的另一种方块（铁矿 → 深层铁矿），都换完了才认输。
             // 阈值可配置——固定等一分钟在"根本不存在这种方块"时纯属浪费。
             this.baritone.cancelMining();
-            List<String> blocks = MiningSources.blocksFor(item);
+            List<String> blocks = this.mineSources;
             if (this.mineSourceIndex + 1 < blocks.size()) {
                 this.mineSourceIndex++;
                 this.mineStallTicks = 0;
@@ -623,6 +708,9 @@ public final class RawMaterialTask {
         this.mineLastCount = 0;
         this.mineStallTicks = 0;
         this.mineSourceIndex = 0;
+        this.mineSources = List.of();
+        this.mineOrigin = null;
+        this.mineAttemptTicks = 0;
         this.unpackItem = null;
         this.craftingWarned = false;
         this.unobtainableWarned.clear();

@@ -3,6 +3,9 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerMaterialCollector;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialPlanRegression;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RecipeAllocationRegression;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueueRegression;
+import com.alonediamond.playercontrolpp.feature.automaterial.restock.LayerBuildControllerRegression;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -62,6 +65,9 @@ public final class MaterialCollectorRegression {
         checks += TransferSessionRegression.run();
         checks += SharedAutomationRegression.run();
         checks += RawMaterialPlanRegression.run();
+        checks += ManualMaterialQueueRegression.run();
+        checks += RecipeAllocationRegression.run();
+        checks += LayerBuildControllerRegression.run();
         System.out.println("Material collector regression: " + checks + " checks passed");
     }
     private static ContainerMaterialCollector.Selection select(Item item, int total, int held, List<Slot> slots, int threshold, boolean mixed) {

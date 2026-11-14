@@ -53,6 +53,38 @@ import java.util.function.BiPredicate;
 @Mixin(ChestTrackerIntegration.class)
 public abstract class ChestTrackerIntegrationImpl {
 
+    @Overwrite(remap = false)
+    public List<ChestTrackerIntegration.Stock> stockSnapshot(BlockPos origin, int range, boolean includeBoxes) {
+        List<ChestTrackerIntegration.Stock> result = new ArrayList<>();
+        try {
+            MemoryBank bank = loadedMemoryBank();
+            Identifier dimension = ProviderUtils.getPlayersCurrentKey().orElse(null);
+            if (bank == null || dimension == null) return result;
+            Optional<MemoryKey> key = bank.getKey(dimension);
+            if (key.isEmpty()) return result;
+            // 双箱的共享 Memory 只统计一次，避免把同一批材料估算两遍。
+            java.util.Set<Memory> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            var memories = new ArrayList<>(key.get().getMemories().entrySet());
+            memories.sort(Comparator.comparingDouble(entry -> entry.getKey().distSqr(origin)));
+            for (var entry : memories) {
+                if (entry.getKey().distSqr(origin) > (long) range * range || !seen.add(entry.getValue())) continue;
+                for (ItemStack stack : entry.getValue().items()) {
+                    if (stack.isEmpty()) continue;
+                    result.add(new ChestTrackerIntegration.Stock(stack.getItem(), stack.getCount(), entry.getKey()));
+                    if (includeBoxes && ItemUtil.isShulkerBox(stack)) {
+                        for (ItemStack inside : ItemUtil.contentsOf(stack)) {
+                            if (!inside.isEmpty()) result.add(new ChestTrackerIntegration.Stock(
+                                    inside.getItem(), inside.getCount(), entry.getKey()));
+                        }
+                    }
+                }
+            }
+        } catch (Throwable error) {
+            Playercontrolpp.LOGGER.debug("Unable to read recipe stock snapshot", error);
+        }
+        return result;
+    }
+
     @Unique
     private static MemoryBank loadedMemoryBank() {
         return MemoryBankAccess.INSTANCE.getLoaded().orElse(null);

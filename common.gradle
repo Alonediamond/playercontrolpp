@@ -6,6 +6,7 @@ apply plugin: unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-l
 apply plugin: 'com.replaymod.preprocess'
 
 repositories {
+	mavenCentral() // 拼音搜索使用的 pinyin4j
 	/*maven {
 		url = 'https://maven.fabricmc.net/'
 		content { includeGroupAndSubgroups('net.fabricmc') }
@@ -71,6 +72,9 @@ dependencies {
 
 	// Optional: ModMenu, only used by gui/ModMenuIntegration (an optional entrypoint).
 	autoImplementation files(rootProject.file("libs/${project.modmenu_jar}"))
+	// 界面物品中文名的全拼和首字母搜索；随发布 jar 一同打包。
+	implementation "com.belerweb:pinyin4j:2.5.1"
+	include "com.belerweb:pinyin4j:2.5.1"
 
 	// 可选联动模组：只进编译期 classpath（类型检查 + 联动层的直连调用），
 	// 不进运行时、不打包。运行时的启用与否由 MixinPlugin 在类变换期判定。

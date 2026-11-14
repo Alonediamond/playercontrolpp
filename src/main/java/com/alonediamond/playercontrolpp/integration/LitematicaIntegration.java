@@ -7,6 +7,7 @@ import net.minecraft.world.level.BlockGetter;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.OptionalInt;
 
 /**
  * Litematica 联动的默认实现（stub）。
@@ -69,6 +70,18 @@ public class LitematicaIntegration {
      *         或它的内部结构不符合预期时返回空。
      */
     public List<PlacementBounds> getPlacementBounds() { return Collections.emptyList(); }
+
+    /** 指定投影已启用子区域的真实世界外框，包含旋转、镜像和负尺寸。 */
+    public List<SelectionBounds> getPlacementRegionBounds(int schematicIndex) { return List.of(); }
+
+    /** 投影区块还未生成时不能把空气当成完成结果。 */
+    public boolean isSchematicChunkLoaded(BlockPos pos) { return false; }
+
+    /** 固定 Y 轴单层模式下的当前层；跟随玩家或其他模式返回空。 */
+    public OptionalInt getSingleLayerY() { return OptionalInt.empty(); }
+
+    /** 只在固定 Y 轴单层模式中改层，不改变玩家的渲染模式。 */
+    public boolean setSingleLayerY(int worldY) { return false; }
 
     /** @return Litematica 当前区域选区的所有盒子；没有则空列表。 */
     public List<SelectionBounds> getCurrentSelectionBounds() { return Collections.emptyList(); }

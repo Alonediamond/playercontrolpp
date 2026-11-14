@@ -5,8 +5,7 @@ import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
-import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
-import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import fi.dy.masa.malilib.config.IConfigBase;
 import com.alonediamond.playercontrolpp.route.RouteManager;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
@@ -30,7 +29,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     private static ConfigGuiTab selectedTab = ConfigGuiTab.HOTKEYS;
 
     public PlayerControlppConfigGui(Screen parent) {
-        super(10, 50, MOD_ID, parent, "playercontrolpp.gui.title");
+        super(10, 98, MOD_ID, parent, "playercontrolpp.gui.title");
     }
 
     @Override
@@ -38,14 +37,22 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         super.initGui();
         clearOptions();
 
+        if (selectedTab.requiresBaritone() && !baritoneAvailable()) {
+            selectedTab = ConfigGuiTab.HOTKEYS;
+            getListWidget().refreshEntries();
+        }
+
         int x = 10;
         int y = 26;
         for (ConfigGuiTab tab : ConfigGuiTab.values()) {
-            // 三个模组都装了才显示 Baritone 标签页
-            if (tab == ConfigGuiTab.BARITONE && !com.alonediamond.playercontrolpp.integration.BaritoneIntegration.getInstance().isLoaded()) {
+            if (tab.requiresBaritone() && !baritoneAvailable()) {
                 continue;
             }
             int width = getStringWidth(tab.getDisplayName()) + 10;
+            if (x + width > this.width - 10 && x > 10) {
+                x = 10;
+                y += 22;
+            }
             ButtonGeneric button = new ButtonGeneric(x, y, width, 20, tab.getDisplayName());
             ButtonListener listener = new ButtonListener(tab, this);
             addButton(button, listener);
@@ -55,9 +62,20 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
 
     @Override
     public List<ConfigOptionWrapper> getConfigs() {
+        if (selectedTab.requiresBaritone() && !baritoneAvailable()) {
+            return Collections.emptyList();
+        }
         switch (selectedTab) {
             case HOTKEYS:
-                List<IConfigBase> hotkeyItems = new ArrayList<>(Configs.Hotkeys.HOTKEY_LIST);
+                // 自动化热键在各自页面内，主要功能页保持简洁；未装 Baritone 时完全不可见。
+                List<IConfigBase> hotkeyItems = new ArrayList<>();
+                hotkeyItems.add(Configs.Hotkeys.OPEN_CONFIG_GUI);
+                hotkeyItems.add(Configs.Hotkeys.AUTO_FORWARD);
+                hotkeyItems.add(Configs.Hotkeys.QUICK_TURN);
+                hotkeyItems.add(Configs.Hotkeys.RECORDING_TOGGLE);
+                hotkeyItems.add(Configs.Hotkeys.AUTO_CACHE_NEARBY_CONTAINERS);
+                hotkeyItems.add(Configs.Hotkeys.CACHE_SCHEMATIC_SELECTION_CONTAINERS);
+                hotkeyItems.add(Configs.Hotkeys.WATER_FILL_TOGGLE);
                 return ConfigOptionWrapper.createFor(hotkeyItems);
             case ROUTE_HOTKEYS:
                 return ConfigOptionWrapper.createFor(
@@ -66,21 +84,44 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 List<IConfigBase> settings = new ArrayList<>(Configs.Settings.OPTIONS);
                 settings.addAll(Configs.CacheNearbySettings.OPTIONS);
                 return ConfigOptionWrapper.createFor(settings);
-            case BARITONE:
-                List<IConfigBase> baritoneOptions = new ArrayList<>();
-                baritoneOptions.add(Configs.Hotkeys.BARITONE_AUTO_GATHER);
-                for (IConfigBase opt : Configs.BaritoneSettings.OPTIONS) {
-                    baritoneOptions.add(opt);
-                }
-                baritoneOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
-                baritoneOptions.add(Configs.Hotkeys.MARK_CONTAINER);
-                // 世界坐标合成用的两个标记热键放在同一个区域，玩家一眼能看到"怎么记录工作站"。
-                baritoneOptions.add(Configs.Hotkeys.MARK_CRAFTING_TABLE);
-                baritoneOptions.add(Configs.Hotkeys.MARK_STONECUTTER);
-                for (IConfigBase opt : Configs.Restocks.OPTIONS) {
-                    baritoneOptions.add(opt);
-                }
-                return ConfigOptionWrapper.createFor(baritoneOptions);
+            case GATHER:
+                return ConfigOptionWrapper.createFor(List.of(
+                        Configs.Hotkeys.BARITONE_AUTO_GATHER,
+                        Configs.BaritoneSettings.MATERIAL_LIST_SOURCE,
+                        Configs.BaritoneSettings.CLICK_COOLDOWN,
+                        Configs.BaritoneSettings.INTRA_CONTAINER_CLICK_DELAY,
+                        Configs.BaritoneSettings.CONTAINER_CLOSE_DELAY,
+                        Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD,
+                        Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX,
+                        Configs.BaritoneSettings.AUTO_STORE_TO_SHULKER,
+                        Configs.BaritoneSettings.SHULKER_STORAGE_MODE,
+                        Configs.BaritoneSettings.SHULKER_PLACE_RADIUS,
+                        Configs.BaritoneSettings.ALLOW_NUDGE_FOR_PLACEMENT,
+                        Configs.BaritoneSettings.ENABLE_GLOBAL_IGNORE,
+                        Configs.BaritoneSettings.GLOBAL_IGNORE_LIST,
+                        Configs.BaritoneSettings.GATHER_TARGET_HIGHLIGHT,
+                        Configs.BaritoneSettings.GATHER_TARGET_COLOR,
+                        Configs.BaritoneSettings.GATHER_TARGET_OPACITY));
+            case CRAFTING:
+                return ConfigOptionWrapper.createFor(List.of(
+                        Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE,
+                        Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH,
+                        Configs.BaritoneSettings.MINING_STALL_TICKS,
+                        Configs.BaritoneSettings.MINING_SEARCH_RADIUS,
+                        Configs.BaritoneSettings.MINING_ATTEMPT_TICKS,
+                        Configs.BaritoneSettings.CRAFT_STATION_SOURCE,
+                        Configs.Hotkeys.MARK_CRAFTING_TABLE,
+                        Configs.BaritoneSettings.CRAFTING_TABLE_POSITIONS,
+                        Configs.Hotkeys.MARK_STONECUTTER,
+                        Configs.BaritoneSettings.STONECUTTER_POSITIONS));
+            case RESTOCK:
+                List<IConfigBase> restockOptions = new ArrayList<>();
+                restockOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
+                restockOptions.add(Configs.Hotkeys.MARK_CONTAINER);
+                restockOptions.addAll(Configs.Restocks.OPTIONS);
+                return ConfigOptionWrapper.createFor(restockOptions);
+            case MATERIAL_QUEUE:
+                return Collections.emptyList();
             case ROUTES:
                 return Collections.emptyList();
         }
@@ -101,9 +142,9 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     //$$ }
     //#endif
 
-    /** render 里版本无关的部分：Baritone 标签页顶部的红色警示。 */
+    /** render 里版本无关的部分：自动化页面顶部的红色警示。 */
     private void renderOverlay(DrawCtx drawContext) {
-        if (selectedTab == ConfigGuiTab.BARITONE && AutoMaterialGatherer.areAllThreeModsPresent()) {
+        if (selectedTab.requiresBaritone() && AutoMaterialGatherer.areAllThreeModsPresent()) {
             String warning = StringUtils.translate("playercontrolpp.gui.baritone.warning");
             int textWidth = font.width(warning);
             int x = (this.width - textWidth) / 2;
@@ -116,7 +157,8 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     @Override
     protected boolean useKeybindSearch() {
         return selectedTab == ConfigGuiTab.HOTKEYS || selectedTab == ConfigGuiTab.ROUTE_HOTKEYS
-                || selectedTab == ConfigGuiTab.BARITONE;
+                || selectedTab == ConfigGuiTab.GATHER || selectedTab == ConfigGuiTab.CRAFTING
+                || selectedTab == ConfigGuiTab.RESTOCK;
     }
 
     public enum ConfigGuiTab {
@@ -125,7 +167,10 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         SETTINGS("playercontrolpp.gui.tab.settings"),
         ROUTES("playercontrolpp.gui.tab.routes"),
         RECORDING("playercontrolpp.gui.tab.recording"),
-        BARITONE("playercontrolpp.gui.tab.baritone");
+        GATHER("playercontrolpp.gui.tab.gather"),
+        CRAFTING("playercontrolpp.gui.tab.crafting"),
+        RESTOCK("playercontrolpp.gui.tab.restock"),
+        MATERIAL_QUEUE("playercontrolpp.gui.tab.material_queue");
 
         private final String translationKey;
 
@@ -136,6 +181,14 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         public String getDisplayName() {
             return StringUtils.translate(translationKey);
         }
+
+        public boolean requiresBaritone() {
+            return this == GATHER || this == CRAFTING || this == RESTOCK || this == MATERIAL_QUEUE;
+        }
+    }
+
+    private static boolean baritoneAvailable() {
+        return BaritoneIntegration.getInstance().isLoaded();
     }
 
     private record ButtonListener(ConfigGuiTab tab, PlayerControlppConfigGui parent) implements IButtonActionListener {
@@ -145,6 +198,8 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 ScreenCompat.setScreen(Minecraft.getInstance(), new RouteListGui(parent));
             } else if (tab == ConfigGuiTab.RECORDING) {
                 ScreenCompat.setScreen(Minecraft.getInstance(), new RecordingListGui(parent));
+            } else if (tab == ConfigGuiTab.MATERIAL_QUEUE) {
+                ScreenCompat.setScreen(Minecraft.getInstance(), new ManualMaterialQueueGui(parent));
             } else {
                 selectedTab = tab;
                 parent.getListWidget().refreshEntries();
