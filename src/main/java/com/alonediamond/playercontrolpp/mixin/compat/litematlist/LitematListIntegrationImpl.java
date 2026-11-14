@@ -75,22 +75,32 @@ public abstract class LitematListIntegrationImpl {
      */
     @Overwrite(remap = false)
     public RawNode getRawMaterialTree(Item item, int count, int maxDepth) {
-        try {
-            if (item == null || count <= 0) return null;
+        List<RawNode> roots = analyzeTemporaryMaterials(List.of(new LitematListIntegration.RawRequest(item, count)), maxDepth);
+        return roots.isEmpty() ? null : roots.get(0);
+    }
 
+    @Overwrite(remap = false)
+    public List<RawNode> analyzeTemporaryMaterials(List<LitematListIntegration.RawRequest> requests, int maxDepth) {
+        try {
+            if (requests.isEmpty()) return List.of();
+            // 独立实例只读玩家白名单、替换及配方优先级，不借用上传清单或界面状态。
             RawMaterialTreeAnalyzer analyzer = new RawMaterialTreeAnalyzer();
             if (maxDepth >= 0) {
                 analyzer.setMaxDepth(maxDepth);
             }
-            List<LitematicReader.MaterialEntry> entries =
-                    List.of(new LitematicReader.MaterialEntry(item, "", count));
+            List<LitematicReader.MaterialEntry> entries = new ArrayList<>();
+            for (var request : requests) {
+                if (request.item() == null || request.count() <= 0) return List.of();
+                entries.add(new LitematicReader.MaterialEntry(request.item(), "", request.count()));
+            }
             RawMaterialTreeAnalyzer.TreeResult result = analyzer.analyze(entries);
-            if (result == null || result.roots().isEmpty()) return null;
-
-            return toNode(result.roots().get(0));
+            if (result == null || result.roots().size() != entries.size()) return List.of();
+            List<RawNode> roots = new ArrayList<>();
+            for (RecipeTreeNode node : result.roots()) roots.add(toNode(node));
+            return List.copyOf(roots);
         } catch (Throwable e) {
-            Playercontrolpp.LOGGER.debug("Unable to trace raw materials for {}", item, e);
-            return null;
+            Playercontrolpp.LOGGER.debug("Unable to analyze temporary raw materials", e);
+            return List.of();
         }
     }
 

@@ -13,11 +13,7 @@ import baritone.api.schematic.ISchematic;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
@@ -26,13 +22,8 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Unique;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 
 /**
  * {@link BaritoneIntegration} 的直连实现，由 MixinPlugin 在 Baritone 在场时注入。
@@ -227,110 +218,19 @@ public abstract class BaritoneIntegrationImpl {
     }
 
     @Overwrite(remap = false)
-    public List<BlockPos> findKnownMiningPositions(String blockId, int radius) {
-        return findKnownMiningSources(List.of(blockId), radius).getOrDefault(blockId, List.of());
-    }
-
-    @Overwrite(remap = false)
-    public Map<String, List<BlockPos>> findKnownMiningSources(List<String> blockIds, int radius) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null || radius <= 0 || blockIds.isEmpty()) return Map.of();
+    public List<BlockPos> cachedMiningPositions(String blockId, BlockPos origin, int radius) {
         try {
-            BlockPos origin = mc.player.blockPosition();
-            double radiusSquared = (double) radius * radius;
-            Map<Block, String> byBlock = new HashMap<>();
-            Map<String, PriorityQueue<BlockPos>> positions = new LinkedHashMap<>();
-            for (String id : blockIds) {
-                Identifier key = Identifier.tryParse(id);
-                if (key == null) continue;
-                Block block = BuiltInRegistries.BLOCK.getOptional(key).orElse(null);
-                if (block == null) continue;
-                byBlock.put(block, id);
-                positions.putIfAbsent(id, new PriorityQueue<>(Comparator.comparingDouble(origin::distSqr).reversed()));
-            }
-            if (positions.isEmpty()) return Map.of();
-            var worldData = primaryBaritone().getPlayerContext().worldData();
+            var data = primaryBaritone().getPlayerContext().worldData();
+            if (data == null) return List.of();
             int regionRadius = (radius + 511) / 512 + 1;
-            if (worldData != null) {
-                for (String id : positions.keySet()) {
-                    for (BlockPos pos : worldData.getCachedWorld().getLocationsOf(id, 64,
-                            origin.getX(), origin.getZ(), regionRadius * regionRadius * 2)) {
-                        if (pos.distSqr(origin) > radiusSquared) continue;
-                        if (mc.level.hasChunkAt(pos) && !id.equals(byBlock.get(mc.level.getBlockState(pos).getBlock()))) continue;
-                        rememberSource(positions.get(id), origin, pos);
-                    }
-                }
-            }
-            scanLoadedSources(mc, origin, radius, byBlock, positions);
-            Map<String, List<BlockPos>> result = new LinkedHashMap<>();
-            positions.forEach((id, found) -> result.put(id, found.stream()
-                    .sorted(Comparator.comparingDouble(origin::distSqr)).toList()));
-            return Map.copyOf(result);
-        } catch (Throwable e) {
-            Playercontrolpp.LOGGER.debug("Unable to inspect known Baritone mining sources", e);
-            return Map.of();
+            return List.copyOf(data.getCachedWorld().getLocationsOf(blockId, 64,
+                    origin.getX(), origin.getZ(), regionRadius * regionRadius * 2));
+        }
+        catch (Throwable error) {
+            Playercontrolpp.LOGGER.debug("Unable to read cached mining positions", error);
+            return List.of();
         }
     }
-
-    @Unique
-    private static void scanLoadedSources(Minecraft mc, BlockPos origin, int radius, Map<Block, String> byBlock,
-                                          Map<String, PriorityQueue<BlockPos>> positions) {
-        // 限定已加载区块、球形距离和最多八区块观察半径，不扫描所有高度或加载新区块。
-        int chunkRadius = Math.min(8, (radius + 15) / 16);
-        int centerX = origin.getX() >> 4;
-        int centerZ = origin.getZ() >> 4;
-        List<ChunkPos> chunks = new ArrayList<>();
-        for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
-            for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
-                chunks.add(new ChunkPos(centerX + dx, centerZ + dz));
-            }
-        }
-        chunks.sort(Comparator.comparingDouble(chunk -> {
-            double dx = chunk.getMiddleBlockX() - origin.getX();
-            double dz = chunk.getMiddleBlockZ() - origin.getZ();
-            return dx * dx + dz * dz;
-        }));
-        double radiusSquared = (double) radius * radius;
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (ChunkPos chunk : chunks) {
-            var loaded = mc.level.getChunkSource().getChunk(chunk.getMinBlockX() >> 4, chunk.getMinBlockZ() >> 4, false);
-            if (loaded == null) continue;
-            var sections = loaded.getSections();
-            for (int index = 0; index < sections.length; index++) {
-                int sectionY = loaded.getSectionYFromSectionIndex(index) << 4;
-                int minY = Math.max(0, origin.getY() - radius - sectionY);
-                int maxY = Math.min(15, origin.getY() + radius - sectionY);
-                var section = sections[index];
-                if (minY > maxY || section == null || section.hasOnlyAir()
-                        || !section.maybeHas(state -> byBlock.containsKey(state.getBlock()))) continue;
-                for (int x = 0; x < 16; x++) {
-                    int worldX = chunk.getMinBlockX() + x;
-                    double dx = worldX - origin.getX();
-                    for (int z = 0; z < 16; z++) {
-                        int worldZ = chunk.getMinBlockZ() + z;
-                        double dz = worldZ - origin.getZ();
-                        double horizontal = dx * dx + dz * dz;
-                        if (horizontal > radiusSquared) continue;
-                        for (int y = minY; y <= maxY; y++) {
-                            double dy = sectionY + y - origin.getY();
-                            if (horizontal + dy * dy > radiusSquared) continue;
-                            String id = byBlock.get(section.getBlockState(x, y, z).getBlock());
-                            if (id != null) rememberSource(positions.get(id), origin, pos.set(worldX, sectionY + y, worldZ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @Unique
-    private static void rememberSource(PriorityQueue<BlockPos> found, BlockPos origin, BlockPos pos) {
-        if (found.size() >= 64 && pos.distSqr(origin) >= found.peek().distSqr(origin)) return;
-        if (found.contains(pos)) return;
-        found.add(pos.immutable());
-        if (found.size() > 64) found.poll();
-    }
-
     @Overwrite(remap = false)
     public boolean resumeBuilder() {
         try {

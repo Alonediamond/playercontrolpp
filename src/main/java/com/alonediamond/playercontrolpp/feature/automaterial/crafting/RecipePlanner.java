@@ -20,6 +20,7 @@ final class RecipePlanner {
     private final Map<Item, List<CraftingRecipes.Plan>> recipes = new HashMap<>();
     private final Map<Item, Integer> held = new HashMap<>();
     private Map<String, List<net.minecraft.core.BlockPos>> knownMining;
+    private boolean awaitingSurvey;
     private record Estimate(Item item, int amount, int depth, Set<Item> path) {}
     private final Map<Estimate, Double> estimates = new HashMap<>();
 
@@ -44,6 +45,7 @@ final class RecipePlanner {
     }
 
     double ingredientCost(Item item, int count) { return estimate(item, count, 0, new HashSet<>()); }
+    boolean awaitingSurvey() { return awaitingSurvey; }
 
     private List<CraftingRecipes.Plan> recipesFor(Item item) {
         return recipes.computeIfAbsent(item, key -> CraftingRecipes.findAll(ctx.client, key));
@@ -87,8 +89,13 @@ final class RecipePlanner {
 
     private boolean canMine(Item item) {
         if (MiningSources.blocksFor(item).isEmpty()) return false;
-        if (knownMining == null) knownMining = com.alonediamond.playercontrolpp.integration.BaritoneIntegration.getInstance()
-                .findKnownMiningSources(MiningSources.allBlockIds(), Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue());
-        return MiningSources.blocksFor(item).stream().anyMatch(id -> !knownMining.getOrDefault(id, List.of()).isEmpty());
+        if (knownMining == null) {
+            var survey = MiningSources.survey();
+            awaitingSurvey |= !survey.ready();
+            knownMining = survey.positions();
+        }
+        int radius = Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue();
+        return MiningSources.blocksFor(item).stream().anyMatch(id -> knownMining.getOrDefault(id, List.of()).stream()
+                .anyMatch(pos -> pos.distSqr(ctx.client.player.blockPosition()) <= (long) radius * radius));
     }
 }

@@ -81,46 +81,64 @@ public final class CraftingRecipes {
         return plans.isEmpty() ? null : plans.get(0);
     }
 
-    public static List<Plan> findAll(Minecraft mc, Item item) {
-        List<Plan> plans = new ArrayList<>();
-        try {
-            //#if MC >= 12102
-            ContextMap contextMap = SlotDisplayContext.fromLevel(mc.level);
-            for (RecipeCollection collection : mc.player.getRecipeBook().getCollections()) {
-                for (RecipeDisplayEntry entry : collection.getRecipes()) {
-                    RecipeDisplay display = entry.display();
-                    if (!(display instanceof ShapedCraftingRecipeDisplay)
-                            && !(display instanceof ShapelessCraftingRecipeDisplay)) {
-                        continue;
-                    }
-                    List<ItemStack> results = entry.resultItems(contextMap);
-                    if (results.isEmpty() || !ItemUtil.is(results.get(0), item)) continue;
-                    Plan plan = planFromDisplay(entry, contextMap);
-                    if (plan != null) plans.add(plan);
-                }
-            }
-            //#else
-            //$$ for (RecipeCollection collection : mc.player.getRecipeBook().getCollections()) {
-            //$$     for (RecipeHolder<?> holder : collection.getRecipes()) {
-            //$$         if (!(holder.value() instanceof CraftingRecipe crafting)) continue;
-            //$$         if (!ItemUtil.is(crafting.getResultItem(mc.level.registryAccess()), item)) continue;
-            //$$         List<Ingredient> ingredients = crafting.getIngredients();
-            //$$         if (ingredients.isEmpty()) continue;
-            //$$         List<List<ItemStack>> grid = new ArrayList<>(ingredients.size());
-            //$$         for (Ingredient ingredient : ingredients) {
-            //$$             grid.add(List.of(ingredient.getItems()));
-            //$$         }
-            //$$         int width = crafting instanceof ShapedRecipe shaped ? shaped.getWidth() : CRAFT_GRID_WIDTH;
-            //$$         plans.add(new Plan(holder, grid, width, crafting.getResultItem(mc.level.registryAccess()).getCount()));
-            //$$     }
-            //$$ }
-            //#endif
-        } catch (Throwable e) {
-            Playercontrolpp.LOGGER.debug("Unable to look up a crafting recipe for {}", item, e);
-        }
-        return plans;
+    private static Object indexedWorld;
+    private static Object indexedCollections;
+    private static long indexedTick;
+    private static java.util.Map<Item, List<Plan>> indexedPlans = java.util.Map.of();
+
+    public static void clearCache() {
+        indexedWorld = null;
+        indexedCollections = null;
+        indexedPlans = java.util.Map.of();
     }
 
+    public static List<Plan> findAll(Minecraft mc, Item item) {
+        if (mc.player == null || mc.level == null) return List.of();
+        var collections = mc.player.getRecipeBook().getCollections();
+        long tick = mc.level.getGameTime();
+        if (indexedWorld != mc.level || indexedCollections != collections || tick < indexedTick || tick - indexedTick > 100) {
+            java.util.Map<Item, List<Plan>> plans = new java.util.HashMap<>();
+            try {
+                //#if MC >= 12102
+                ContextMap contextMap = SlotDisplayContext.fromLevel(mc.level);
+                for (RecipeCollection collection : collections) {
+                    for (RecipeDisplayEntry entry : collection.getRecipes()) {
+                        RecipeDisplay display = entry.display();
+                        if (!(display instanceof ShapedCraftingRecipeDisplay)
+                                && !(display instanceof ShapelessCraftingRecipeDisplay)) continue;
+                        List<ItemStack> results = entry.resultItems(contextMap);
+                        if (results.isEmpty()) continue;
+                        Plan plan = planFromDisplay(entry, contextMap);
+                        if (plan != null) plans.computeIfAbsent(results.get(0).getItem(), ignored -> new ArrayList<>()).add(plan);
+                    }
+                }
+                //#else
+                //$$ for (RecipeCollection collection : collections) {
+                //$$     for (RecipeHolder<?> holder : collection.getRecipes()) {
+                //$$         if (!(holder.value() instanceof CraftingRecipe crafting)) continue;
+                //$$         List<Ingredient> ingredients = crafting.getIngredients();
+                //$$         if (ingredients.isEmpty()) continue;
+                //$$         List<List<ItemStack>> grid = new ArrayList<>(ingredients.size());
+                //$$         for (Ingredient ingredient : ingredients) grid.add(List.of(ingredient.getItems()));
+                //$$         int width = crafting instanceof ShapedRecipe shaped ? shaped.getWidth() : CRAFT_GRID_WIDTH;
+                //$$         ItemStack result = crafting.getResultItem(mc.level.registryAccess());
+                //$$         plans.computeIfAbsent(result.getItem(), ignored -> new ArrayList<>())
+                //$$                 .add(new Plan(holder, grid, width, result.getCount()));
+                //$$     }
+                //$$ }
+                //#endif
+            } catch (Throwable error) {
+                Playercontrolpp.LOGGER.debug("Unable to index crafting recipes", error);
+            }
+            plans.replaceAll((key, value) -> List.copyOf(value));
+            indexedPlans = java.util.Map.copyOf(plans);
+            indexedWorld = mc.level;
+            indexedCollections = collections;
+            indexedTick = tick;
+        }
+        // 只缓存配方定义；库存与缺口仍由每次选择即时读取。
+        return indexedPlans.getOrDefault(item, List.of());
+    }
     //#if MC >= 12102
     /** 把配方展示条目转成"每个合成格能放哪些物品"。 */
     private static Plan planFromDisplay(RecipeDisplayEntry entry, ContextMap contextMap) {

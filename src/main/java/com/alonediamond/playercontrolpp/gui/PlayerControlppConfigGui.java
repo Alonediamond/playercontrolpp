@@ -13,6 +13,7 @@ import fi.dy.masa.malilib.gui.GuiConfigsBase.ConfigOptionWrapper;
 import fi.dy.masa.malilib.gui.button.ButtonBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
 import fi.dy.masa.malilib.gui.button.IButtonActionListener;
+import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptions;
 import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -27,6 +28,8 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
     public static final String MOD_ID = "playercontrolpp";
 
     private static ConfigGuiTab selectedTab = ConfigGuiTab.HOTKEYS;
+    private int listTop = 52;
+    private boolean initialized;
 
     public PlayerControlppConfigGui(Screen parent) {
         super(10, 98, MOD_ID, parent, "playercontrolpp.gui.title");
@@ -34,14 +37,29 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
 
     @Override
     public void initGui() {
-        super.initGui();
-        clearOptions();
-
         if (selectedTab.requiresBaritone() && !baritoneAvailable()) {
             selectedTab = ConfigGuiTab.HOTKEYS;
-            getListWidget().refreshEntries();
         }
+        List<TabButton> tabs = layoutTabs();
+        listTop = tabs.isEmpty() ? 52 : tabs.getLast().y() + 26;
+        setListPosition(10, listTop);
+        if (initialized) {
+            saveCurrentList();
+            reCreateListWidget();
+        }
+        clearOptions();
+        super.initGui();
+        initialized = true;
 
+        for (TabButton tab : tabs) {
+            ButtonGeneric button = new ButtonGeneric(tab.x(), tab.y(), tab.width(), 20,
+                    tab.tab().getDisplayName());
+            addButton(button, new ButtonListener(tab.tab(), this));
+        }
+    }
+
+    private List<TabButton> layoutTabs() {
+        List<TabButton> tabs = new ArrayList<>();
         int x = 10;
         int y = 26;
         for (ConfigGuiTab tab : ConfigGuiTab.values()) {
@@ -53,12 +71,49 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 x = 10;
                 y += 22;
             }
-            ButtonGeneric button = new ButtonGeneric(x, y, width, 20, tab.getDisplayName());
-            ButtonListener listener = new ButtonListener(tab, this);
-            addButton(button, listener);
+            tabs.add(new TabButton(tab, x, y, width));
             x += width + 2;
         }
+        return tabs;
     }
+
+    private void saveCurrentList() {
+        WidgetListConfigOptions list = getListWidget();
+        list.applyPendingModifications();
+        if (list.wereConfigsModified()) {
+            onSettingsChanged();
+            list.clearConfigsModifiedFlag();
+        }
+    }
+
+    private void switchTab(ConfigGuiTab tab) {
+        if (selectedTab == tab) return;
+        saveCurrentList();
+        clearOptions();
+        selectedTab = tab;
+        reCreateListWidget();
+        getListWidget().initGui();
+    }
+
+    void restartSearch() {
+        saveCurrentList();
+        clearOptions();
+        reCreateListWidget();
+        getListWidget().initGui();
+    }
+
+    @Override
+    protected int getBrowserHeight() {
+        return Math.max(0, this.height - listTop - 10);
+    }
+
+    @Override
+    protected WidgetListConfigOptions createListWidget(int listX, int listY) {
+        return new PlayerControlppConfigList(listX, listY, getBrowserWidth(), getBrowserHeight(),
+                getConfigWidth(), useKeybindSearch(), this);
+    }
+
+    private record TabButton(ConfigGuiTab tab, int x, int y, int width) {}
 
     @Override
     public List<ConfigOptionWrapper> getConfigs() {
@@ -83,6 +138,8 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
             case SETTINGS:
                 List<IConfigBase> settings = new ArrayList<>(Configs.Settings.OPTIONS);
                 settings.addAll(Configs.CacheNearbySettings.OPTIONS);
+                replaceOption(settings, Configs.CacheNearbySettings.UNCACHED_HIGHLIGHT_TICKS,
+                        Configs.CacheNearbySettings.UNCACHED_HIGHLIGHT_SECONDS);
                 return ConfigOptionWrapper.createFor(settings);
             case GATHER:
                 return ConfigOptionWrapper.createFor(List.of(
@@ -106,9 +163,9 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 return ConfigOptionWrapper.createFor(List.of(
                         Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE,
                         Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH,
-                        Configs.BaritoneSettings.MINING_STALL_TICKS,
+                        Configs.BaritoneSettings.MINING_STALL_SECONDS,
                         Configs.BaritoneSettings.MINING_SEARCH_RADIUS,
-                        Configs.BaritoneSettings.MINING_ATTEMPT_TICKS,
+                        Configs.BaritoneSettings.MINING_ATTEMPT_SECONDS,
                         Configs.BaritoneSettings.CRAFT_STATION_SOURCE,
                         Configs.Hotkeys.MARK_CRAFTING_TABLE,
                         Configs.BaritoneSettings.CRAFTING_TABLE_POSITIONS,
@@ -119,6 +176,8 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 restockOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
                 restockOptions.add(Configs.Hotkeys.MARK_CONTAINER);
                 restockOptions.addAll(Configs.Restocks.OPTIONS);
+                replaceOption(restockOptions, Configs.Restocks.BUILD_LAYER_STABLE_TICKS,
+                        Configs.Restocks.BUILD_LAYER_STABLE_SECONDS);
                 return ConfigOptionWrapper.createFor(restockOptions);
             case MATERIAL_QUEUE:
                 return Collections.emptyList();
@@ -126,6 +185,11 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 return Collections.emptyList();
         }
         return Collections.emptyList();
+    }
+
+    private static void replaceOption(List<IConfigBase> options, IConfigBase stored, IConfigBase displayed) {
+        int index = options.indexOf(stored);
+        if (index >= 0) options.set(index, displayed);
     }
 
     //#if MC >= 260000
@@ -201,8 +265,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
             } else if (tab == ConfigGuiTab.MATERIAL_QUEUE) {
                 ScreenCompat.setScreen(Minecraft.getInstance(), new ManualMaterialQueueGui(parent));
             } else {
-                selectedTab = tab;
-                parent.getListWidget().refreshEntries();
+                parent.switchTab(tab);
             }
         }
     }

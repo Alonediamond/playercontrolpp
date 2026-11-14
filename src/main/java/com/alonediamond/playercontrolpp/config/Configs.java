@@ -259,8 +259,10 @@ public class Configs implements IConfigHandler {
          */
         public static final ConfigInteger MINING_STALL_TICKS = new ConfigInteger(
                 "miningStallTicks", 200, 40, 3600,
-                "How many ticks Baritone may mine without the target material increasing before the raw-material trace switches to another source or variant.")
+                "How long Baritone may mine without the target material increasing before the raw-material trace switches to another source or variant (GUI: seconds; stored: ticks).")
                 .apply(KEY_BARITONE);
+        public static final SecondsConfigOption MINING_STALL_SECONDS =
+                SecondsConfigOption.forTicks(MINING_STALL_TICKS, KEY_BARITONE);
 
         /** 世界挖掘只搜索玩家附近的方块，避免追着远处来源跑。 */
         public static final ConfigInteger MINING_SEARCH_RADIUS = new ConfigInteger(
@@ -271,8 +273,10 @@ public class Configs implements IConfigHandler {
         /** 单个物品挖掘的总时限，换方块来源时不重置。 */
         public static final ConfigInteger MINING_ATTEMPT_TICKS = new ConfigInteger(
                 "miningAttemptTicks", 1200, 100, 12000,
-                "Total mining time in ticks for one item, including all block variants.")
+                "Total mining time for one item, including all block variants (GUI: seconds; stored: ticks).")
                 .apply(KEY_BARITONE);
+        public static final SecondsConfigOption MINING_ATTEMPT_SECONDS =
+                SecondsConfigOption.forTicks(MINING_ATTEMPT_TICKS, KEY_BARITONE);
 
         /** 模拟模式放置潜影盒时的搜索半径（以玩家为中心）。 */
         public static final ConfigInteger SHULKER_PLACE_RADIUS = new ConfigInteger(
@@ -352,8 +356,10 @@ public class Configs implements IConfigHandler {
          */
         public static final ConfigInteger UNCACHED_HIGHLIGHT_TICKS = new ConfigInteger(
                 "uncachedHighlightTicks", 100, 0, 600,
-                "How long (in ticks) containers that failed to be cached stay highlighted in the world. 0 disables the highlight.")
+                "How long containers that failed to be cached stay highlighted in the world (GUI: seconds; stored: ticks). 0 disables the highlight.")
                 .apply(KEY_CACHE_NEARBY);
+        public static final SecondsConfigOption UNCACHED_HIGHLIGHT_SECONDS =
+                SecondsConfigOption.forTicks(UNCACHED_HIGHLIGHT_TICKS, KEY_CACHE_NEARBY);
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 CONTAINER_WHITELIST, UNCACHED_HIGHLIGHT_TICKS);
@@ -394,8 +400,10 @@ public class Configs implements IConfigHandler {
         /** 完成判据连续成立的等待 tick，避免短暂的投影/区块状态触发误推进。 */
         public static final ConfigInteger BUILD_LAYER_STABLE_TICKS = new ConfigInteger(
                 "buildLayerStableTicks", 20, 5, 200,
-                "How many consecutive ticks the current Y layer must be complete before advancing. Unloaded chunks do not count.")
+                "How long the current Y layer must stay complete before advancing (GUI: seconds; stored: ticks). Unloaded chunks do not count.")
                 .apply(KEY_BARITONE);
+        public static final SecondsConfigOption BUILD_LAYER_STABLE_SECONDS =
+                SecondsConfigOption.forTicks(BUILD_LAYER_STABLE_TICKS, KEY_BARITONE);
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 RESTOCK_CONTAINER_SOURCE, RESTOCK_SHULKER_MODE, RESTOCK_STACKS_PER_ITEM, RESTOCK_CONTAINER_MAX_DISTANCE,

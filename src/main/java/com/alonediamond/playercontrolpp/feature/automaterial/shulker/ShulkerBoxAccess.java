@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.shulker;
 
 import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerPlacement;
+import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerStorageCapacity;
 import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
@@ -399,18 +400,23 @@ public final class ShulkerBoxAccess {
     }
 
     private boolean storable(GatherContext ctx, ItemStack stack) {
-        return !stack.isEmpty() && !ItemUtil.isShulkerBox(stack)
+        return !stack.isEmpty() && stack.getItem().canFitInsideContainerItems()
+                && !ItemUtil.isShulkerBox(stack)
                 && (ctx.isWantedNow(stack.getItem()) || ctx.extraStorableItems.contains(stack.getItem()));
     }
 
     private int findStorageBox(GatherContext ctx) {
+        List<ItemStack> candidates = new ArrayList<>();
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = ctx.client.player.getInventory().getItem(i);
+            if (storable(ctx, stack)) candidates.add(stack);
+        }
+        if (candidates.isEmpty()) return -1;
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             if (triedBoxes.contains(i) || ctx.extractionBoxSlots.contains(i)) continue;
             ItemStack stack = ctx.client.player.getInventory().getItem(i);
             if (!QuickShulkerIntegration.isOpenableShulkerBox(stack) || ctx.isWantedNow(stack.getItem())) continue;
-            List<ItemStack> contents = ItemUtil.contentsOf(stack);
-            if (contents.size() < 27) return i;
-            for (ItemStack inner : contents) if (inner.isEmpty() || inner.getCount() < inner.getMaxStackSize()) return i;
+            if (ShulkerStorageCapacity.canStoreAny(ItemUtil.contentsOf(stack), candidates)) return i;
         }
         return -1;
     }

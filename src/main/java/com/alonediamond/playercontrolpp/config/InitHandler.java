@@ -75,6 +75,7 @@ public class InitHandler implements IInitializationHandler {
         FeatureRegistry.register(AutoForwardFeature.FEATURE);
         FeatureRegistry.register(RouteFlowRuntime.getInstance());
         FeatureRegistry.register(RecordingManager.getInstance());
+        FeatureRegistry.register(com.alonediamond.playercontrolpp.feature.automaterial.crafting.MiningSurveyFeature.INSTANCE);
         FeatureRegistry.register(AutoMaterialGatherer.getInstance());
         FeatureRegistry.register(AutoCacheNearbyContainersFeature.FEATURE);
         FeatureRegistry.register(SchematicSelectionContainerCacheFeature.FEATURE);

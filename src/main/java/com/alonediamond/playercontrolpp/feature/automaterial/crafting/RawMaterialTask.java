@@ -61,6 +61,8 @@ public final class RawMaterialTask {
         IDLE,
         /** 正在决定"下一个要保证的子材料"或发起合成。 */
         GATHER,
+        /** 来源快照尚未就绪；空的处理中结果不能当成挖不到。 */
+        SURVEY,
         /** 已经把某个子材料交给主状态机去采集，等它的回调。 */
         DISPATCHED,
         /** 正在用 Baritone 挖。 */
@@ -135,11 +137,16 @@ public final class RawMaterialTask {
      * @return false = 建不出计划（没有配方 / 是白名单材料又挖不到），调用方按原逻辑跳过该物品
      */
     public boolean start(GatherContext ctx, AutoMaterialGatherer tsm, Item item, int gap) {
+        return start(ctx, tsm, item, gap, null);
+    }
+
+    /** 手工批次复用临时分析得到的树；执行数量仍按当前缺口和真实配方逐批核对。 */
+    public boolean start(GatherContext ctx, AutoMaterialGatherer tsm, Item item, int gap, RawNode preparedTree) {
         if (ctx.client == null || ctx.client.player == null) return false;
         reset();
 
         int need = Math.max(1, gap);
-        RawNode root = this.litematlist.getRawMaterialTree(item, need, resolveDepth());
+        RawNode root = preparedTree != null ? preparedTree : this.litematlist.getRawMaterialTree(item, need, resolveDepth());
         if (root == null) {
             // 建不出树（LitematList 里没有这个物品的配方）时说一声，别让玩家只看到"跳过了"。
             MessageUtil.sendActionBar(ctx.client,
@@ -152,7 +159,7 @@ public final class RawMaterialTask {
 
         if (root.children().isEmpty()) {
             // 溯源白名单里的材料本身没有配方（铁锭、木棍……）：只能去世界里挖。
-            if (MiningSources.availableBlocks(ctx.client, item).isEmpty()) {
+            if (MiningSources.blocksFor(item).isEmpty()) {
                 // 挖不到、也没配方可做（平滑石、玻璃、需要熔炼的矿石……）：明确告诉玩家，
                 // 而不是静默跳过。这样"为什么这个材料一直拿不到"有一个直接答案。
                 MessageUtil.sendActionBar(ctx.client,
@@ -160,7 +167,11 @@ public final class RawMaterialTask {
                 return false;
             }
             if (!canMineHere()) return false;
-            startMining(ctx, tsm, item, need, null, true);
+            dispatchedItem = item;
+            dispatchedNode = root;
+            dispatchedNeed = need;
+            dispatchedIsRoot = true;
+            stage = Stage.SURVEY;
             return true;
         }
 
@@ -183,6 +194,9 @@ public final class RawMaterialTask {
         }
         switch (this.stage) {
             case GATHER -> gatherTick(ctx, tsm);
+            case SURVEY -> {
+                if (MiningSources.survey().ready()) afterGatherFailed(ctx, tsm, dispatchedItem, true);
+            }
             case MINING -> miningTick(ctx, tsm);
             case CRAFT -> craftTick(ctx, tsm);
             default -> { }
@@ -263,8 +277,9 @@ public final class RawMaterialTask {
         }
 
         if (frame.warmingRecipe && frame.nextChild > 0) {
-            RecipeAllocation unlocked = new RecipePlanner(ctx, item -> reservedFor(ctx, frame, item))
-                    .choose(frame.item, frame.batchTarget - ctx.countHeld(frame.item));
+            RecipePlanner planner = new RecipePlanner(ctx, item -> reservedFor(ctx, frame, item));
+            RecipeAllocation unlocked = planner.choose(frame.item, frame.batchTarget - ctx.countHeld(frame.item));
+            if (planner.awaitingSurvey()) return;
             if (unlocked != null) {
                 frame.allocation = unlocked;
                 frame.ingredients = new ArrayList<>(unlocked.ingredients().entrySet());
@@ -280,6 +295,7 @@ public final class RawMaterialTask {
             } else {
                 RecipePlanner planner = new RecipePlanner(ctx, item -> reservedFor(ctx, frame, item));
                 frame.allocation = planner.choose(frame.item, frame.batchTarget - ctx.countHeld(frame.item));
+                if (planner.awaitingSurvey()) return;
                 if (frame.allocation != null) {
                     frame.ingredients = new ArrayList<>(frame.allocation.ingredients().entrySet());
                     log("batch {} target={} crafts={} inputs={} cost={}", name(frame.item), frame.batchTarget,
@@ -292,6 +308,11 @@ public final class RawMaterialTask {
                     // 先拿当前可获得的材料触发解锁，避免在默认木材缺货时挡住红石等解锁材料。
                     frame.ingredients.sort(Comparator.comparingDouble(entry ->
                             planner.ingredientCost(entry.getKey(), entry.getValue())));
+                    if (planner.awaitingSurvey()) {
+                        frame.ingredients = null;
+                        frame.warmingRecipe = false;
+                        return;
+                    }
                 } else {
                     if (++frame.recipeWaitTicks < 40) return;
                     failChain(ctx, tsm, frame.item);
@@ -568,6 +589,8 @@ public final class RawMaterialTask {
      * @param allowMine false = 刚从挖矿回来（挖不到），不要再挖一次
      */
     private void afterGatherFailed(GatherContext ctx, AutoMaterialGatherer tsm, Item item, boolean allowMine) {
+        if (allowMine && canMineHere() && MiningSources.isNaturallyObtainable(item)
+                && !MiningSources.survey().ready()) { stage = Stage.SURVEY; return; }
         RawNode node = this.dispatchedNode;
         boolean isRoot = this.dispatchedIsRoot;
         this.dispatchedItem = null;

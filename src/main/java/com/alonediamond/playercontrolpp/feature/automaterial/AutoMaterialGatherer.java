@@ -21,6 +21,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueue;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualPreparationMode;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualRawMaterialPlan;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
@@ -38,6 +40,10 @@ public final class AutoMaterialGatherer implements ClientFeature {
     private State state = State.IDLE;
     private boolean active;
     private boolean manualRun;
+    private ManualPreparationMode manualPreparationMode = ManualPreparationMode.DIRECT;
+    private ManualRawMaterialPlan rawPreparation;
+    private boolean preparingRaw;
+    private java.util.List<MaterialItemEntry> rawPreparationTargets = java.util.List.of();
     private final ManualMaterialQueue manualQueue =
             ManualMaterialQueue.getInstance();
     private int currentItemIndex;
@@ -85,6 +91,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
     public static AutoMaterialGatherer getInstance() { return INSTANCE; }
 
     public State getState() { return state; }
+    public ManualPreparationMode manualPreparationMode() { return manualPreparationMode; }
 
     @Override
     public boolean isActive() { return active; }
@@ -98,16 +105,25 @@ public final class AutoMaterialGatherer implements ClientFeature {
         }
     }
 
-    private boolean start() { return start(false, false); }
+    private boolean start() { return start(false, false, ManualPreparationMode.DIRECT); }
 
-    public boolean startManualQueue() { return start(true, false); }
-    public boolean resumeManualQueue() { return start(true, true); }
+    public boolean startManualQueue() { return startManualQueue(ManualPreparationMode.DIRECT); }
+    public boolean startManualQueue(ManualPreparationMode mode) { return start(true, false, mode); }
+    public boolean resumeManualQueue() { return start(true, true, manualPreparationMode); }
 
-    private boolean start(boolean manual, boolean resume) {
+    private boolean start(boolean manual, boolean resume, ManualPreparationMode preparationMode) {
         ctx.client = Minecraft.getInstance();
         if (ctx.client.player == null || ctx.client.level == null) return false;
 
         if (active) return false;
+        if (!resume && manualQueue.state() == ManualMaterialQueue.State.PAUSED) {
+            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.manual_paused");
+            return false;
+        }
+        if (manual && preparationMode != ManualPreparationMode.DIRECT && !LitematListIntegration.getInstance().isLoaded()) {
+            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.manual_raw_missing");
+            return false;
+        }
         if ((!manual && !LitematicaIntegration.getInstance().isLoaded())
                 || !BaritoneIntegration.getInstance().isLoaded() || !ChestTrackerIntegration.getInstance().isLoaded()) {
             MessageUtil.sendActionBar(ctx.client, manual ? "playercontrolpp.message.baritone.manual_mods_missing"
@@ -127,6 +143,10 @@ public final class AutoMaterialGatherer implements ClientFeature {
         resetRunState();
         ctx.reset();
         manualRun = manual;
+        if (!resume) {
+            manualPreparationMode = preparationMode;
+            clearRawPreparation();
+        }
         if (manual && !(resume ? manualQueue.resume(ctx::countHeld) : manualQueue.start(ctx::countHeld))) {
             MessageUtil.sendActionBar(ctx.client, manualQueue.state() == ManualMaterialQueue.State.PAUSED
                     ? "playercontrolpp.message.baritone.manual_paused" : "playercontrolpp.message.baritone.manual_empty");
@@ -141,6 +161,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     public void stop() {
         if (manualRun) manualQueue.stop();
+        clearRawPreparation();
         setState(State.STOPPED);
         MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.stopped");
     }
@@ -167,7 +188,9 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     @Override
     public void onWorldChange() {
+        com.alonediamond.playercontrolpp.compat.CraftingRecipes.clearCache();
         manualQueue.stop();
+        clearRawPreparation();
         if (active) {
             stop();
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.world_change");
@@ -186,7 +209,26 @@ public final class AutoMaterialGatherer implements ClientFeature {
             if (manualRun) {
                 var batch = manualQueue.activeBatch();
                 if (batch == null) { setState(State.STOPPED); return; }
-                ctx.requirements.replaceWith(batch.targets());
+                if (manualPreparationMode != ManualPreparationMode.DIRECT && rawPreparation == null) {
+                    var definition = manualQueue.batches().get(batch.index());
+                    ManualRawMaterialPlan analyzed = ManualRawMaterialPlan.analyze(definition);
+                    if (manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT && analyzed.unsupportedRecipe()) {
+                        setState(State.STOPPED, "playercontrolpp.message.baritone.manual_raw_unsupported");
+                        return;
+                    }
+                    boolean rawOnly = manualPreparationMode == ManualPreparationMode.RAW_ONLY;
+                    java.util.List<MaterialItemEntry> targets = java.util.List.of();
+                    if (rawOnly) {
+                        var reserves = ManualRawMaterialPlan.reserves(definition, batch.targets(), manualQueue.completedTargets());
+                        targets = analyzed.rawOnlyTargets(reserves, ctx::countHeld);
+                        manualQueue.replaceActiveTargets(targets);
+                    }
+                    // 分析与数量校验全部成功后才发布，恢复时不能把半成品计划当成完成的快照。
+                    rawPreparation = analyzed;
+                    rawPreparationTargets = targets;
+                    preparingRaw = rawOnly;
+                }
+                ctx.requirements.replaceWith(preparingRaw ? rawPreparationTargets : batch.targets());
                 currentItemIndex = 0;
                 if (!startInitialStorage()) setState(State.NEXT_ITEM);
                 return;
@@ -244,6 +286,8 @@ public final class AutoMaterialGatherer implements ClientFeature {
             return;
         }
 
+        if (manualRun && manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT
+                && !preparingRaw && tryStartRawMaterialTask()) return;
         setState(State.SEARCHING);
     }
 
@@ -255,7 +299,13 @@ public final class AutoMaterialGatherer implements ClientFeature {
             setState(State.STOPPED, "playercontrolpp.message.baritone.manual_paused");
             return true;
         }
-        manualQueue.completeActiveBatch(ctx::countHeld);
+        boolean nextReady = manualQueue.completeActiveBatch(ctx::countHeld);
+        if (!nextReady && manualQueue.state() == ManualMaterialQueue.State.RUNNING) {
+            manualQueue.failActiveBatch("incomplete");
+            setState(State.STOPPED, "playercontrolpp.message.baritone.manual_paused");
+            return true;
+        }
+        clearRawPreparation();
         if (manualQueue.state() == ManualMaterialQueue.State.PAUSED) {
             setState(State.STOPPED, "playercontrolpp.message.baritone.manual_paused");
             return true;
@@ -265,6 +315,12 @@ public final class AutoMaterialGatherer implements ClientFeature {
         ctx.reset();
         setState(State.ANALYZING);
         return true;
+    }
+
+    private void clearRawPreparation() {
+        rawPreparation = null;
+        rawPreparationTargets = java.util.List.of();
+        preparingRaw = false;
     }
 
     /** 关闭容器后重新数一遍，然后决定推进还是换下一个位置。 */
@@ -370,6 +426,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     /** 整轮备货结束时的收尾：额外取消追溯任务（它可能正开着合成界面或让 Baritone 挖着矿）。 */
     private void stopEverythingAndTasks() {
+        com.alonediamond.playercontrolpp.feature.automaterial.crafting.KnownMiningSurvey.clear();
         ContainerHighlightFeature.getInstance().clearGatherTarget();
         stopEverything();
         rawMaterialTask.cancel(ctx.client);
@@ -613,7 +670,8 @@ public final class AutoMaterialGatherer implements ClientFeature {
     private boolean tryStartRawMaterialTask() {
         RawMaterialMode mode =
                 (RawMaterialMode) Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue();
-        if (mode == RawMaterialMode.DISABLED) return false;
+        if (mode == RawMaterialMode.DISABLED && !(manualRun
+                && manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT && !preparingRaw)) return false;
         if (ctx.targetItem() == null) return false;
         // 追溯过一次还是凑不齐的物品不再重试，否则"搜不到 → 追溯 → 仍不够 → 再搜"会打转。
         if (ctx.tracedItems.contains(ctx.targetItem())) return false;
@@ -623,7 +681,15 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
         if (!checkRawMaterialPrerequisites()) return false;
 
-        return rawMaterialTask.start(ctx, this, ctx.targetItem(), gap);
+        if (manualRun && manualPreparationMode == ManualPreparationMode.RAW_ONLY) {
+            // 只备临时表的叶子，不重新从叶子展开，避免越过玩家指定的白名单或追溯深度。
+            if (mode != RawMaterialMode.WORLD_SEARCH) return false;
+            String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(ctx.targetItem()).toString();
+            return rawMaterialTask.start(ctx, this, ctx.targetItem(), gap,
+                    new LitematListIntegration.RawNode(id, gap, "base", java.util.List.of()));
+        }
+        return rawMaterialTask.start(ctx, this, ctx.targetItem(), gap,
+                rawPreparation == null ? null : rawPreparation.rootFor(ctx.targetItem()));
     }
 
     /**

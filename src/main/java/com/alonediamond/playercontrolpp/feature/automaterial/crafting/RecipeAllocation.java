@@ -7,7 +7,17 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.*;
 
-/** 有界束搜索同时分配各配方格，避免重复格都贪心选择同一小堆材料。 */
+/**
+ * 为整批合成同时选择配方及每格的合法物品变种。
+ *
+ * <p>先按实际单次产量向上取整合成次数，再逐格扩展候选方案，把同种物品在重复格中的
+ * 用量累加后交给 {@link Cost} 估价。每扩展一格只保留成本最低的 32 个方案，最后比较
+ * 各配方的完整方案。这样不会让每一格都独立贪心地选中同一小堆材料；不同格仍可使用
+ * 配方允许的不同木板等变种。选中的格子与总投入量同时返回，采集和摆料共用这一选择。
+ *
+ * <p>这是有界束搜索：估价由调用方提供，保留宽度限制了计算量，也可能剪掉后续更优的
+ * 分支，因此不承诺全局最优。相同成本按候选注册名和原配方顺序稳定选择。
+ */
 public record RecipeAllocation(Plan recipe, Map<Item, Integer> ingredients, int crafts, double cost) {
     private static final int BEAM_WIDTH = 32;
     @FunctionalInterface

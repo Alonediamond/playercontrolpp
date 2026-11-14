@@ -29,18 +29,20 @@ PlayerControl++ builds on MaLiLib to add practical client-side utilities. Press 
 | **Auto Water Fill (requires Litematica)** | Waterlogs blocks that should contain water according to your schematic but do not yet. Especially handy for technical builds and redstone contraptions |
 | **Render-layer Sync (requires Litematica)** | Advances the schematic's render layer after each route traversal, helping you work through a build layer by layer |
 | **Automatic Schematic Material Gathering (requires Baritone, Chest Tracker, and Litematica)** | Finds cached containers, travels to them, and collects the schematic's materials. The current container or workstation can be highlighted in the world |
-| **Manual Material Queue (requires Baritone and Chest Tracker)** | Search for items and arrange batches of additional quantities. Earlier batch targets stay reserved, and a failed batch can be resumed |
+| **Manual Material Queue (requires Baritone and Chest Tracker)** | Arrange batches of additional quantities. Gather finished items directly, gather raw materials then craft, or gather raw materials only. Earlier targets stay reserved |
 | **Build Restocking and Layer Building (requires Baritone and Litematica)** | Refills loose materials when building pauses for supplies. Layer building can be off, upward, or downward |
 
 ### Gathering, Crafting, and Layer Building
 
 - Tracing raw materials for schematic gathering requires LitematList as the list source and an uploaded list. Tracing for the manual queue only requires LitematList to be loaded; no uploaded list is needed. Crafting preserves schematic requirements and earlier queue targets instead of treating them as spare materials.
-- For each batch, recipe selection uses a beam width of 32 and estimates costs up to three recipe layers deep. It considers materials already held, cached stock within range, recipes, and known mineable sources. The estimate ranks candidates; actual container contents are checked when opened.
+- The manual queue offers Direct, Raw + Craft, and Raw Only modes. The raw material preview analyzes the selected batch temporarily without changing LitematList's uploaded list; the two raw modes require LitematList. Raw + Craft gathers and crafts one group at a time instead of stockpiling the entire batch's ingredients. Raw Only changes run targets while saved batch definitions remain finished items. Smelting and smithing cannot be auto crafted; Raw Only can gather their leaf materials.
+- For each batch, recipe selection uses a beam width of 32 and estimates costs up to three recipe layers deep. It considers materials already held, cached stock within range, recipes, and known mineable sources. Recipe definitions are indexed briefly while inventory is read again as needed. The estimate ranks candidates; actual container contents are checked when opened.
 - Batches are planned as they run, so only the current batch's ingredients are gathered. Automatic workstation selection falls back between inventory and marked world positions of the same type; it does not switch between crafting table and stonecutter recipes, whose ingredient counts may differ. Stonecutting input is placed one unit at a time to preserve reserved materials.
-- World material search tries only block positions known to Baritone near the player. The default radius is 64 blocks, with a total limit of 1,200 ticks per item. No known position does not mean the material is absent from the world.
+- World material search tries only block positions known to Baritone near the player. The default radius is 64 blocks, with a total limit of 60 seconds per item (stored as 1,200 ticks). Known sources and loaded sections are captured in stages on the client thread, then searched from a snapshot on a worker thread. Distant sections are skipped, with at most 64 nearby candidates per block type. Canceling, changing worlds, moving far enough, or changing the range or sources discards the old survey. The roughly 2 ms per-step budget is soft and does not guarantee a hitch-free game. No known position does not mean the material is absent from the world.
+- Automatic shulker storage checks space for the material being stored. A full box is chosen only if a stack of the same item and components can still accept more.
 - Layer building is off by default. Upward and downward modes require Litematica's single Y layer mode and a valid schematic range. Unloaded chunks delay completion; changing the layer or schematic settings during a run stops it.
 
-Without Baritone, the gathering, crafting, restocking, and material queue pages are hidden. Routes and route hotkeys remain available separately.
+Configuration search supports Chinese, pinyin, and English keys. Closing and reopening search clears its text, and filtered options and hotkey reset buttons follow their current positions. Mining stall and total time, layer completion delay, and highlight duration are entered in seconds, including decimals. Existing JSON keys and tick values remain compatible; short click delays still use ticks. Without Baritone, the gathering, crafting, restocking, and material queue pages are hidden. Routes and route hotkeys remain available separately.
 
 ---
 
@@ -68,7 +70,7 @@ Without Baritone, the gathering, crafting, restocking, and material queue pages 
 
 ## Supported Versions
 
-`1.21` – `1.21.1` · `1.21.4` · `1.21.6` – `1.21.7` · `1.21.8` · `1.21.11` · `26.1` – `26.1.2` · `26.2`
+`1.21` – `1.21.1` · `1.21.4` · `1.21.6` – `1.21.7` · `1.21.8` · `1.21.10` · `1.21.11` · `26.1` – `26.1.2` · `26.2` · `26.3`
 
 **Client-side only:** PlayerControl++ does not need to be installed on the server.
 

@@ -5,7 +5,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.client.Minecraft;
-import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.config.Configs;
 
 import java.util.ArrayList;
@@ -35,6 +34,7 @@ final class MiningSources {
 
     /** 物品 → 挖了能直接掉出它的方块（按优先级排列）。 */
     private static final Map<Item, List<String>> SOURCES = sources();
+    private static final List<String> BLOCK_IDS = SOURCES.values().stream().flatMap(List::stream).distinct().toList();
 
     /**
      * @param item 目标物品
@@ -53,14 +53,27 @@ final class MiningSources {
     /** 不推断维度生成规则；只在当前维度有限范围内确有方块证据时尝试。 */
     static List<String> availableBlocks(Minecraft mc, Item item) {
         if (mc.level == null || mc.player == null) return List.of();
+        var known = survey().positions();
         int radius = Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue();
-        var known = BaritoneIntegration.getInstance().findKnownMiningSources(blocksFor(item), radius);
-        return blocksFor(item).stream().filter(block -> !known.getOrDefault(block, List.of()).isEmpty())
-                .sorted(java.util.Comparator.comparingDouble(block -> known.get(block).get(0)
-                        .distSqr(mc.player.blockPosition()))).toList();
+        Map<String, Double> distances = new java.util.HashMap<>();
+        for (String id : blocksFor(item)) {
+            var block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(id)).orElse(null);
+            double distance = known.getOrDefault(id, List.of()).stream()
+                    .filter(pos -> !mc.level.hasChunkAt(pos) || block != null && mc.level.getBlockState(pos).is(block))
+                    .mapToDouble(pos -> pos.distSqr(mc.player.blockPosition()))
+                    .filter(value -> value <= (long) radius * radius).min().orElse(Double.POSITIVE_INFINITY);
+            distances.put(id, distance);
+        }
+        return blocksFor(item).stream().filter(id -> Double.isFinite(distances.get(id)))
+                .sorted(java.util.Comparator.comparingDouble(distances::get)).toList();
     }
 
-    static List<String> allBlockIds() { return SOURCES.values().stream().flatMap(List::stream).distinct().toList(); }
+    static KnownMiningSurvey.Status survey() {
+        return KnownMiningSurvey.poll(allBlockIds(),
+                Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue());
+    }
+
+    static List<String> allBlockIds() { return BLOCK_IDS; }
 
     private static Map<Item, List<String>> sources() {
         Map<Item, List<String>> map = new LinkedHashMap<>();

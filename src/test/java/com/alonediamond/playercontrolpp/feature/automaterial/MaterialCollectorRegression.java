@@ -1,10 +1,15 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import com.alonediamond.playercontrolpp.config.SecondsConfigOptionRegression;
+import com.alonediamond.playercontrolpp.gui.ConfigSearchRegression;
+import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerStorageCapacityRegression;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.MiningSnapshotSearchRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerMaterialCollector;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialPlanRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RecipeAllocationRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueueRegression;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualRawMaterialPlanRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.restock.LayerBuildControllerRegression;
 
 import net.minecraft.SharedConstants;
@@ -68,6 +73,11 @@ public final class MaterialCollectorRegression {
         checks += ManualMaterialQueueRegression.run();
         checks += RecipeAllocationRegression.run();
         checks += LayerBuildControllerRegression.run();
+        checks += SecondsConfigOptionRegression.run();
+        checks += ConfigSearchRegression.run();
+        checks += ShulkerStorageCapacityRegression.run();
+        checks += MiningSnapshotSearchRegression.run();
+        checks += ManualRawMaterialPlanRegression.run();
         System.out.println("Material collector regression: " + checks + " checks passed");
     }
     private static ContainerMaterialCollector.Selection select(Item item, int total, int held, List<Slot> slots, int threshold, boolean mixed) {

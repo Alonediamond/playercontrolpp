@@ -6,6 +6,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGathere
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialBatch;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueue;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialSearch;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualPreparationMode;
 import net.minecraft.client.Minecraft;
 //#if MC >= 260000
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -25,13 +26,13 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-/** 仅编辑手工备货批次；开始、失败恢复和世界切换由备货主状态机接线。 */
+/** 编辑手工批次、选择启动模式并查看原料预览；运行状态由备货主状态机管理。 */
 public final class ManualMaterialQueueGui extends Screen {
     private static final int ROW = 18;
     private static final int LEFT = 10;
     private static final int LEFT_WIDTH = 128;
     private static final int RIGHT = LEFT + LEFT_WIDTH + 10;
-    private static final int LIST_TOP = 90;
+    private static final int LIST_TOP = 122;
     private final Screen parent;
     private final ManualMaterialQueue queue = ManualMaterialQueue.getInstance();
     private final List<Candidate> catalog = new ArrayList<>();
@@ -51,6 +52,9 @@ public final class ManualMaterialQueueGui extends Screen {
     private Button startButton;
     private Button resumeButton;
     private Button stopButton;
+    private Button modeButton;
+    private Button previewButton;
+    private ManualPreparationMode preparationMode = ManualPreparationMode.DIRECT;
     private int batchScroll;
     private int resultScroll;
     private int materialScroll;
@@ -63,6 +67,7 @@ public final class ManualMaterialQueueGui extends Screen {
         super(Component.translatable("playercontrolpp.gui.manual.title"));
         this.parent = parent;
         queue.load();
+        if (!queue.isEditingAllowed()) preparationMode = AutoMaterialGatherer.getInstance().manualPreparationMode();
         for (Item item : BuiltInRegistries.ITEM) {
             if (item == Items.AIR) continue;
             String id = BuiltInRegistries.ITEM.getKey(item).toString();
@@ -96,14 +101,24 @@ public final class ManualMaterialQueueGui extends Screen {
                 .bounds(LEFT, 56, 62, 20).build());
         downButton = addRenderableWidget(Button.builder(label("move_down"), b -> move(1))
                 .bounds(LEFT + 65, 56, 62, 20).build());
+        modeButton = addRenderableWidget(Button.builder(modeLabel(), b -> {
+            preparationMode = switch (preparationMode) {
+                case DIRECT -> ManualPreparationMode.RAW_THEN_CRAFT;
+                case RAW_THEN_CRAFT -> ManualPreparationMode.RAW_ONLY;
+                case RAW_ONLY -> ManualPreparationMode.DIRECT;
+            };
+            b.setMessage(modeLabel());
+        }).bounds(LEFT, 80, LEFT_WIDTH, 20).build());
+        previewButton = addRenderableWidget(Button.builder(label("preview_raw"), b -> {
+            if (selectedBatch == null || selectedBatch.isEmpty() || !saveChanges()) return;
+            ScreenCompat.setScreen(Minecraft.getInstance(),
+                    new ManualRawMaterialPreviewGui(this, selectedBatch));
+        }).bounds(RIGHT, 80, rightWidth, 20).build());
         addRenderableWidget(Button.builder(label("back"), b -> onClose())
                 .bounds(width - 62, 8, 52, 20).build());
         startButton = addRenderableWidget(Button.builder(label("start"), b -> {
-            if (dirty) {
-                if (!queue.save()) return;
-                dirty = false;
-            }
-            if (AutoMaterialGatherer.getInstance().startManualQueue())
+            if (!saveChanges()) return;
+            if (AutoMaterialGatherer.getInstance().startManualQueue(preparationMode))
                 ScreenCompat.setScreen(Minecraft.getInstance(), null);
         }).bounds(LEFT, height - 29, 40, 20).build());
         resumeButton = addRenderableWidget(Button.builder(label("resume"), b -> {
@@ -160,6 +175,21 @@ public final class ManualMaterialQueueGui extends Screen {
         return Component.translatable("playercontrolpp.gui.manual." + suffix);
     }
 
+    private Component modeLabel() {
+        return label("mode." + switch (preparationMode) {
+            case DIRECT -> "direct";
+            case RAW_THEN_CRAFT -> "raw_then_craft";
+            case RAW_ONLY -> "raw_only";
+        });
+    }
+
+    private boolean saveChanges() {
+        if (!dirty) return true;
+        if (!queue.save()) return false;
+        dirty = false;
+        return true;
+    }
+
     private void move(int offset) {
         if (selectedBatch != null && queue.isEditingAllowed() && queue.moveBatch(selectedBatch, offset)) dirty = true;
     }
@@ -202,10 +232,7 @@ public final class ManualMaterialQueueGui extends Screen {
 
     @Override
     public void onClose() {
-        if (dirty) {
-            if (!queue.save()) return;
-            dirty = false;
-        }
+        if (!saveChanges()) return;
         if (parent == null) super.onClose();
         else ScreenCompat.setScreen(Minecraft.getInstance(), parent);
     }
@@ -228,6 +255,9 @@ public final class ManualMaterialQueueGui extends Screen {
         startButton.active = !gatherer.isActive()
                 && (state == ManualMaterialQueue.State.IDLE || state == ManualMaterialQueue.State.COMPLETE)
                 && batches.stream().anyMatch(batch -> !batch.isEmpty());
+        modeButton.active = !gatherer.isActive()
+                && (state == ManualMaterialQueue.State.IDLE || state == ManualMaterialQueue.State.COMPLETE);
+        previewButton.active = index >= 0 && !selectedBatch.isEmpty();
         resumeButton.active = !gatherer.isActive() && state == ManualMaterialQueue.State.PAUSED;
         stopButton.active = gatherer.isActive()
                 || state == ManualMaterialQueue.State.PAUSED || state == ManualMaterialQueue.State.RUNNING;
@@ -269,7 +299,7 @@ public final class ManualMaterialQueueGui extends Screen {
         String secondLine = font.plainSubstrByWidth(hint.substring(firstLine.length()), LEFT_WIDTH);
         ctx.text(font, Component.literal(firstLine), LEFT, height - 53, 0xFFAAAAAA, false);
         ctx.text(font, Component.literal(secondLine), LEFT, height - 43, 0xFFAAAAAA, false);
-        int middle = Math.max(LIST_TOP + 35, (height + LIST_TOP) / 2);
+        int middle = panelMiddle();
         int bottom = height - 55;
         drawPanel(ctx, LEFT, LIST_TOP, LEFT_WIDTH, bottom - LIST_TOP);
         drawPanel(ctx, RIGHT, LIST_TOP, width - RIGHT - 10, middle - LIST_TOP - 3);
@@ -280,7 +310,7 @@ public final class ManualMaterialQueueGui extends Screen {
         Component status = statusText();
         int statusColor = queue.state() == ManualMaterialQueue.State.PAUSED ? 0xFFFF7777 : 0xFFB8D8FF;
         ctx.text(font, Component.literal(font.plainSubstrByWidth(status.getString(), width - 20)),
-                LEFT, 78, statusColor, false);
+                LEFT, 107, statusColor, false);
     }
 
     private Component statusText() {
@@ -297,6 +327,10 @@ public final class ManualMaterialQueueGui extends Screen {
 
     private static void drawPanel(DrawCtx ctx, int x, int y, int w, int h) {
         if (w > 0 && h > 0) ctx.fill(x, y, x + w, y + h, 0x6030333A);
+    }
+
+    private int panelMiddle() {
+        return Math.max(LIST_TOP + 35, (height - 55 + LIST_TOP) / 2);
     }
 
     private void drawBatches(DrawCtx ctx, int bottom) {
@@ -368,7 +402,7 @@ public final class ManualMaterialQueueGui extends Screen {
 
     private boolean handleClick(double x, double y, int button) {
         if (button != 0 || y < LIST_TOP || y >= height - 55) return false;
-        int middle = Math.max(LIST_TOP + 35, (height + LIST_TOP) / 2);
+        int middle = panelMiddle();
         if (x >= LEFT && x < LEFT + LEFT_WIDTH) {
             int i = batchScroll + ((int) y - LIST_TOP) / ROW;
             if (i < queue.batches().size()) {
@@ -401,7 +435,7 @@ public final class ManualMaterialQueueGui extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double hAmount, double vAmount) {
         int direction = vAmount > 0 ? -1 : 1;
-        int middle = Math.max(LIST_TOP + 35, (height + LIST_TOP) / 2);
+        int middle = panelMiddle();
         if (mouseX < RIGHT) batchScroll += direction;
         else if (mouseY < middle) resultScroll += direction;
         else materialScroll += direction;

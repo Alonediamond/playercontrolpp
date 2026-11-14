@@ -65,6 +65,13 @@ public final class ManualMaterialQueue {
     public int activeIndex() { return activeIndex; }
 
     public String failure() { return failure; }
+    public Map<Item, Integer> completedTargets() { return Map.copyOf(completedTargets); }
+
+    /** 只备原料时仅替换本次运行目标，文件中的成品定义始终保留。 */
+    public void replaceActiveTargets(List<MaterialItemEntry> targets) {
+        if (state != State.RUNNING || activeBatch == null) throw new IllegalStateException("manual queue is not running");
+        activeBatch = new ActiveBatch(activeBatch.index(), activeBatch.name(), List.copyOf(targets));
+    }
 
     public boolean isEditingAllowed() { return state != State.RUNNING && state != State.PAUSED; }
 
@@ -232,7 +239,7 @@ public final class ManualMaterialQueue {
                     failure = "unknown_item: " + row.getKey();
                     return false;
                 }
-                int held = Math.max(0, countHeld.applyAsInt(item));
+                int held = Math.max(completedTargets.getOrDefault(item, 0), Math.max(0, countHeld.applyAsInt(item)));
                 if (held > Integer.MAX_VALUE - row.getValue()) {
                     activeIndex = i;
                     activeBatch = null;
