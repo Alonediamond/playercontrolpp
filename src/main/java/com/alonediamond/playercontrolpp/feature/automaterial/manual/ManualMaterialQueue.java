@@ -5,13 +5,14 @@ import com.alonediamond.playercontrolpp.compat.MaLiLibCompat;
 import com.alonediamond.playercontrolpp.compat.RegistryCompat;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.util.AtomicFiles;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.resources.Identifier;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 
 import java.io.IOException;
@@ -37,6 +38,7 @@ public final class ManualMaterialQueue {
 
     private static final ManualMaterialQueue INSTANCE = new ManualMaterialQueue();
     private static final String FILE_NAME = "playercontrolpp_manual_materials.json";
+    private static final int FORMAT_VERSION = 1;
     private final Path fileOverride;
     private final List<ManualMaterialBatch> batches = new ArrayList<>();
     private final List<ManualMaterialBatch> view = Collections.unmodifiableList(batches);
@@ -56,7 +58,10 @@ public final class ManualMaterialQueue {
 
     public static ManualMaterialQueue getInstance() { return INSTANCE; }
 
-    public List<ManualMaterialBatch> batches() { load(); return view; }
+    public List<ManualMaterialBatch> batches() {
+        load();
+        return view;
+    }
 
     public State state() { return state; }
 
@@ -113,7 +118,7 @@ public final class ManualMaterialQueue {
         List<ManualMaterialBatch> parsed = new ArrayList<>();
         try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-            if (root.get("format").getAsInt() != 1) throw new IOException("unsupported manual queue format");
+            if (root.get("format").getAsInt() != FORMAT_VERSION) throw new IOException("unsupported manual queue format");
             JsonArray array = root.getAsJsonArray("batches");
             if (array == null) throw new IOException("missing batches");
             for (JsonElement batchElement : array) {
@@ -150,7 +155,7 @@ public final class ManualMaterialQueue {
         load();
         if (loadFailed) return false;
         JsonObject root = new JsonObject();
-        root.addProperty("format", 1);
+        root.addProperty("format", FORMAT_VERSION);
         JsonArray array = new JsonArray();
         for (ManualMaterialBatch batch : batches) {
             JsonObject object = new JsonObject();

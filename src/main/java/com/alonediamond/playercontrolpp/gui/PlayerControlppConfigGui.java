@@ -1,31 +1,39 @@
 package com.alonediamond.playercontrolpp.gui;
 
+import com.alonediamond.playercontrolpp.Playercontrolpp;
+//#if MC >= 260000
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+//#else
+//$$ import net.minecraft.client.gui.GuiGraphics;
+//#endif
+
 import com.alonediamond.playercontrolpp.compat.DrawCtx;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
-import fi.dy.masa.malilib.config.IConfigBase;
 import com.alonediamond.playercontrolpp.route.RouteManager;
-import fi.dy.masa.malilib.gui.GuiConfigsBase;
+
+import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase.ConfigOptionWrapper;
+import fi.dy.masa.malilib.gui.GuiConfigsBase;
 import fi.dy.masa.malilib.gui.button.ButtonBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
 import fi.dy.masa.malilib.gui.button.IButtonActionListener;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptions;
 import fi.dy.masa.malilib.util.StringUtils;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.ChatFormatting;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 public class PlayerControlppConfigGui extends GuiConfigsBase {
 
-    public static final String MOD_ID = "playercontrolpp";
+    public static final String MOD_ID = Playercontrolpp.MOD_ID;
 
     private static ConfigGuiTab selectedTab = ConfigGuiTab.HOTKEYS;
     private int listTop = 52;
@@ -194,13 +202,13 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
 
     //#if MC >= 260000
     @Override
-    public void extractRenderState(net.minecraft.client.gui.GuiGraphicsExtractor drawContext, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor drawContext, int mouseX, int mouseY, float delta) {
         super.extractRenderState(drawContext, mouseX, mouseY, delta);
         renderOverlay(new DrawCtx(drawContext));
     }
     //#else
     //$$ @Override
-    //$$ public void render(net.minecraft.client.gui.GuiGraphics drawContext, int mouseX, int mouseY, float delta) {
+    //$$ public void render(GuiGraphics drawContext, int mouseX, int mouseY, float delta) {
     //$$     super.render(drawContext, mouseX, mouseY, delta);
     //$$     renderOverlay(new DrawCtx(drawContext));
     //$$ }

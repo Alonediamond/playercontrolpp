@@ -3,12 +3,11 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialRequirements;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialTarget;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
-import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
-
 import com.alonediamond.playercontrolpp.util.ItemUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -28,7 +27,7 @@ public final class GatherContext {
     public int countHeld(Item item) {
         int count = ItemUtil.countEverywhere(client.player, item);
         for (int slot : extractionBoxSlots) {
-            if (slot >= 0 && slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE) {
+            if (slot >= 0 && slot < Inventory.INVENTORY_SIZE) {
                 count -= ItemUtil.countInside(client.player.getInventory().getItem(slot), item);
             }
         }

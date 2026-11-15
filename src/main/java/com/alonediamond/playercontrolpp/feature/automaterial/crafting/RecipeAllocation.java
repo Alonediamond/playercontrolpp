@@ -1,11 +1,17 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import com.alonediamond.playercontrolpp.compat.CraftingRecipes.Plan;
+
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 为整批合成同时选择配方及每格的合法物品变种。
@@ -20,8 +26,12 @@ import java.util.*;
  */
 public record RecipeAllocation(Plan recipe, Map<Item, Integer> ingredients, int crafts, double cost) {
     private static final int BEAM_WIDTH = 32;
+
     @FunctionalInterface
-    public interface Cost { double estimate(Item item, int count); }
+    public interface Cost {
+        double estimate(Item item, int count);
+    }
+
     private record Candidate(List<List<ItemStack>> grid, Map<Item, Integer> counts, double cost) {}
 
     public static RecipeAllocation choose(List<Plan> recipes, int outputNeeded, Cost cost) {
@@ -30,27 +40,7 @@ public record RecipeAllocation(Plan recipe, Map<Item, Integer> ingredients, int 
             int crafts = craftsFor(outputNeeded, recipe.outputCount());
             List<Candidate> beam = List.of(new Candidate(List.of(), Map.of(), 0));
             for (List<ItemStack> slot : recipe.ingredients()) {
-                List<Candidate> next = new ArrayList<>();
-                List<Item> options = slot.stream().map(ItemStack::getItem).distinct()
-                        .sorted(Comparator.comparing(item -> BuiltInRegistries.ITEM.getKey(item).toString())).toList();
-                for (Candidate previous : beam) {
-                    if (options.isEmpty()) {
-                        List<List<ItemStack>> grid = new ArrayList<>(previous.grid);
-                        grid.add(List.of());
-                        next.add(new Candidate(grid, previous.counts, previous.cost));
-                    }
-                    for (Item item : options) {
-                        Map<Item, Integer> counts = new LinkedHashMap<>(previous.counts);
-                        counts.merge(item, crafts, RecipeAllocation::target);
-                        double total = counts.entrySet().stream()
-                                .mapToDouble(entry -> cost.estimate(entry.getKey(), entry.getValue())).sum();
-                        List<List<ItemStack>> grid = new ArrayList<>(previous.grid);
-                        grid.add(List.of(new ItemStack(item)));
-                        next.add(new Candidate(grid, counts, total));
-                    }
-                }
-                next.sort(Comparator.comparingDouble(Candidate::cost));
-                beam = next.stream().limit(BEAM_WIDTH).toList();
+                beam = expandSlot(beam, slot, crafts, cost);
                 if (beam.isEmpty()) break;
             }
             if (beam.isEmpty() || beam.get(0).counts.isEmpty()) continue;
@@ -62,6 +52,35 @@ public record RecipeAllocation(Plan recipe, Map<Item, Integer> ingredients, int 
             }
         }
         return best;
+    }
+
+    private static List<Candidate> expandSlot(List<Candidate> beam, List<ItemStack> slot, int crafts, Cost cost) {
+        List<Item> options = slot.stream()
+                .map(ItemStack::getItem)
+                .distinct()
+                .sorted(Comparator.comparing(item -> BuiltInRegistries.ITEM.getKey(item).toString()))
+                .toList();
+        List<Candidate> next = new ArrayList<>();
+        for (Candidate previous : beam) {
+            if (options.isEmpty()) {
+                List<List<ItemStack>> grid = new ArrayList<>(previous.grid);
+                grid.add(List.of());
+                next.add(new Candidate(grid, previous.counts, previous.cost));
+                continue;
+            }
+            for (Item item : options) {
+                Map<Item, Integer> counts = new LinkedHashMap<>(previous.counts);
+                counts.merge(item, crafts, RecipeAllocation::target);
+                double total = counts.entrySet().stream()
+                        .mapToDouble(entry -> cost.estimate(entry.getKey(), entry.getValue()))
+                        .sum();
+                List<List<ItemStack>> grid = new ArrayList<>(previous.grid);
+                grid.add(List.of(new ItemStack(item)));
+                next.add(new Candidate(grid, counts, total));
+            }
+        }
+        next.sort(Comparator.comparingDouble(Candidate::cost));
+        return next.stream().limit(BEAM_WIDTH).toList();
     }
 
     public static int craftsFor(int outputNeeded, int outputPerCraft) {

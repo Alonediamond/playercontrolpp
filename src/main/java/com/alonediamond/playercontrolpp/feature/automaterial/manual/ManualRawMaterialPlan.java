@@ -1,24 +1,37 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.manual;
 
+import com.alonediamond.playercontrolpp.compat.CraftingRecipes;
 import com.alonediamond.playercontrolpp.compat.RegistryCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
-import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
+import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
+
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.ToIntFunction;
 
 /** LitematList 临时树的自有快照，成品目标、原料目标及合成阶段预留互不覆盖。 */
 public record ManualRawMaterialPlan(List<MaterialItemEntry> materials, boolean unsupportedRecipe, List<RawNode> roots) {
-    public ManualRawMaterialPlan { materials = List.copyOf(materials); roots = List.copyOf(roots); }
+    public ManualRawMaterialPlan {
+        materials = List.copyOf(materials);
+        roots = List.copyOf(roots);
+    }
 
     public RawNode rootFor(Item item) {
         String id = BuiltInRegistries.ITEM.getKey(item).toString();
-        return roots.stream().filter(root -> root.itemId().equals(id)).findFirst().orElse(null);
+        return roots.stream()
+                .filter(root -> root.itemId().equals(id))
+                .findFirst()
+                .orElse(null);
     }
 
     public static ManualRawMaterialPlan analyze(ManualMaterialBatch batch) {
@@ -26,10 +39,7 @@ public record ManualRawMaterialPlan(List<MaterialItemEntry> materials, boolean u
         if (!integration.isLoaded()) throw new IllegalStateException("litematlist_missing");
         List<LitematListIntegration.RawRequest> requests = new ArrayList<>();
         batch.amounts().forEach((id, count) -> requests.add(new LitematListIntegration.RawRequest(resolve(id), count)));
-        int depth = Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH.getIntegerValue();
-        if (depth < 0) depth = Math.max(0, LitematListIntegration.getObservedPlayerDepth());
-        if (Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH.getIntegerValue() < 0
-                && LitematListIntegration.getObservedPlayerDepth() < 0) depth = 5;
+        int depth = LitematListIntegration.resolveRawDepth(Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH.getIntegerValue());
         List<RawNode> roots = integration.analyzeTemporaryMaterials(requests, depth);
         if (roots.size() != requests.size()) throw new IllegalStateException("raw_analysis_failed");
         return fromTrees(roots);
@@ -44,7 +54,7 @@ public record ManualRawMaterialPlan(List<MaterialItemEntry> materials, boolean u
             if (node.count() <= 0) throw new IllegalArgumentException("invalid_raw_count");
             if (node.children().isEmpty()) totals.merge(resolve(node.itemId()), node.count(), Math::addExact);
             else {
-                unsupported |= !Set.of("crafting_shaped", "crafting_shapeless", "stonecutting").contains(node.recipeType());
+                unsupported |= !CraftingRecipes.isSupportedType(node.recipeType());
                 remaining.addAll(node.children());
             }
         }
@@ -73,8 +83,11 @@ public record ManualRawMaterialPlan(List<MaterialItemEntry> materials, boolean u
     }
 
     private static List<MaterialItemEntry> entries(Map<Item, Integer> totals) {
-        return totals.entrySet().stream().filter(entry -> entry.getValue() > 0).map(entry -> new MaterialItemEntry(entry.getKey(), entry.getValue(),
-                entry.getKey().getDefaultMaxStackSize())).toList();
+        return totals.entrySet().stream()
+                .filter(entry -> entry.getValue() > 0)
+                .map(entry -> new MaterialItemEntry(
+                        entry.getKey(), entry.getValue(), entry.getKey().getDefaultMaxStackSize()))
+                .toList();
     }
 
     private static Item resolve(String id) {

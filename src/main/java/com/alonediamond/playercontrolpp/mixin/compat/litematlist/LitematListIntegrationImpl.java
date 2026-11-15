@@ -1,19 +1,17 @@
 package com.alonediamond.playercontrolpp.mixin.compat.litematlist;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
-import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.MaterialEntry;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
+import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 
 import com.litematlist.LitematicReader;
 import com.litematlist.RawMaterialTreeAnalyzer;
 import com.litematlist.RecipeTreeNode;
-import com.litematlist.api.LitematListAPI;
 import com.litematlist.api.LitematListAPI.MaterialItem;
-
+import com.litematlist.api.LitematListAPI;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Unique;
@@ -89,7 +87,7 @@ public abstract class LitematListIntegrationImpl {
                 analyzer.setMaxDepth(maxDepth);
             }
             List<LitematicReader.MaterialEntry> entries = new ArrayList<>();
-            for (var request : requests) {
+            for (LitematListIntegration.RawRequest request : requests) {
                 if (request.item() == null || request.count() <= 0) return List.of();
                 entries.add(new LitematicReader.MaterialEntry(request.item(), "", request.count()));
             }

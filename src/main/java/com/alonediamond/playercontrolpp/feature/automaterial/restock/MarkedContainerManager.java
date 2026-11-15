@@ -62,8 +62,14 @@ public class MarkedContainerManager {
 
         for (MarkedContainer mc : all()) {
             if (!mc.dimension().equals(currentDim)) continue;
-            if (!mc.enabled()) { disabled++; continue; }
-            if (mc.pos().distSqr(origin) > maxDistanceSq) { tooFar++; continue; }
+            if (!mc.enabled()) {
+                disabled++;
+                continue;
+            }
+            if (mc.pos().distSqr(origin) > maxDistanceSq) {
+                tooFar++;
+                continue;
+            }
             usable.add(mc.pos());
         }
 

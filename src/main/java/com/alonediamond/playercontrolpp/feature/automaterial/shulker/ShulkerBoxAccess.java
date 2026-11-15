@@ -1,22 +1,22 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.shulker;
 
-import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerPlacement;
-import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerStorageCapacity;
-import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
-import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
-import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
-import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
-import com.alonediamond.playercontrolpp.inventory.TransferSession;
-
 import com.alonediamond.playercontrolpp.compat.InventoryCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.StorageMode;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.input.SimulatedInput;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
+import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
+import com.alonediamond.playercontrolpp.inventory.TransferSession;
+import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerPlacement;
+import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerStorageCapacity;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -24,6 +24,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
@@ -31,7 +32,13 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import java.util.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** 潜影盒存取周期。借盒、打开、转移、回收均有独立状态和超时；归还由主流程处理。 */
 public final class ShulkerBoxAccess {
@@ -40,6 +47,11 @@ public final class ShulkerBoxAccess {
     private static final int MAX_NUDGE_ATTEMPTS = 2;
     /** 每次侧移按住方向键多少 tick（约半秒，够走一格）。 */
     private static final int NUDGE_HOLD_TICKS = 10;
+    private static final int BOX_READY_TIMEOUT_TICKS = 40;
+    private static final int PLACEMENT_TIMEOUT_TICKS = 30;
+    private static final int OPEN_TIMEOUT_TICKS = 40;
+    private static final int MINING_TIMEOUT_TICKS = 160;
+    private static final int PICKUP_TIMEOUT_TICKS = 100;
     private enum Phase {
         TAKE, TAKE_WAIT, READY,
         FIND, NUDGE, NUDGE_WAIT, PLACE, PLACE_WAIT,
@@ -130,7 +142,10 @@ public final class ShulkerBoxAccess {
         if (!active) return result;
         Minecraft mc = ctx.client;
         if (mc.player == null || mc.level == null || mc.player.isDeadOrDying()) return finish(mc, StorageResult.FAILED);
-        if (cooldownTicks > 0) { cooldownTicks--; return StorageResult.ACTIVE; }
+        if (cooldownTicks > 0) {
+            cooldownTicks--;
+            return StorageResult.ACTIVE;
+        }
         phaseTicks++;
         return switch (phase) {
             case TAKE -> takeBox(ctx);
@@ -175,7 +190,7 @@ public final class ShulkerBoxAccess {
         Minecraft mc = ctx.client;
         if (mc.player.containerMenu != mc.player.inventoryMenu) {
             mc.player.closeContainer();
-            if (phaseTicks > 40) return fail(ctx, "shulker_open_failed");
+            if (phaseTicks > BOX_READY_TIMEOUT_TICKS) return fail(ctx, "shulker_open_failed");
             return StorageResult.ACTIVE;
         }
         if (operation == Operation.STORE) boxSlot = findStorageBox(ctx);
@@ -214,7 +229,10 @@ public final class ShulkerBoxAccess {
         if (boxSlot >= PlayerUtil.HOTBAR_SIZE) {
             int menuSlot = PlayerUtil.menuSlotOf(mc.player.inventoryMenu, mc.player.getInventory(), boxSlot);
             SlotActionCompat.swapWithHotbar(mc, mc.player.inventoryMenu.containerId, menuSlot, selectedSlot);
-            if (returnTarget != null) { ctx.extractionBoxSlots.remove(boxSlot); ctx.extractionBoxSlots.add(selectedSlot); }
+            if (returnTarget != null) {
+                ctx.extractionBoxSlots.remove(boxSlot);
+                ctx.extractionBoxSlots.add(selectedSlot);
+            }
             boxSlot = selectedSlot;
         }
         InventoryCompat.setSelectedSlot(mc.player.getInventory(), boxSlot);
@@ -259,7 +277,7 @@ public final class ShulkerBoxAccess {
             if (returnTarget != null) ctx.extractionBoxSlots.remove(boxSlot);
             rememberBoxes(mc);
             enter(Phase.OPEN, 2);
-        } else if (phaseTicks > 30) return fail(ctx, "shulker_place_failed");
+        } else if (phaseTicks > PLACEMENT_TIMEOUT_TICKS) return fail(ctx, "shulker_place_failed");
         return active ? StorageResult.ACTIVE : result;
     }
 
@@ -272,7 +290,8 @@ public final class ShulkerBoxAccess {
         } else {
             Direction face = BlockInteraction.nearestFace(mc.player.getEyePosition(), position);
             mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND,
-                    new BlockHitResult(Vec3.atCenterOf(position).add(face.getStepX() * .5, face.getStepY() * .5, face.getStepZ() * .5), face, position, false));
+                    new BlockHitResult(Vec3.atCenterOf(position)
+                            .add(face.getStepX() * .5, face.getStepY() * .5, face.getStepZ() * .5), face, position, false));
         }
         enter(Phase.OPEN_WAIT, 4);
         return active ? StorageResult.ACTIVE : result;
@@ -281,7 +300,7 @@ public final class ShulkerBoxAccess {
     private StorageResult waitForOpen(GatherContext ctx) {
         Minecraft mc = ctx.client;
         if (mc.player.containerMenu instanceof ShulkerBoxMenu) enter(Phase.TRANSFER, 2);
-        else if (phaseTicks > 40) return fail(ctx, "shulker_open_failed");
+        else if (phaseTicks > OPEN_TIMEOUT_TICKS) return fail(ctx, "shulker_open_failed");
         return active ? StorageResult.ACTIVE : result;
     }
 
@@ -315,7 +334,7 @@ public final class ShulkerBoxAccess {
             Direction face = BlockInteraction.nearestFace(mc.player.getEyePosition(), position);
             if (phaseTicks == 1) mc.gameMode.startDestroyBlock(position, face);
             mc.gameMode.continueDestroyBlock(position, face);
-            if (phaseTicks > 160) return fail(ctx, "shulker_mine_failed");
+            if (phaseTicks > MINING_TIMEOUT_TICKS) return fail(ctx, "shulker_mine_failed");
         }
         return active ? StorageResult.ACTIVE : result;
     }
@@ -323,17 +342,26 @@ public final class ShulkerBoxAccess {
     private StorageResult waitForPickup(GatherContext ctx) {
         Minecraft mc = ctx.client;
         int recovered = findNewBox(mc);
-        if (recovered >= 0) { placed = false; return afterBox(ctx, recovered); }
-        if (phaseTicks > 100) return fail(ctx, "shulker_pickup_failed");
+        if (recovered >= 0) {
+            placed = false;
+            return afterBox(ctx, recovered);
+        }
+        if (phaseTicks > PICKUP_TIMEOUT_TICKS) return fail(ctx, "shulker_pickup_failed");
         return active ? StorageResult.ACTIVE : result;
     }
 
     /** 两种存取方向共享会话进展检查，每次只执行一次真实转移。 */
     private void transferContents(GatherContext ctx) {
         Minecraft mc = ctx.client;
-        if (!(mc.player.containerMenu instanceof ShulkerBoxMenu)) { fail(ctx, "shulker_open_failed"); return; }
-        var menu = mc.player.containerMenu;
-        if (!menu.getCarried().isEmpty()) { fail(ctx, "transfer_interrupted"); return; }
+        if (!(mc.player.containerMenu instanceof ShulkerBoxMenu)) {
+            fail(ctx, "shulker_open_failed");
+            return;
+        }
+        AbstractContainerMenu menu = mc.player.containerMenu;
+        if (!menu.getCarried().isEmpty()) {
+            fail(ctx, "transfer_interrupted");
+            return;
+        }
         // 模拟模式为回收盒子保留一个空格；先归还借盒，再交回满包整理流程。
         if ((operation == Operation.EXTRACT) && emptySlots(mc) <= (placed ? 1 : 0)) {
             ctx.storageAfterExtraction = true;
@@ -384,7 +412,9 @@ public final class ShulkerBoxAccess {
 
     private int extractGap(GatherContext ctx, Item item) {
         if (!targets.isEmpty()) return Math.max(0, targets.getOrDefault(item, 0) - ItemUtil.countLoose(ctx.client.player, item));
-        for (MaterialItemEntry entry : ctx.wantedEntries()) if (entry.item == item) return Math.max(0, entry.neededCount - ctx.countHeld(item));
+        for (MaterialItemEntry entry : ctx.wantedEntries()) {
+            if (entry.item == item) return Math.max(0, entry.neededCount - ctx.countHeld(item));
+        }
         return 0;
     }
 
@@ -423,13 +453,16 @@ public final class ShulkerBoxAccess {
 
     private void rememberBoxes(Minecraft mc) {
         existingBoxes.clear();
-        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) if (ItemUtil.isShulkerBox(mc.player.getInventory().getItem(i))) existingBoxes.add(i);
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            if (ItemUtil.isShulkerBox(mc.player.getInventory().getItem(i))) existingBoxes.add(i);
+        }
     }
 
     private int findNewBox(Minecraft mc) {
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             ItemStack stack = mc.player.getInventory().getItem(i);
-            if (!existingBoxes.contains(i) && ItemUtil.isShulkerBox(stack) && ItemStack.isSameItemSameComponents(identityOf(stack), identity)) return i;
+            if (!existingBoxes.contains(i) && ItemUtil.isShulkerBox(stack)
+                    && ItemStack.isSameItemSameComponents(identityOf(stack), identity)) return i;
         }
         return -1;
     }
@@ -446,7 +479,11 @@ public final class ShulkerBoxAccess {
         return count;
     }
 
-    private void enter(Phase phase, int cooldownTicks) { this.phase = phase; this.cooldownTicks = cooldownTicks; phaseTicks = 0; }
+    private void enter(Phase phase, int cooldownTicks) {
+        this.phase = phase;
+        this.cooldownTicks = cooldownTicks;
+        phaseTicks = 0;
+    }
     public void releaseKeys() { SimulatedInput.releaseAll(this); }
     public void cancel(Minecraft mc) {
         if (active) {
@@ -456,7 +493,8 @@ public final class ShulkerBoxAccess {
     }
     private void reportPlacedBox(Minecraft mc) {
         if (placed && position != null && mc != null && mc.player != null) {
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_recover_at", position.getX(), position.getY(), position.getZ());
+            MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.shulker_recover_at",
+                    position.getX(), position.getY(), position.getZ());
         }
     }
     private StorageResult finish(Minecraft mc, StorageResult result) {
@@ -468,6 +506,7 @@ public final class ShulkerBoxAccess {
         MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone." + key);
         reportPlacedBox(ctx.client);
         // 放置过盒子或已经借到盒子时停机，避免失败后遗忘世界中/背包中的盒子。
-        return finish(ctx.client, placed || returnTarget != null ? StorageResult.FAILED : optionalStorage ? StorageResult.ABORTED : StorageResult.FAILED);
+        boolean maySkip = optionalStorage && !placed && returnTarget == null;
+        return finish(ctx.client, maySkip ? StorageResult.ABORTED : StorageResult.FAILED);
     }
 }

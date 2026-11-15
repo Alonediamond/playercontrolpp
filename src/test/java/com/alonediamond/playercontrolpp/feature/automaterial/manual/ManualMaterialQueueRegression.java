@@ -1,12 +1,24 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.manual;
 
+import com.alonediamond.playercontrolpp.Playercontrolpp;
+import com.google.gson.stream.MalformedJsonException;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Property;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.IdentityHashMap;
+import java.util.ArrayList;
+import java.util.List;
 
 /** 验证串行批次的新增量、失败恢复及持久化边界。 */
 public final class ManualMaterialQueueRegression {
@@ -69,7 +81,7 @@ public final class ManualMaterialQueueRegression {
                 "停止仅清运行状态，定义不变");
         restored.batches().get(1).removeItem("minecraft:stone");
         restored.batches().get(1).setAmount("minecraft:dirt", 1);
-        Map<net.minecraft.world.item.Item, Integer> owned = new IdentityHashMap<>();
+        Map<Item, Integer> owned = new IdentityHashMap<>();
         check(restored.start(item -> owned.getOrDefault(item, 0)), "新一轮从第一批重新启动");
         owned.put(Items.STONE, 32);
         check(restored.completeActiveBatch(item -> owned.getOrDefault(item, 0))
@@ -87,12 +99,54 @@ public final class ManualMaterialQueueRegression {
         try {
             Files.writeString(file, "{broken json");
             ManualMaterialQueue corrupt = new ManualMaterialQueue(file);
-            check(corrupt.batches().isEmpty() && Files.exists(file.resolveSibling(file.getFileName() + ".corrupt-1")),
-                    "损坏队列被隔离且不加载伪条目");
+            // 只捕获这个故意损坏文件的预期警告；真实运行和其他回归的异常仍正常输出。
+            try (ExpectedQueueWarning warning = new ExpectedQueueWarning()) {
+                check(corrupt.batches().isEmpty() && Files.exists(file.resolveSibling(file.getFileName() + ".corrupt-1")),
+                        "损坏队列被隔离且不加载伪条目");
+                check(warning.isMalformedJsonWarning(), "损坏JSON记录一条可诊断的预期警告");
+            }
             check(corrupt.save(), "隔离成功后可以写入新的队列定义");
             Files.deleteIfExists(file.resolveSibling(file.getFileName() + ".corrupt-1"));
         } catch (IOException e) {
             throw new AssertionError("manual queue corruption IO", e);
+        }
+    }
+
+    private static final class ExpectedQueueWarning extends AbstractAppender implements AutoCloseable {
+        private final Logger logger = (Logger) LogManager.getLogger(Playercontrolpp.MOD_ID);
+        private final boolean additive = logger.isAdditive();
+        private final List<LogEvent> events = new ArrayList<>();
+
+        ExpectedQueueWarning() {
+            super("expected-queue-warning", null, PatternLayout.createDefaultLayout(), false, Property.EMPTY_ARRAY);
+            start();
+            logger.addAppender(this);
+            logger.setAdditive(false);
+        }
+
+        @Override
+        public void append(LogEvent event) {
+            events.add(event.toImmutable());
+        }
+
+        boolean isMalformedJsonWarning() {
+            if (events.size() != 1) return false;
+            LogEvent event = events.getFirst();
+            if (event.getLevel() != Level.WARN
+                    || !event.getMessage().getFormattedMessage().startsWith("Failed to read manual materials;")) {
+                return false;
+            }
+            for (Throwable cause = event.getThrown(); cause != null; cause = cause.getCause()) {
+                if (cause instanceof MalformedJsonException) return true;
+            }
+            return false;
+        }
+
+        @Override
+        public void close() {
+            logger.removeAppender(this);
+            logger.setAdditive(additive);
+            stop();
         }
     }
 

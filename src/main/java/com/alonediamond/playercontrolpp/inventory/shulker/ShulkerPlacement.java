@@ -1,9 +1,12 @@
 package com.alonediamond.playercontrolpp.inventory.shulker;
 
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -89,7 +92,7 @@ public final class ShulkerPlacement {
     }
 
     public static boolean isOpenSpace(Minecraft mc, BlockPos pos) {
-        var state = mc.level.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         return state.isAir() || state.canBeReplaced();
     }
 
@@ -112,7 +115,7 @@ public final class ShulkerPlacement {
     }
 
     /** 世界方向换成相对玩家朝向的移动键。 */
-    public static net.minecraft.client.KeyMapping sideKey(Minecraft mc, Direction dir) {
+    public static KeyMapping sideKey(Minecraft mc, Direction dir) {
         Direction facing = mc.player.getDirection();
         if (dir == facing) return mc.options.keyUp;
         if (dir == facing.getOpposite()) return mc.options.keyDown;

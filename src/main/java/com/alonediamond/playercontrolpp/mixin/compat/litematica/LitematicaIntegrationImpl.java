@@ -2,9 +2,9 @@ package com.alonediamond.playercontrolpp.mixin.compat.litematica;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.PlayerCompat;
-import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.PlacementBounds;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.SelectionBounds;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 
 import fi.dy.masa.litematica.data.DataManager;
 import fi.dy.masa.litematica.materials.MaterialListBase;
@@ -18,9 +18,9 @@ import fi.dy.masa.litematica.selection.AreaSelection;
 import fi.dy.masa.litematica.selection.Box;
 import fi.dy.masa.litematica.selection.SelectionManager;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
+import fi.dy.masa.litematica.world.WorldSchematic;
 import fi.dy.masa.malilib.util.LayerMode;
 import fi.dy.masa.malilib.util.StringUtils;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -28,7 +28,6 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BlockGetter;
-
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Unique;
@@ -36,16 +35,16 @@ import org.spongepowered.asm.mixin.Unique;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
 import java.util.OptionalInt;
+import java.util.Set;
 
 /**
  * {@link LitematicaIntegration} 的直连实现，由 MixinPlugin 在 Litematica 在场时注入，
  * 覆写 stub 的全部默认值。
  *
  * <p>Litematica 从 0.19.60（1.21.1）到 0.28.4（26.2）之间，这里用到的每个类名、方法名与
- * 签名都逐版本核对过（javap），没有任何版本分支。malilib 的 {@code LayerRange} 在新版本
- * 挪了包，但旧包名至今保留为兼容别名，直接 import 旧包全版本可用。
+ * 签名按实际依赖核对。malilib 的 {@code LayerRange} 返回类型在新版本挪了包，
+ * 三处局部变量保留 {@code var}，只调用共同成员，避免为类型名称重复增加版本分支。
  *
  * <p>方法体统一捕获 {@link Throwable} 而不是 {@link Exception}：第三方构建（fork、
  * 未发布的改版）若让某个签名漂移，直接调用会抛 {@link NoSuchMethodError} 这类
@@ -137,7 +136,7 @@ public abstract class LitematicaIntegrationImpl {
     @Overwrite(remap = false)
     public boolean isSchematicChunkLoaded(BlockPos pos) {
         try {
-            var world = SchematicWorldHandler.getSchematicWorld();
+            WorldSchematic world = SchematicWorldHandler.getSchematicWorld();
             return world != null && world.hasChunkAt(pos);
         } catch (Throwable e) {
             return false;
@@ -270,7 +269,6 @@ public abstract class LitematicaIntegrationImpl {
 
         try {
             // malilib 0.28 起该返回类型挪了包（util.LayerRange → util.position.LayerRange），
-            // 用 var 让各子项目按自己依赖的 malilib 推断，源码不需要分支。
             var range = DataManager.getRenderLayerRange();
             if (range == null) return false;
             if (range.getLayerMode() != LayerMode.SINGLE_LAYER) return false;

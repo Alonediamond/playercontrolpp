@@ -6,20 +6,36 @@ import com.alonediamond.playercontrolpp.config.RawMaterialMode;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.ToIntFunction;
 
 /** 每批重新估价：自有富余、有限范围缓存、递归合成、已知可挖来源，依次增加成本。 */
 final class RecipePlanner {
     private static final double UNAVAILABLE = Double.POSITIVE_INFINITY;
+    private static final int MAX_ESTIMATE_DEPTH = 3;
+    // 排序成本不是预计秒数：优先自有富余，其次缓存，再合成或挖矿。
+    private static final double OWNED_ITEM_COST = 0.001;
+    private static final double CONTAINER_VISIT_COST = 10;
+    private static final double CACHED_ITEM_COST = 0.05;
+    private static final double CRAFTING_COST = 100;
+    private static final double MINING_START_COST = 1_000;
+    private static final double MINED_ITEM_COST = 20;
+    private static final double DEPTH_LIMIT_COST = 100_000;
     private final GatherContext ctx;
     private final ToIntFunction<Item> reserved;
     private final Map<Item, List<ChestTrackerIntegration.Stock>> stocks = new HashMap<>();
     private final Map<Item, List<CraftingRecipes.Plan>> recipes = new HashMap<>();
     private final Map<Item, Integer> held = new HashMap<>();
-    private Map<String, List<net.minecraft.core.BlockPos>> knownMining;
+    private Map<String, List<BlockPos>> knownMining;
     private boolean awaitingSurvey;
     private record Estimate(Item item, int amount, int depth, Set<Item> path) {}
     private final Map<Estimate, Double> estimates = new HashMap<>();
@@ -27,10 +43,10 @@ final class RecipePlanner {
     RecipePlanner(GatherContext ctx, ToIntFunction<Item> reserved) {
         this.ctx = ctx;
         this.reserved = reserved;
-        var scope = new CachedContainerSource().scope(0);
+        CachedContainerSource.Scope scope = new CachedContainerSource().scope(0);
         if (scope.error() == null) {
             boolean boxes = Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue();
-            for (var stock : ChestTrackerIntegration.getInstance().stockSnapshot(
+            for (ChestTrackerIntegration.Stock stock : ChestTrackerIntegration.getInstance().stockSnapshot(
                     ctx.client.player.blockPosition(), scope.range(), boxes)) {
                 stocks.computeIfAbsent(stock.item(), ignored -> new ArrayList<>()).add(stock);
             }
@@ -44,7 +60,10 @@ final class RecipePlanner {
                 (ingredient, amount) -> estimate(ingredient, amount, 0, path));
     }
 
-    double ingredientCost(Item item, int count) { return estimate(item, count, 0, new HashSet<>()); }
+    double ingredientCost(Item item, int count) {
+        return estimate(item, count, 0, new HashSet<>());
+    }
+
     boolean awaitingSurvey() { return awaitingSurvey; }
 
     private List<CraftingRecipes.Plan> recipesFor(Item item) {
@@ -64,38 +83,41 @@ final class RecipePlanner {
         if (path.contains(item)) return UNAVAILABLE;
         int target = RecipeAllocation.target(reserved.applyAsInt(item), amount);
         int missing = Math.max(0, target - held.computeIfAbsent(item, ctx::countHeld));
-        if (missing == 0) return amount * 0.001;
+        if (missing == 0) return amount * OWNED_ITEM_COST;
         double cacheCost = 0;
-        for (var stock : stocks.getOrDefault(item, List.of())) {
+        for (ChestTrackerIntegration.Stock stock : stocks.getOrDefault(item, List.of())) {
             int take = Math.min(missing, stock.count());
             if (take <= 0) continue;
-            cacheCost += 10 + Math.sqrt(stock.position().distSqr(ctx.client.player.blockPosition())) + take * .05;
+            double distance = Math.sqrt(stock.position().distSqr(ctx.client.player.blockPosition()));
+            cacheCost += CONTAINER_VISIT_COST + distance + take * CACHED_ITEM_COST;
             missing -= take;
             if (missing == 0) return cacheCost;
         }
-        if (depth >= 3) return cacheCost + 100_000 + missing;
+        if (depth >= MAX_ESTIMATE_DEPTH) return cacheCost + DEPTH_LIMIT_COST + missing;
         double fallback = UNAVAILABLE;
         if (Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue() == RawMaterialMode.WORLD_SEARCH
                 && canMine(item)) {
-            fallback = 1000 + missing * 20.0;
+            fallback = MINING_START_COST + missing * MINED_ITEM_COST;
         }
         path.add(item);
         RecipeAllocation allocation = RecipeAllocation.choose(recipesFor(item), missing,
                 (child, needed) -> estimate(child, needed, depth + 1, path));
         path.remove(item);
-        if (allocation != null) fallback = Math.min(fallback, 100 + allocation.cost());
+        if (allocation != null) fallback = Math.min(fallback, CRAFTING_COST + allocation.cost());
         return cacheCost + fallback;
     }
 
     private boolean canMine(Item item) {
         if (MiningSources.blocksFor(item).isEmpty()) return false;
         if (knownMining == null) {
-            var survey = MiningSources.survey();
+            KnownMiningSurvey.Status survey = MiningSources.survey();
             awaitingSurvey |= !survey.ready();
             knownMining = survey.positions();
         }
         int radius = Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue();
-        return MiningSources.blocksFor(item).stream().anyMatch(id -> knownMining.getOrDefault(id, List.of()).stream()
-                .anyMatch(pos -> pos.distSqr(ctx.client.player.blockPosition()) <= (long) radius * radius));
+        BlockPos origin = ctx.client.player.blockPosition();
+        return MiningSources.blocksFor(item).stream()
+                .anyMatch(id -> knownMining.getOrDefault(id, List.of()).stream()
+                        .anyMatch(pos -> pos.distSqr(origin) <= (long) radius * radius));
     }
 }

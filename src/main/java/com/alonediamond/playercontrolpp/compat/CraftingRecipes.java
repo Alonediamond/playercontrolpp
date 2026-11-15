@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.compat;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -12,7 +13,9 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 //#if MC >= 12102
 import net.minecraft.util.context.ContextMap;
@@ -32,7 +35,14 @@ import net.minecraft.world.item.crafting.display.SlotDisplayContext;
 /** 把各版本的客户端配方书统一成摆料计划；不负责工作站选择和合成流程。 */
 public final class CraftingRecipes {
     private static final int CRAFT_GRID_WIDTH = 3;
+    private static final int RECIPE_CACHE_LIFETIME_TICKS = 100;
     private CraftingRecipes() {}
+
+    public static boolean isSupportedType(String recipeType) {
+        return "crafting_shaped".equals(recipeType)
+                || "crafting_shapeless".equals(recipeType)
+                || "stonecutting".equals(recipeType);
+    }
 
     /**
      * 一次合成用的配方计划：把各版本的配方类型统一成"每个合成格能放哪些物品"。
@@ -84,20 +94,21 @@ public final class CraftingRecipes {
     private static Object indexedWorld;
     private static Object indexedCollections;
     private static long indexedTick;
-    private static java.util.Map<Item, List<Plan>> indexedPlans = java.util.Map.of();
+    private static Map<Item, List<Plan>> indexedPlans = Map.of();
 
     public static void clearCache() {
         indexedWorld = null;
         indexedCollections = null;
-        indexedPlans = java.util.Map.of();
+        indexedPlans = Map.of();
     }
 
     public static List<Plan> findAll(Minecraft mc, Item item) {
         if (mc.player == null || mc.level == null) return List.of();
-        var collections = mc.player.getRecipeBook().getCollections();
+        List<RecipeCollection> collections = mc.player.getRecipeBook().getCollections();
         long tick = mc.level.getGameTime();
-        if (indexedWorld != mc.level || indexedCollections != collections || tick < indexedTick || tick - indexedTick > 100) {
-            java.util.Map<Item, List<Plan>> plans = new java.util.HashMap<>();
+        if (indexedWorld != mc.level || indexedCollections != collections
+                || tick < indexedTick || tick - indexedTick > RECIPE_CACHE_LIFETIME_TICKS) {
+            Map<Item, List<Plan>> plans = new HashMap<>();
             try {
                 //#if MC >= 12102
                 ContextMap contextMap = SlotDisplayContext.fromLevel(mc.level);
@@ -131,7 +142,7 @@ public final class CraftingRecipes {
                 Playercontrolpp.LOGGER.debug("Unable to index crafting recipes", error);
             }
             plans.replaceAll((key, value) -> List.copyOf(value));
-            indexedPlans = java.util.Map.copyOf(plans);
+            indexedPlans = Map.copyOf(plans);
             indexedWorld = mc.level;
             indexedCollections = collections;
             indexedTick = tick;

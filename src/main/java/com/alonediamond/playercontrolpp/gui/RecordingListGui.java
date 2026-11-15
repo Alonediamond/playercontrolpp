@@ -1,23 +1,28 @@
 package com.alonediamond.playercontrolpp.gui;
 
+//#if MC >= 12110
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+//#endif
+
 import com.alonediamond.playercontrolpp.compat.DrawCtx;
-
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-
 import com.alonediamond.playercontrolpp.record.InputRecorder;
 import com.alonediamond.playercontrolpp.record.RecordingFile;
 import com.alonediamond.playercontrolpp.record.RecordingManager;
+
 import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 //#if MC >= 260000
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 //#else
 //$$ import net.minecraft.client.gui.GuiGraphics;
 //#endif
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 import java.util.List;
@@ -124,7 +129,10 @@ public class RecordingListGui extends Screen {
 
         nameField = new EditBox(font, FIELD_X, 0, 130, 18, Component.empty());
         nameField.setResponder(s -> {
-            if (selectedRecording != null) { selectedRecording.setName(s); dirty = true; }
+            if (selectedRecording != null) {
+                selectedRecording.setName(s);
+                dirty = true;
+            }
         });
         this.addWidget(nameField);
 
@@ -221,7 +229,7 @@ public class RecordingListGui extends Screen {
         if (selectedRecording == null) {
             String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
             String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
-            for (var child : this.children()) {
+            for (GuiEventListener child : this.children()) {
                 if (child instanceof Button btn) {
                     String msg = btn.getMessage().getString();
                     if (msg.equals(playLabel) || msg.equals(stopLabel)) btn.visible = false;
@@ -262,7 +270,7 @@ public class RecordingListGui extends Screen {
         int btnY = ry;
         String playLabel = StringUtils.translate("playercontrolpp.gui.recording.play");
         String stopLabel = StringUtils.translate("playercontrolpp.gui.recording.stop");
-        for (var child : this.children()) {
+        for (GuiEventListener child : this.children()) {
             if (child instanceof Button btn) {
                 String msg = btn.getMessage().getString();
                 if (msg.equals(playLabel)) {
@@ -284,7 +292,7 @@ public class RecordingListGui extends Screen {
 
     //#if MC >= 12110
     @Override
-    public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent click, boolean isDragging) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean isDragging) {
         if (handleClick(click.x(), click.y(), click.button())) return true;
         return super.mouseClicked(click, isDragging);
     }
@@ -340,13 +348,13 @@ public class RecordingListGui extends Screen {
 
     //#if MC >= 12110
     @Override
-    public boolean charTyped(net.minecraft.client.input.CharacterEvent input) {
+    public boolean charTyped(CharacterEvent input) {
         EditBox focused = focusedField();
         return focused != null ? focused.charTyped(input) : super.charTyped(input);
     }
 
     @Override
-    public boolean keyPressed(net.minecraft.client.input.KeyEvent input) {
+    public boolean keyPressed(KeyEvent input) {
         EditBox focused = focusedField();
         if (input.key() == KEY_ESCAPE && focused == null) {
             onClose();

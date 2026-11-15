@@ -4,16 +4,18 @@ import com.alonediamond.playercontrolpp.compat.InventoryCompat;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.PlacementBounds;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
@@ -120,10 +122,6 @@ public class AutoWaterFillFeature {
         if (enabled) {
             enabled = false;
             resetState();
-            Minecraft client = Minecraft.getInstance();
-            if (client.player != null) {
-                MessageUtil.sendActionBar(client, "playercontrolpp.message.water_fill.world_change");
-            }
         }
     }
 
@@ -271,7 +269,7 @@ public class AutoWaterFillFeature {
         InventoryCompat.setSelectedSlot(mc.player.getInventory(), slot);
         if (mc.getConnection() != null) {
             mc.getConnection().send(
-                    new net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket(slot));
+                    new ServerboundSetCarriedItemPacket(slot));
         }
     }
 

@@ -1,18 +1,21 @@
 package com.alonediamond.playercontrolpp.feature;
 
-import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
-import com.alonediamond.playercontrolpp.interaction.ContainerOpenWait;
-import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
+import com.alonediamond.playercontrolpp.interaction.ContainerOpenWait;
+import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 
@@ -93,8 +96,8 @@ public class AutoCacheNearbyContainersFeature {
 
     public static void toggle(Minecraft client) {
         if (!enabled && (SchematicSelectionContainerCacheFeature.isActive()
-                || com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.getInstance().isActive()
-                || com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature.getInstance().isActive())) {
+                || AutoMaterialGatherer.getInstance().isActive()
+                || AutoRestockFeature.getInstance().isActive())) {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.schematic_cache.busy");
             return;
         }
@@ -113,10 +116,6 @@ public class AutoCacheNearbyContainersFeature {
         if (enabled) {
             enabled = false;
             resetState();
-            Minecraft client = Minecraft.getInstance();
-            if (client.player != null) {
-                MessageUtil.sendActionBar(client, "playercontrolpp.message.cache_nearby.world_change");
-            }
         }
     }
 

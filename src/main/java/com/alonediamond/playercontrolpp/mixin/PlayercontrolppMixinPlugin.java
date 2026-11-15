@@ -1,11 +1,9 @@
 package com.alonediamond.playercontrolpp.mixin;
 
 import net.fabricmc.loader.api.FabricLoader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
-import org.objectweb.asm.tree.ClassNode;
 
 import java.util.List;
 import java.util.Set;
@@ -22,8 +20,6 @@ import java.util.Set;
  * 启动自检的基准。
  */
 public class PlayercontrolppMixinPlugin implements IMixinConfigPlugin {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(PlayercontrolppMixinPlugin.class);
 
     /**
      * {@code setScreen} 的归属类版本分叉：26.2 起从 {@code Minecraft} 挪到 {@code Gui}。
@@ -62,9 +58,6 @@ public class PlayercontrolppMixinPlugin implements IMixinConfigPlugin {
         chestTrackerLoaded = isLoaded("chesttracker");
         quickShulkerLoaded = isLoaded("quickshulker");
         litematListLoaded = isLoaded("litematlist");
-
-        LOGGER.info("Compat mixins to apply: litematica={}, baritone={}, chesttracker={}, quickshulker={}, litematlist={}",
-                litematicaLoaded, baritoneLoaded, chestTrackerLoaded, quickShulkerLoaded, litematListLoaded);
     }
 
     private static boolean isLoaded(String modId) {

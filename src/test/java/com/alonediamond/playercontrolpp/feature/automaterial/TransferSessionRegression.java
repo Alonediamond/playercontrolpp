@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+
 import com.alonediamond.playercontrolpp.inventory.TransferSession;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.inventory.Slot;
@@ -55,7 +56,7 @@ final class TransferSessionRegression {
         session.bind(box);
         // 此预算仅用于让测试在回归出错时及时失败，不参与生产取物逻辑。
         for (int step = 0; step < 80; step++) {
-            var result = session.transferNext(slots, slot -> {
+            TransferSession.Result result = session.transferNext(slots, slot -> {
                 scanned[0]++;
                 return slot.getItem().is(Items.STONE);
             }, slot -> {

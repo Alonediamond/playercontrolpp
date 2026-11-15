@@ -22,7 +22,10 @@ public final class TransferSession {
         }
     }
 
-    public void reset() { menu = null; attempts.clear(); }
+    public void reset() {
+        menu = null;
+        attempts.clear();
+    }
 
     public boolean canAttempt(Slot slot) {
         ItemStack before = attempts.get(slot.index);

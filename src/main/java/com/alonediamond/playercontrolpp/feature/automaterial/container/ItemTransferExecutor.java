@@ -1,14 +1,16 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
-import com.alonediamond.playercontrolpp.inventory.TransferSession;
-import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
+import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
-import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
-
-import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
+import com.alonediamond.playercontrolpp.inventory.TransferSession;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 
 /**
  * 执行当前容器的一次取物；选择规则与点击事务独立，目标推进交回主状态机。
@@ -26,22 +28,29 @@ public final class ItemTransferExecutor {
 
     public void transfer(GatherContext ctx, AutoMaterialGatherer task) {
         if (ctx.transferCooldown > 0) return;
-        var mc = ctx.client;
-        var menu = mc.player.containerMenu;
-        if (menu == mc.player.inventoryMenu) { task.setState(State.VERIFYING); return; }
+        Minecraft mc = ctx.client;
+        AbstractContainerMenu menu = mc.player.containerMenu;
+        if (menu == mc.player.inventoryMenu) {
+            task.setState(State.VERIFYING);
+            return;
+        }
         transfers.bind(menu);
         if (!menu.getCarried().isEmpty()) {
             task.setState(State.STOPPED, "playercontrolpp.message.baritone.transfer_interrupted");
             return;
         }
-        var selection = ContainerMaterialCollector.select(ctx, menu.slots, transfers::canAttempt);
+        ContainerMaterialCollector.Selection selection = ContainerMaterialCollector.select(ctx, menu.slots, transfers::canAttempt);
         if (selection != null) {
             if (selection.unpack()) {
-                if (PlayerUtil.isInventoryFull(mc.player)) { task.onInventoryFull(); return; }
+                if (PlayerUtil.isInventoryFull(mc.player)) {
+                    task.onInventoryFull();
+                    return;
+                }
                 shulkerAccess.startContainerBoxTake(ctx, selection.slot().index, ctx.currentContainerTarget);
                 return;
             }
-            var result = transfers.attempt(selection.slot(), slot -> SlotTransfer.toPlayer(mc, slot, selection.amount()));
+            TransferSession.Result result = transfers.attempt(selection.slot(),
+                    slot -> SlotTransfer.toPlayer(mc, slot, selection.amount()));
             // 同一个容器内的两次点击之间用单独的间隔：它不受寻路影响，可以比跨容器更短。
             ctx.transferCooldown = Configs.BaritoneSettings.INTRA_CONTAINER_CLICK_DELAY.getIntegerValue();
             if (result == TransferSession.Result.UNCHANGED && PlayerUtil.isInventoryFull(mc.player)) task.onInventoryFull();

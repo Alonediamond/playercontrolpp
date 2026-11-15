@@ -1,5 +1,8 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.data.registries.VanillaRegistries;
 import com.alonediamond.playercontrolpp.config.SecondsConfigOptionRegression;
 import com.alonediamond.playercontrolpp.gui.ConfigSearchRegression;
 import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerStorageCapacityRegression;
@@ -8,6 +11,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialIt
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerMaterialCollector;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialPlanRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RecipeAllocationRegression;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.StonecutterBatchRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueueRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualRawMaterialPlanRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.restock.LayerBuildControllerRegression;
@@ -29,11 +33,11 @@ public final class MaterialCollectorRegression {
         Bootstrap.bootStrap();
         //#if MC >= 260000
         //#if MC >= 260300
-        //$$ var registries = net.minecraft.data.registries.VanillaRegistries.createWorldLookup();
+        //$$ HolderLookup.Provider registries = VanillaRegistries.createWorldLookup();
         //#else
-        var registries = net.minecraft.data.registries.VanillaRegistries.createLookup();
+        HolderLookup.Provider registries = VanillaRegistries.createLookup();
         //#endif
-        net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(registries).forEach(p -> p.apply());
+        BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(registries).forEach(p -> p.apply());
         //#endif
         Item stone = Items.STONE;
         ItemStack full = box(stone, 27, 64);
@@ -49,7 +53,7 @@ public final class MaterialCollectorRegression {
         check(!ContainerMaterialCollector.isFullBox(mixedBox, stone), "杂盒不能按满盒搬走");
         Slot loose = slot(new ItemStack(stone, 64));
         Slot fullSlot = slot(full);
-        var result = select(stone, 900, 0, List.of(loose, fullSlot), 864, false);
+        ContainerMaterialCollector.Selection result = select(stone, 900, 0, List.of(loose, fullSlot), 864, false);
         check(result.slot() == fullSlot && result.amount() == 1 && !result.unpack(), "900 缺口允许拿一满盒超量");
         result = select(stone, 864, 0, List.of(fullSlot, loose), 864, false);
         check(result.slot() == loose, "等于阈值拿散装");
@@ -62,7 +66,7 @@ public final class MaterialCollectorRegression {
         check(select(stone, 900, 0, List.of(slot(mixedBox)), 864, false) == null, "关闭识别不借杂盒");
         result = select(stone, 900, 0, List.of(slot(mixedBox)), 864, true);
         check(result.unpack(), "超过阈值但没有满盒时仍可借杂盒取料");
-        var needs = List.of(new MaterialItemEntry(stone, 64, 64), new MaterialItemEntry(Items.DIRT, 900, 64));
+        List<MaterialItemEntry> needs = List.of(new MaterialItemEntry(stone, 64, 64), new MaterialItemEntry(Items.DIRT, 900, 64));
         Slot dirtBox = slot(box(Items.DIRT, 27, 64));
         result = ContainerMaterialCollector.select(needs, item -> 0, List.of(loose, dirtBox), s -> true, 864, false);
         check(result.slot() == dirtBox, "同一容器其他缺失材料也按满盒优先");
@@ -72,6 +76,7 @@ public final class MaterialCollectorRegression {
         checks += RawMaterialPlanRegression.run();
         checks += ManualMaterialQueueRegression.run();
         checks += RecipeAllocationRegression.run();
+        checks += StonecutterBatchRegression.run();
         checks += LayerBuildControllerRegression.run();
         checks += SecondsConfigOptionRegression.run();
         checks += ConfigSearchRegression.run();

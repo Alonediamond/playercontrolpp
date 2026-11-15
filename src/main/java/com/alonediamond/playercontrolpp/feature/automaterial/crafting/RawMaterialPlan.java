@@ -1,9 +1,13 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
+
 import net.minecraft.world.item.Item;
+
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
+import java.util.Map;
 
 /** 原材料分批计划与父子帧推进；不驱动采集、挖矿、开盒或合成。 */
 final class RawMaterialPlan {
@@ -33,7 +37,7 @@ final class RawMaterialPlan {
         /** 为这一帧开过几次盒子取料。每个子材料最多各一次，且总数有上限，避免来回开关盒子。 */
         int unpackAttempts;
         RecipeAllocation allocation;
-        java.util.List<java.util.Map.Entry<Item, Integer>> ingredients;
+        List<Map.Entry<Item, Integer>> ingredients;
         int batchTarget;
         int remainingAfter;
         boolean warmingRecipe;

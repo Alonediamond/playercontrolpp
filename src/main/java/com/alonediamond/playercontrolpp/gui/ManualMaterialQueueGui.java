@@ -1,12 +1,18 @@
 package com.alonediamond.playercontrolpp.gui;
 
+//#if MC >= 12110
+import net.minecraft.client.input.MouseButtonEvent;
+//#endif
+
 import com.alonediamond.playercontrolpp.compat.DrawCtx;
+import com.alonediamond.playercontrolpp.compat.RegistryCompat;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialBatch;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueue;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialSearch;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualPreparationMode;
+
 import net.minecraft.client.Minecraft;
 //#if MC >= 260000
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -18,6 +24,7 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
@@ -82,54 +89,33 @@ public final class ManualMaterialQueueGui extends Screen {
     protected void init() {
         super.init();
         int rightWidth = Math.max(120, width - RIGHT - 10);
-        addBatchButton = addRenderableWidget(Button.builder(label("add_batch"), b -> {
-            if (!queue.isEditingAllowed()) return;
-            selectedBatch = queue.addBatch("Batch " + (queue.batches().size() + 1));
-            selectedItemId = null;
-            dirty = true;
-            refreshFields();
-        }).bounds(LEFT, 33, 62, 20).build());
-        removeBatchButton = addRenderableWidget(Button.builder(label("remove_batch"), b -> {
-            if (selectedBatch == null || !queue.isEditingAllowed()) return;
-            queue.removeBatch(selectedBatch);
-            selectedBatch = null;
-            selectedItemId = null;
-            dirty = true;
-            refreshFields();
-        }).bounds(LEFT + 65, 33, 62, 20).build());
+        addBatchButton = addRenderableWidget(Button.builder(label("add_batch"), button -> addBatch())
+                .bounds(LEFT, 33, 62, 20)
+                .build());
+        removeBatchButton = addRenderableWidget(Button.builder(label("remove_batch"), button -> removeBatch())
+                .bounds(LEFT + 65, 33, 62, 20)
+                .build());
         upButton = addRenderableWidget(Button.builder(label("move_up"), b -> move(-1))
                 .bounds(LEFT, 56, 62, 20).build());
         downButton = addRenderableWidget(Button.builder(label("move_down"), b -> move(1))
                 .bounds(LEFT + 65, 56, 62, 20).build());
-        modeButton = addRenderableWidget(Button.builder(modeLabel(), b -> {
-            preparationMode = switch (preparationMode) {
-                case DIRECT -> ManualPreparationMode.RAW_THEN_CRAFT;
-                case RAW_THEN_CRAFT -> ManualPreparationMode.RAW_ONLY;
-                case RAW_ONLY -> ManualPreparationMode.DIRECT;
-            };
-            b.setMessage(modeLabel());
-        }).bounds(LEFT, 80, LEFT_WIDTH, 20).build());
-        previewButton = addRenderableWidget(Button.builder(label("preview_raw"), b -> {
-            if (selectedBatch == null || selectedBatch.isEmpty() || !saveChanges()) return;
-            ScreenCompat.setScreen(Minecraft.getInstance(),
-                    new ManualRawMaterialPreviewGui(this, selectedBatch));
-        }).bounds(RIGHT, 80, rightWidth, 20).build());
+        modeButton = addRenderableWidget(Button.builder(modeLabel(), this::cyclePreparationMode)
+                .bounds(LEFT, 80, LEFT_WIDTH, 20)
+                .build());
+        previewButton = addRenderableWidget(Button.builder(label("preview_raw"), button -> openRawPreview())
+                .bounds(RIGHT, 80, rightWidth, 20)
+                .build());
         addRenderableWidget(Button.builder(label("back"), b -> onClose())
                 .bounds(width - 62, 8, 52, 20).build());
-        startButton = addRenderableWidget(Button.builder(label("start"), b -> {
-            if (!saveChanges()) return;
-            if (AutoMaterialGatherer.getInstance().startManualQueue(preparationMode))
-                ScreenCompat.setScreen(Minecraft.getInstance(), null);
-        }).bounds(LEFT, height - 29, 40, 20).build());
-        resumeButton = addRenderableWidget(Button.builder(label("resume"), b -> {
-            if (AutoMaterialGatherer.getInstance().resumeManualQueue())
-                ScreenCompat.setScreen(Minecraft.getInstance(), null);
-        }).bounds(LEFT + 43, height - 29, 40, 20).build());
-        stopButton = addRenderableWidget(Button.builder(label("stop"), b -> {
-            if (AutoMaterialGatherer.getInstance().isActive()) AutoMaterialGatherer.getInstance().stop();
-            else queue.stop();
-        })
-                .bounds(LEFT + 86, height - 29, 40, 20).build());
+        startButton = addRenderableWidget(Button.builder(label("start"), button -> startQueue())
+                .bounds(LEFT, height - 29, 40, 20)
+                .build());
+        resumeButton = addRenderableWidget(Button.builder(label("resume"), button -> resumeQueue())
+                .bounds(LEFT + 43, height - 29, 40, 20)
+                .build());
+        stopButton = addRenderableWidget(Button.builder(label("stop"), button -> stopQueue())
+                .bounds(LEFT + 86, height - 29, 40, 20)
+                .build());
 
         batchName = new EditBox(font, RIGHT + 48, 34, rightWidth - 48, 18, label("batch_name"));
         batchName.setMaxLength(80);
@@ -160,15 +146,69 @@ public final class ManualMaterialQueueGui extends Screen {
         addRenderableWidget(quantity);
         addItemButton = addRenderableWidget(Button.builder(label("add_item"), b -> addSelectedItem())
                 .bounds(RIGHT, footerY, 74, 20).build());
-        removeItemButton = addRenderableWidget(Button.builder(label("remove_item"), b -> {
-            if (selectedBatch == null || selectedItemId == null || !queue.isEditingAllowed()) return;
-            selectedBatch.removeItem(selectedItemId);
-            selectedItemId = null;
-            dirty = true;
-            refreshFields();
-        }).bounds(RIGHT + 78, footerY, 74, 20).build());
+        removeItemButton = addRenderableWidget(Button.builder(label("remove_item"), button -> removeSelectedItem())
+                .bounds(RIGHT + 78, footerY, 74, 20)
+                .build());
         refreshFields();
         updateActions();
+    }
+
+    private void addBatch() {
+        if (!queue.isEditingAllowed()) return;
+        selectedBatch = queue.addBatch("Batch " + (queue.batches().size() + 1));
+        selectedItemId = null;
+        dirty = true;
+        refreshFields();
+    }
+
+    private void removeBatch() {
+        if (selectedBatch == null || !queue.isEditingAllowed()) return;
+        queue.removeBatch(selectedBatch);
+        selectedBatch = null;
+        selectedItemId = null;
+        dirty = true;
+        refreshFields();
+    }
+
+    private void removeSelectedItem() {
+        if (selectedBatch == null || selectedItemId == null || !queue.isEditingAllowed()) return;
+        selectedBatch.removeItem(selectedItemId);
+        selectedItemId = null;
+        dirty = true;
+        refreshFields();
+    }
+
+    private void cyclePreparationMode(Button button) {
+        preparationMode = switch (preparationMode) {
+            case DIRECT -> ManualPreparationMode.RAW_THEN_CRAFT;
+            case RAW_THEN_CRAFT -> ManualPreparationMode.RAW_ONLY;
+            case RAW_ONLY -> ManualPreparationMode.DIRECT;
+        };
+        button.setMessage(modeLabel());
+    }
+
+    private void openRawPreview() {
+        if (selectedBatch == null || selectedBatch.isEmpty() || !saveChanges()) return;
+        ScreenCompat.setScreen(Minecraft.getInstance(), new ManualRawMaterialPreviewGui(this, selectedBatch));
+    }
+
+    private void startQueue() {
+        if (!saveChanges()) return;
+        if (AutoMaterialGatherer.getInstance().startManualQueue(preparationMode)) {
+            ScreenCompat.setScreen(Minecraft.getInstance(), null);
+        }
+    }
+
+    private void resumeQueue() {
+        if (AutoMaterialGatherer.getInstance().resumeManualQueue()) {
+            ScreenCompat.setScreen(Minecraft.getInstance(), null);
+        }
+    }
+
+    private void stopQueue() {
+        AutoMaterialGatherer gatherer = AutoMaterialGatherer.getInstance();
+        if (gatherer.isActive()) gatherer.stop();
+        else queue.stop();
     }
 
     private static Component label(String suffix) {
@@ -223,10 +263,11 @@ public final class ManualMaterialQueueGui extends Screen {
 
     private void filter() {
         String query = search.getValue();
-        if (query.isBlank()) results = catalog;
-        else results = catalog.stream()
-                .filter(candidate -> ManualMaterialSearch.matches(query, candidate.name(), candidate.id()))
-                .toList();
+        results = query.isBlank()
+                ? catalog
+                : catalog.stream()
+                        .filter(candidate -> ManualMaterialSearch.matches(query, candidate.name(), candidate.id()))
+                        .toList();
         resultScroll = 0;
     }
 
@@ -373,8 +414,7 @@ public final class ManualMaterialQueueGui extends Screen {
             Map.Entry<String, Integer> entry = entries.get(i);
             if (entry.getKey().equals(selectedItemId)) ctx.fill(RIGHT, y, RIGHT + panelWidth, y + ROW - 1, 0x705588CC);
             Item item;
-            try { item = com.alonediamond.playercontrolpp.compat.RegistryCompat.item(
-                    net.minecraft.resources.Identifier.parse(entry.getKey())); }
+            try { item = RegistryCompat.item(Identifier.parse(entry.getKey())); }
             catch (RuntimeException e) { item = null; }
             if (item != null && BuiltInRegistries.ITEM.getKey(item).toString().equals(entry.getKey()))
                 ctx.item(item.getDefaultInstance(), RIGHT + 2, y + 1);
@@ -388,7 +428,7 @@ public final class ManualMaterialQueueGui extends Screen {
 
     //#if MC >= 12110
     @Override
-    public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent click, boolean isDragging) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean isDragging) {
         if (handleClick(click.x(), click.y(), click.button())) return true;
         return super.mouseClicked(click, isDragging);
     }

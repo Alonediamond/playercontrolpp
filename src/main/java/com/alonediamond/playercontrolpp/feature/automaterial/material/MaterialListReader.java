@@ -2,13 +2,20 @@ package com.alonediamond.playercontrolpp.feature.automaterial.material;
 
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
-import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.core.registries.BuiltInRegistries;
-import java.util.*;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** 读取清单快照；只处理来源、忽略项和需求总量，不驱动游戏操作。 */
 public final class MaterialListReader {
@@ -21,16 +28,18 @@ public final class MaterialListReader {
             for (String id : Configs.BaritoneSettings.GLOBAL_IGNORE_LIST.getStrings()) ignored.add(id.trim());
         }
         if (Configs.BaritoneSettings.MATERIAL_LIST_SOURCE.getOptionListValue() == MaterialSource.LITEMATLIST) {
-            var source = LitematListIntegration.getInstance();
+            LitematListIntegration source = LitematListIntegration.getInstance();
             if (!source.isLoaded()) return new Result(List.of(), "litematlist_not_loaded");
             if (!source.isMaterialListAvailable()) return new Result(List.of(), "litematlist_no_list");
-            for (var entry : source.getMaterialEntries()) add(entries, ignored, entry.stack(), entry.totalCount());
+            for (LitematListIntegration.MaterialEntry entry : source.getMaterialEntries()) {
+                add(entries, ignored, entry.stack(), entry.totalCount());
+            }
         } else {
-            var source = LitematicaIntegration.getInstance();
+            LitematicaIntegration source = LitematicaIntegration.getInstance();
             if (source.getMaterialList() == null) return new Result(List.of(), "no_material_list");
             if (!source.isMaterialListHudVisible()) return new Result(List.of(), "no_hud");
             // HUD 被其他模组接管时，也按玩家当前看到的清单读取。
-            for (var entry : source.getMaterialListEntries(player)) {
+            for (LitematicaIntegration.MaterialEntry entry : source.getMaterialListEntries(player)) {
                 if (!entry.ignored()) add(entries, ignored, entry.stack(), entry.countMissing());
             }
         }

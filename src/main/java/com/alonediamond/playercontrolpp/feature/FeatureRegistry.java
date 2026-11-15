@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
+import com.alonediamond.playercontrolpp.util.MessageUtil;
 import net.minecraft.client.Minecraft;
 
 import java.util.ArrayList;
@@ -24,24 +25,35 @@ public final class FeatureRegistry {
     }
 
     public static void tickAll(Minecraft mc) {
+        boolean playerDied = mc.player != null && mc.player.isDeadOrDying();
+        boolean stopped = false;
         for (ClientFeature feature : FEATURES) {
             try {
+                boolean wasActive = playerDied && feature.isActive();
                 feature.onClientTick(mc);
+                stopped |= wasActive && !feature.isActive();
             } catch (Exception e) {
                 Playercontrolpp.LOGGER.error("功能 {} 在客户端 tick 中抛出异常",
                         feature.getClass().getName(), e);
             }
         }
+        if (stopped) MessageUtil.sendStopped(mc, "playercontrolpp.message.stop_reason.player_died");
     }
 
     public static void notifyWorldChange() {
+        boolean stopped = false;
         for (ClientFeature feature : FEATURES) {
             try {
+                boolean wasActive = feature.isActive();
                 feature.onWorldChange();
+                stopped |= wasActive && !feature.isActive();
             } catch (Exception e) {
                 Playercontrolpp.LOGGER.error("功能 {} 在世界切换中抛出异常",
                         feature.getClass().getName(), e);
             }
+        }
+        if (stopped) {
+            MessageUtil.sendStopped(Minecraft.getInstance(), "playercontrolpp.message.stop_reason.world_change");
         }
     }
 

@@ -1,22 +1,28 @@
 package com.alonediamond.playercontrolpp.gui;
 
+//#if MC >= 12110
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+//#endif
+
 import com.alonediamond.playercontrolpp.compat.DrawCtx;
-
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
-
 import com.alonediamond.playercontrolpp.route.Route;
 import com.alonediamond.playercontrolpp.route.RouteManager;
 import com.alonediamond.playercontrolpp.route.RouteNode;
+
 import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 //#if MC >= 260000
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 //#else
 //$$ import net.minecraft.client.gui.GuiGraphics;
 //#endif
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
@@ -107,7 +113,10 @@ public class RouteListGui extends Screen {
         // Name field
         nameField = new EditBox(font, FIELD_X, TOP, 140, 18, Component.empty());
         nameField.setResponder(s -> {
-            if (selectedRoute != null) { selectedRoute.setName(s); dirty = true; }
+            if (selectedRoute != null) {
+                selectedRoute.setName(s);
+                dirty = true;
+            }
         });
         this.addWidget(nameField);
 
@@ -424,7 +433,7 @@ public class RouteListGui extends Screen {
 
     //#if MC >= 12110
     @Override
-    public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent click, boolean isDragging) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean isDragging) {
         if (handleClick(click.x(), click.y(), click.button())) return true;
         return super.mouseClicked(click, isDragging);
     }
@@ -481,8 +490,8 @@ public class RouteListGui extends Screen {
                 } else {
                     if (mouseX >= area.setBtnX && mouseX <= area.setBtnX + area.setBtnW
                             && mouseY >= area.y && mouseY <= area.y + WPT_ROW_H) {
-                        var client = Minecraft.getInstance();
-                        var player = client.player;
+                        Minecraft client = Minecraft.getInstance();
+                        LocalPlayer player = client.player;
                         if (player != null) {
                             RouteNode node = selectedRoute.getNode(area.nodeIndex);
                             node.x = player.getX();
@@ -574,13 +583,13 @@ public class RouteListGui extends Screen {
 
     //#if MC >= 12110
     @Override
-    public boolean charTyped(net.minecraft.client.input.CharacterEvent input) {
+    public boolean charTyped(CharacterEvent input) {
         EditBox focused = focusedField();
         return focused != null ? focused.charTyped(input) : super.charTyped(input);
     }
 
     @Override
-    public boolean keyPressed(net.minecraft.client.input.KeyEvent input) {
+    public boolean keyPressed(KeyEvent input) {
         EditBox focused = focusedField();
         if (input.key() == KEY_ESCAPE && focused == null) {
             onClose();
@@ -639,7 +648,10 @@ public class RouteListGui extends Screen {
             final int idx = nodeIndex;
             xf.setResponder(s -> {
                 if (selectedRoute != null && idx < selectedRoute.getNodeCount()) {
-                    try { selectedRoute.getNode(idx).x = Double.parseDouble(s); dirty = true; }
+                    try {
+                        selectedRoute.getNode(idx).x = Double.parseDouble(s);
+                        dirty = true;
+                    }
                     catch (NumberFormatException ignored) {}
                 }
             });
@@ -649,7 +661,10 @@ public class RouteListGui extends Screen {
             EditBox zf = new EditBox(font, zFieldX, 0, FIELD_W, 18, Component.empty());
             zf.setResponder(s -> {
                 if (selectedRoute != null && idx < selectedRoute.getNodeCount()) {
-                    try { selectedRoute.getNode(idx).z = Double.parseDouble(s); dirty = true; }
+                    try {
+                        selectedRoute.getNode(idx).z = Double.parseDouble(s);
+                        dirty = true;
+                    }
                     catch (NumberFormatException ignored) {}
                 }
             });

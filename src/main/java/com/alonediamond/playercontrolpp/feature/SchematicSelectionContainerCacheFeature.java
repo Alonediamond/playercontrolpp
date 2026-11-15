@@ -1,15 +1,18 @@
 package com.alonediamond.playercontrolpp.feature;
 
-import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
-import com.alonediamond.playercontrolpp.interaction.ContainerOpenWait;
-import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
-import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.SelectionBounds;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
+import com.alonediamond.playercontrolpp.interaction.ContainerOpenWait;
+import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
@@ -151,8 +154,8 @@ public final class SchematicSelectionContainerCacheFeature {
                 || client.player.containerMenu != client.player.inventoryMenu
                 || ScreenCompat.getScreen(client) != null
                 || AutoCacheNearbyContainersFeature.isEnabled()
-                || com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.getInstance().isActive()
-                || com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature.getInstance().isActive()) {
+                || AutoMaterialGatherer.getInstance().isActive()
+                || AutoRestockFeature.getInstance().isActive()) {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.schematic_cache.busy");
             return;
         }

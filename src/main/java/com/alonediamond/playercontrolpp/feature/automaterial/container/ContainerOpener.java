@@ -1,14 +1,15 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
-import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
+import com.alonediamond.playercontrolpp.compat.ScreenCompat;
+import com.alonediamond.playercontrolpp.config.Configs;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.navigation.BaritonePathingController;
 import com.alonediamond.playercontrolpp.feature.automaterial.shulker.MixedBoxReturn;
-import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
-
-import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.input.SimulatedInput;
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
@@ -91,7 +92,7 @@ public final class ContainerOpener {
             } else {
                 mc.player.closeContainer();
                 // 关箱后等多久再继续由配置决定：延迟高的服务器上太快去开下一个箱子会被丢包。
-                ctx.transferCooldown = com.alonediamond.playercontrolpp.config.Configs.BaritoneSettings
+                ctx.transferCooldown = Configs.BaritoneSettings
                         .CONTAINER_CLOSE_DELAY.getIntegerValue();
                 retryAdjacentOrFail(ctx, tsm, pathing);
             }

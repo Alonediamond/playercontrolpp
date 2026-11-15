@@ -6,18 +6,19 @@ import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
+import baritone.api.Settings;
+import baritone.api.cache.IWorldData;
 import baritone.api.pathing.goals.GoalGetToBlock;
 import baritone.api.process.IBuilderProcess;
 import baritone.api.schematic.ISchematic;
-
-import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
-
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Unique;
@@ -36,6 +37,12 @@ import java.util.Map;
  */
 @Mixin(BaritoneIntegration.class)
 public abstract class BaritoneIntegrationImpl {
+    @Unique
+    private static final long MAX_LAYER_AREA = 1_000_000L;
+    @Unique
+    private static final int MAX_CACHED_MINING_POSITIONS = 64;
+    @Unique
+    private static final int CACHE_REGION_SIZE = 512;
 
     @Unique
     private static IBaritone primaryBaritone() {
@@ -124,16 +131,18 @@ public abstract class BaritoneIntegrationImpl {
     public boolean startLitematicaLayerBuild(int schematicIndex, int worldY) {
         try {
             LitematicaIntegration litematica = LitematicaIntegration.getInstance();
-            var world = litematica.getSchematicWorld();
+            BlockGetter world = litematica.getSchematicWorld();
             List<LitematicaIntegration.SelectionBounds> regions = litematica.getPlacementRegionBounds(schematicIndex)
-                    .stream().filter(box -> worldY >= box.min().getY() && worldY <= box.max().getY()).toList();
+                    .stream()
+                    .filter(box -> worldY >= box.min().getY() && worldY <= box.max().getY())
+                    .toList();
             if (world == null || regions.isEmpty()) return false;
             int minX = regions.stream().mapToInt(box -> box.min().getX()).min().orElseThrow();
             int minZ = regions.stream().mapToInt(box -> box.min().getZ()).min().orElseThrow();
             int maxX = regions.stream().mapToInt(box -> box.max().getX()).max().orElseThrow();
             int maxZ = regions.stream().mapToInt(box -> box.max().getZ()).max().orElseThrow();
             // 稀疏区域之间也会被 Builder 扫描，限制外框面积以免一次 tick 分配或遍历无界。
-            if (((long) maxX - minX + 1) * ((long) maxZ - minZ + 1) > 1_000_000L) return false;
+            if (((long) maxX - minX + 1) * ((long) maxZ - minZ + 1) > MAX_LAYER_AREA) return false;
             int width = maxX - minX + 1;
             int length = maxZ - minZ + 1;
             BlockState[][] states = new BlockState[width][length];
@@ -184,7 +193,7 @@ public abstract class BaritoneIntegrationImpl {
 
     @Unique
     private static boolean buildExactLayer(ISchematic layer, BlockPos origin) {
-        var settings = BaritoneAPI.getSettings();
+        Settings settings = BaritoneAPI.getSettings();
         // 重复建造在后续 tick 读取全局设置，无法靠同步调用期间覆盖；拒绝避免越界复制。
         if (!Vec3i.ZERO.equals(settings.buildRepeat.value)) return false;
         boolean orientationX = settings.schematicOrientationX.value;
@@ -192,7 +201,7 @@ public abstract class BaritoneIntegrationImpl {
         boolean orientationZ = settings.schematicOrientationZ.value;
         Rotation rotation = settings.buildSchematicRotation.value;
         Mirror mirror = settings.buildSchematicMirror.value;
-        var substitutes = settings.buildSubstitutes.value;
+        Map<Block, List<Block>> substitutes = settings.buildSubstitutes.value;
         int startAtLayer = settings.startAtLayer.value;
         try {
             // 投影世界已经应用 placement 的变换，Builder 的二次变换会破坏世界坐标裁剪。
@@ -220,13 +229,12 @@ public abstract class BaritoneIntegrationImpl {
     @Overwrite(remap = false)
     public List<BlockPos> cachedMiningPositions(String blockId, BlockPos origin, int radius) {
         try {
-            var data = primaryBaritone().getPlayerContext().worldData();
+            IWorldData data = primaryBaritone().getPlayerContext().worldData();
             if (data == null) return List.of();
-            int regionRadius = (radius + 511) / 512 + 1;
-            return List.copyOf(data.getCachedWorld().getLocationsOf(blockId, 64,
+            int regionRadius = (radius + CACHE_REGION_SIZE - 1) / CACHE_REGION_SIZE + 1;
+            return List.copyOf(data.getCachedWorld().getLocationsOf(blockId, MAX_CACHED_MINING_POSITIONS,
                     origin.getX(), origin.getZ(), regionRadius * regionRadius * 2));
-        }
-        catch (Throwable error) {
+        } catch (Throwable error) {
             Playercontrolpp.LOGGER.debug("Unable to read cached mining positions", error);
             return List.of();
         }

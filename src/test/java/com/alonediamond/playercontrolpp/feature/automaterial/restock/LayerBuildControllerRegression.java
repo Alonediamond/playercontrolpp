@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.restock;
 
+
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.SelectionBounds;
 import net.minecraft.core.BlockPos;
 
@@ -38,7 +39,7 @@ public final class LayerBuildControllerRegression {
     }
 
     private static void completionRequiresStableScans() {
-        var completion = new LayerBuildRules.StableCompletion();
+        LayerBuildRules.StableCompletion completion = new LayerBuildRules.StableCompletion();
         check(!completion.confirm(10, false, false, 5), "首次完整无缺扫描不能确认完成");
         check(!completion.confirm(14, false, false, 5), "重复扫描仍须等稳定窗口");
         check(completion.confirm(15, false, false, 5), "窗口结束且重复扫描后才确认完成");
@@ -53,7 +54,7 @@ public final class LayerBuildControllerRegression {
     }
 
     private static void unknownAndMissingInvalidateConfirmation() {
-        var completion = new LayerBuildRules.StableCompletion();
+        LayerBuildRules.StableCompletion completion = new LayerBuildRules.StableCompletion();
         check(!completion.confirm(0, false, false, 5), "首次确认允许从tick零开始");
         check(!completion.confirm(10, true, false, 5), "未加载区块阻止翻层");
         check(!completion.confirm(20, false, false, 5), "区块加载后必须重新建立首个完成观察");

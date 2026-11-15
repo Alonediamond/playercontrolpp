@@ -33,10 +33,6 @@ public class AutoForwardFeature {
     public static void onWorldChange() {
         if (enabled) {
             enabled = false;
-            Minecraft client = Minecraft.getInstance();
-            if (client.player != null) {
-                MessageUtil.sendActionBar(client, "playercontrolpp.message.auto_forward.world_change");
-            }
         }
     }
 }

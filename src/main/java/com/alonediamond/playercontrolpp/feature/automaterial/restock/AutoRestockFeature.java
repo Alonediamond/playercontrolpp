@@ -1,37 +1,44 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.restock;
 
-import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
-import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
-import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
-
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
-import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.BuildLayerMode;
-import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
+import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.RestockContainerSource;
-import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+import com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature;
 import com.alonediamond.playercontrolpp.feature.ClientFeature;
+import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
+import com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
+import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
+import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
+import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * 监控 Baritone 的 {@code #litematica} 建造进程，它因缺料暂停时自动补货，然后让建造继续。
@@ -206,12 +213,15 @@ public class AutoRestockFeature implements ClientFeature {
     public void onClientTick(Minecraft mc) {
         if (!active) return;
         if (mc.player == null || mc.player.isDeadOrDying()) {
-            stop("playercontrolpp.message.restock.player_died");
+            stop(null);
             return;
         }
 
         ContainerHighlightFeature.getInstance().setGatherTarget(currentContainerTarget);
-        if (deferTicks > 0) { deferTicks--; return; }
+        if (deferTicks > 0) {
+            deferTicks--;
+            return;
+        }
         if (transferCooldown > 0) { transferCooldown--; }
 
         switch (state) {
@@ -230,7 +240,7 @@ public class AutoRestockFeature implements ClientFeature {
     @Override
     public void onWorldChange() {
         if (active) {
-            stop("playercontrolpp.message.restock.world_change");
+            stop(null);
         }
     }
 
@@ -251,8 +261,8 @@ public class AutoRestockFeature implements ClientFeature {
         }
 
         if (AutoMaterialGatherer.getInstance().isActive()
-                || com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature.isEnabled()
-                || com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature.isActive()) {
+                || AutoCacheNearbyContainersFeature.isEnabled()
+                || SchematicSelectionContainerCacheFeature.isActive()) {
             MessageUtil.sendActionBar(mc, "playercontrolpp.message.baritone.busy");
             return;
         }
@@ -326,10 +336,22 @@ public class AutoRestockFeature implements ClientFeature {
     private void tickMonitoring(Minecraft mc) {
         if (layers.isActive()) {
             switch (layers.tick(mc)) {
-                case COMPLETE -> { stop("playercontrolpp.message.restock.build_finished"); return; }
-                case CHANGED -> { stop("playercontrolpp.message.restock.layer_changed"); return; }
-                case STOPPED -> { stop("playercontrolpp.message.restock.layer_build_stopped"); return; }
-                case START_FAILED -> { stop("playercontrolpp.message.restock.layer_start_failed"); return; }
+                case COMPLETE -> {
+                    stop("playercontrolpp.message.restock.build_finished");
+                    return;
+                }
+                case CHANGED -> {
+                    stop("playercontrolpp.message.restock.layer_changed");
+                    return;
+                }
+                case STOPPED -> {
+                    stop("playercontrolpp.message.restock.layer_build_stopped");
+                    return;
+                }
+                case START_FAILED -> {
+                    stop("playercontrolpp.message.restock.layer_start_failed");
+                    return;
+                }
                 case ADVANCED -> {
                     MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.layer_next", layers.layerY());
                     deferTicks = BUILD_SETTLE;
@@ -460,9 +482,12 @@ public class AutoRestockFeature implements ClientFeature {
     private void startContainerTrip(Minecraft mc) {
         containerQueue.clear();
         if (usesCache()) {
-            var source = new CachedContainerSource();
-            var scope = source.scope(Configs.Restocks.RESTOCK_CONTAINER_MAX_DISTANCE.getIntegerValue());
-            if (scope.error() != null) { stop(scope.error()); return; }
+            CachedContainerSource source = new CachedContainerSource();
+            CachedContainerSource.Scope scope = source.scope(Configs.Restocks.RESTOCK_CONTAINER_MAX_DISTANCE.getIntegerValue());
+            if (scope.error() != null) {
+                stop(scope.error());
+                return;
+            }
             Set<BlockPos> found = new HashSet<>();
             for (RestockMaterials.Need need : materials.needs()) {
                 if (looseCount(mc, need.item()) >= need.target()) continue;
@@ -471,15 +496,21 @@ public class AutoRestockFeature implements ClientFeature {
             }
             containerQueue.addAll(found);
             containerQueue.sort(Comparator.comparingDouble(pos -> pos.distSqr(mc.player.blockPosition())));
-            if (containerQueue.isEmpty()) { stop("playercontrolpp.message.restock.cache_empty"); return; }
+            if (containerQueue.isEmpty()) {
+                stop("playercontrolpp.message.restock.cache_empty");
+                return;
+            }
         } else {
-            var targets = containerManager.pickTargets(mc.level, mc.player.blockPosition());
+            MarkedContainerManager.Targets targets = containerManager.pickTargets(mc.level, mc.player.blockPosition());
             if (targets.isEmpty()) {
                 stop(targets.filtered() > 0 ? "playercontrolpp.message.restock.all_containers_filtered"
                         : "playercontrolpp.message.restock.no_containers");
                 return;
             }
-            if (targets.filtered() > 0) MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.containers_filtered", targets.disabled(), targets.tooFar());
+            if (targets.filtered() > 0) {
+                MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.containers_filtered",
+                        targets.disabled(), targets.tooFar());
+            }
             containerQueue.addAll(targets.positions());
         }
 
@@ -600,7 +631,10 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     private void tickOpening(Minecraft mc) {
-        if (openCooldown > 0) { openCooldown--; return; }
+        if (openCooldown > 0) {
+            openCooldown--;
+            return;
+        }
         if (ScreenCompat.getScreen(mc) instanceof AbstractContainerScreen<?>) {
             openRetries = 0;
             transferCooldown = 0;
@@ -700,7 +734,7 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     private void tickShulkerTake(Minecraft mc) {
-        if (!(mc.player.containerMenu instanceof net.minecraft.world.inventory.ShulkerBoxMenu)) {
+        if (!(mc.player.containerMenu instanceof ShulkerBoxMenu)) {
             if (--shulkerOpenWait <= 0) {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.shulker_open_failed");
                 state = State.SHULKER_OPEN;
@@ -884,13 +918,19 @@ public class AutoRestockFeature implements ClientFeature {
 
             int source = -1;
             for (int i = PlayerUtil.HOTBAR_SIZE; i < Inventory.INVENTORY_SIZE; i++) {
-                if (ItemUtil.is(inv.getItem(i), item)) { source = i; break; }
+                if (ItemUtil.is(inv.getItem(i), item)) {
+                    source = i;
+                    break;
+                }
             }
             if (source < 0) continue;
 
             int target = -1;
             for (int i = 0; i < PlayerUtil.HOTBAR_SIZE; i++) {
-                if (inv.getItem(i).isEmpty()) { target = i; break; }
+                if (inv.getItem(i).isEmpty()) {
+                    target = i;
+                    break;
+                }
             }
             if (target < 0) break; // 快捷栏满了，不挤掉玩家的东西就无能为力
 

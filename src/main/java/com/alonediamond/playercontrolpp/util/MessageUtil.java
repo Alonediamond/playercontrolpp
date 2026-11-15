@@ -12,6 +12,11 @@ public final class MessageUtil {
 
     private MessageUtil() {}
 
+    /** 生命周期停止共用模板，原因先按当前语言翻译，不能把语言键直接显示给玩家。 */
+    public static void sendStopped(Minecraft client, String reasonKey) {
+        sendActionBar(client, "playercontrolpp.message.feature_stopped", StringUtils.translate(reasonKey));
+    }
+
     /**
      * 在快捷栏上方显示一条翻译文本。
      *

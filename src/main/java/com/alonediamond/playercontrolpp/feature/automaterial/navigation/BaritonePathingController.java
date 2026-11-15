@@ -47,7 +47,8 @@ public final class BaritonePathingController {
     }
 
     private boolean canReach(GatherContext ctx, BlockPos pos) {
-        return pos != null && ctx.client.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) <= PlayerUtil.blockReachSq(ctx.client.player);
+        return pos != null && ctx.client.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos))
+                <= PlayerUtil.blockReachSq(ctx.client.player);
     }
 
     public void startPathing(BlockPos target, GatherContext ctx) {

@@ -104,7 +104,6 @@ public class RouteFlowRuntime implements ClientFeature {
             }
             executors.clear();
             forwardActive = false;
-            MessageUtil.sendActionBar(client, "playercontrolpp.message.route.death");
             return;
         }
 
@@ -167,11 +166,7 @@ public class RouteFlowRuntime implements ClientFeature {
     @Override
     public void onWorldChange() {
         if (!executors.isEmpty()) {
-            Minecraft client = Minecraft.getInstance();
             stopAllRoutes();
-            if (client.player != null) {
-                MessageUtil.sendActionBar(client, "playercontrolpp.message.route.world_change");
-            }
         }
     }
 }

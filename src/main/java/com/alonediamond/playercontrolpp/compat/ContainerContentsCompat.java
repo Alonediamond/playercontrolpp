@@ -1,6 +1,9 @@
 package com.alonediamond.playercontrolpp.compat;
 
 import net.minecraft.world.item.ItemStack;
+//#if MC >= 260000
+import net.minecraft.world.item.ItemStackTemplate;
+//#endif
 import net.minecraft.world.item.component.ItemContainerContents;
 
 import java.util.ArrayList;
@@ -24,7 +27,7 @@ public final class ContainerContentsCompat {
             return result;
         }
         //#if MC >= 260000
-        for (net.minecraft.world.item.ItemStackTemplate template : container.nonEmptyItems()) {
+        for (ItemStackTemplate template : container.nonEmptyItems()) {
             result.add(template.create());
         }
         //#else

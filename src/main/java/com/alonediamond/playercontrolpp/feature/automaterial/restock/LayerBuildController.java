@@ -3,8 +3,10 @@ package com.alonediamond.playercontrolpp.feature.automaterial.restock;
 import com.alonediamond.playercontrolpp.config.BuildLayerMode;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
-import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematicaIntegration.SelectionBounds;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
@@ -12,9 +14,12 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
-import java.util.*;
-import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.OptionalInt;
 
 /** 逐层建造与世界确认；每 tick 有界扫描，未加载区块始终不能作为建完的证据。 */
 final class LayerBuildController {
@@ -44,7 +49,7 @@ final class LayerBuildController {
     boolean start() {
         reset();
         mode = (BuildLayerMode) Configs.Restocks.BUILD_LAYER_MODE.getOptionListValue();
-        var layer = litematica.getSingleLayerY();
+        OptionalInt layer = litematica.getSingleLayerY();
         bounds = List.copyOf(litematica.getPlacementRegionBounds(0));
         schematic = litematica.getSchematicWorld();
         if (mode == BuildLayerMode.OFF || layer.isEmpty() || bounds.isEmpty() || schematic == null) return false;
@@ -54,7 +59,7 @@ final class LayerBuildController {
         if (y < minY || y > maxY) return false;
         final int initialY = y;
         if (bounds.stream().noneMatch(box -> initialY >= box.min().getY() && initialY <= box.max().getY())) {
-            var next = LayerBuildRules.nextLayer(bounds, y, mode == BuildLayerMode.UP ? 1 : -1);
+            OptionalInt next = LayerBuildRules.nextLayer(bounds, y, mode == BuildLayerMode.UP ? 1 : -1);
             if (next.isEmpty() || !litematica.setSingleLayerY(next.getAsInt())) return false;
             y = next.getAsInt();
         }
@@ -77,10 +82,13 @@ final class LayerBuildController {
             SelectionBounds box = bounds.get(region);
             if (y >= box.min().getY() && y <= box.max().getY()) {
                 BlockPos pos = new BlockPos(x, y, z);
-                if (!visited.add(pos.asLong())) { advancePosition(box); continue; }
+                if (!visited.add(pos.asLong())) {
+                    advancePosition(box);
+                    continue;
+                }
                 if (!mc.level.hasChunkAt(pos) || !litematica.isSchematicChunkLoaded(pos)) unknown = true;
                 else {
-                    var expected = schematic.getBlockState(pos);
+                    BlockState expected = schematic.getBlockState(pos);
                     scanHash += pos.asLong() ^ ((long) expected.hashCode() * 0x9E3779B9L);
                     if (!expected.is(Blocks.STRUCTURE_VOID) && !expected.equals(mc.level.getBlockState(pos))) {
                         missing = true;
@@ -107,8 +115,11 @@ final class LayerBuildController {
         if (wasUnknown) return Result.UNLOADED;
         if (wasMissing) return baritone.isBuilderActive() ? Result.ACTIVE : Result.STOPPED;
         if (!complete) return Result.ACTIVE;
-        var nextLayer = LayerBuildRules.nextLayer(bounds, y, mode == BuildLayerMode.UP ? 1 : -1);
-        if (nextLayer.isEmpty()) { active = false; return Result.COMPLETE; }
+        OptionalInt nextLayer = LayerBuildRules.nextLayer(bounds, y, mode == BuildLayerMode.UP ? 1 : -1);
+        if (nextLayer.isEmpty()) {
+            active = false;
+            return Result.COMPLETE;
+        }
         int next = nextLayer.getAsInt();
         baritone.cancelPathing();
         if (!litematica.setSingleLayerY(next)) return Result.CHANGED;
@@ -124,7 +135,10 @@ final class LayerBuildController {
     private void advancePosition(SelectionBounds box) {
         if (++x > box.max().getX()) {
             x = box.min().getX();
-            if (++z > box.max().getZ()) { region++; prepareRegion(); }
+            if (++z > box.max().getZ()) {
+                region++;
+                prepareRegion();
+            }
         }
     }
 
@@ -141,7 +155,10 @@ final class LayerBuildController {
     private void prepareRegion() {
         // 不在当前Y的子区无需逐格扫描。
         while (region < bounds.size() && (y < bounds.get(region).min().getY() || y > bounds.get(region).max().getY())) region++;
-        if (region < bounds.size()) { x = bounds.get(region).min().getX(); z = bounds.get(region).min().getZ(); }
+        if (region < bounds.size()) {
+            x = bounds.get(region).min().getX();
+            z = bounds.get(region).min().getZ();
+        }
     }
 
     void reset() {

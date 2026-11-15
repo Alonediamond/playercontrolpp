@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -24,7 +25,7 @@ public final class MiningSnapshotSearchRegression {
         live.set(0, 0, 0, Blocks.STONE.defaultBlockState());
         PalettedContainer<BlockState> snapshot = live.copy();
         live.set(0, 0, 0, Blocks.AIR.defaultBlockState());
-        var copied = search(List.of(section(origin, snapshot)), Map.of(), origin, 32);
+        MiningSnapshotSearch.Result copied = search(List.of(section(origin, snapshot)), Map.of(), origin, 32);
         check(copied.positions().get(STONE).equals(List.of(origin)), "复制后原容器变化不影响快照结果");
         checks++;
         check(search(List.of(section(origin, live)), Map.of(), origin, 32)
@@ -37,7 +38,7 @@ public final class MiningSnapshotSearchRegression {
             dense.set(x, 0, z, Blocks.STONE.defaultBlockState());
             expected.add(new BlockPos(x, 0, z));
         }
-        var nearest = search(List.of(section(origin, dense)), Map.of(), origin, 32);
+        MiningSnapshotSearch.Result nearest = search(List.of(section(origin, dense)), Map.of(), origin, 32);
         List<BlockPos> positions = nearest.positions().get(STONE);
         check(positions.size() == 64 && positions.contains(origin), "仅保留最近 64 个位置");
         checks++;
@@ -57,7 +58,7 @@ public final class MiningSnapshotSearchRegression {
         BlockPos duplicate = new BlockPos(1, 0, 0);
         PalettedContainer<BlockState> one = emptyStates();
         one.set(1, 0, 0, Blocks.STONE.defaultBlockState());
-        var deduplicated = search(List.of(section(origin, one)),
+        MiningSnapshotSearch.Result deduplicated = search(List.of(section(origin, one)),
                 Map.of(STONE, List.of(duplicate, duplicate, new BlockPos(100, 0, 0))), origin, 32);
         check(deduplicated.positions().get(STONE).equals(List.of(duplicate)),
                 "缓存重复位置与快照命中只保留一次，范围外缓存不进入结果");
@@ -66,12 +67,12 @@ public final class MiningSnapshotSearchRegression {
         BlockPos far = new BlockPos(256, 0, 0);
         PalettedContainer<BlockState> distant = emptyStates();
         distant.set(0, 0, 0, Blocks.STONE.defaultBlockState());
-        var pruned = search(List.of(section(far, distant)), Map.of(), origin, 32);
+        MiningSnapshotSearch.Result pruned = search(List.of(section(far, distant)), Map.of(), origin, 32);
         check(pruned.visitedBlocks() == 0 && pruned.positions().get(STONE).isEmpty(),
                 "远区段在逐方块扫描前剪枝");
         checks++;
 
-        var capped = search(List.of(section(new BlockPos(32, 0, 0), distant), section(origin, dense)),
+        MiningSnapshotSearch.Result capped = search(List.of(section(new BlockPos(32, 0, 0), distant), section(origin, dense)),
                 Map.of(), origin, 64);
         check(capped.visitedBlocks() == 4096
                         && capped.positions().get(STONE).stream().noneMatch(pos -> pos.getX() >= 32),

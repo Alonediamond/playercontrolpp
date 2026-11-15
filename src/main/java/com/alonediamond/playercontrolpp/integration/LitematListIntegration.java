@@ -10,12 +10,10 @@ import java.util.List;
  * LitematList 联动的默认实现（stub）。真正的方法体在
  * {@code mixin/compat/litematlist/LitematListIntegrationImpl} 里，机制同 {@link LitematicaIntegration}。
  *
- * <p>只读它的公开 API {@code com.litematlist.api.LitematListAPI}：返回的是上传区域里
- * 已经处理完替换、忽略与项目聚合的清单，因此这里不需要再关心它的替换/忽略规则。
- * LitematList 目前只发布了 1.21.10 与 26.1.2 版，其他 MC 版本上 MixinPlugin 自然不会
- * 放行注入，本类按默认值静默降级；等它适配更多版本后无需再改这里。
+ * <p>读取上传清单或独立临时原料树，统一转换为自有 DTO；第三方类型只在 compat mixin 中使用。
  */
 public class LitematListIntegration {
+    private static final int DEFAULT_RAW_DEPTH = 5;
 
     private static final LitematListIntegration INSTANCE = new LitematListIntegration();
 
@@ -44,7 +42,7 @@ public class LitematListIntegration {
     /**
      * 原材料配方树的一个节点。
      *
-     * <p>刻意用字符串物品 id 而不是 {@link ItemStack}/{@link net.minecraft.world.item.Item}：
+     * <p>刻意用字符串物品 id 而不是 {@link ItemStack}/{@link Item}：
      * stub 里不能出现 LitematList 的任何类型，而它的树节点正是用注册名表达的。
      *
      * @param itemId     物品注册名，如 {@code minecraft:oak_planks}
@@ -60,8 +58,8 @@ public class LitematListIntegration {
     /**
      * 读某个物品的原材料配方树。
      *
-     * <p>树的形状完全由 LitematList 决定：它内部读的是玩家在那边配置的溯源白名单与配方优先级，
-     * 所以本模组不需要（也不应该）自己再实现一套配方选择规则。
+     * <p>初始树继承 LitematList 的溯源白名单与配方优先级；执行时再按当前配方书和可用库存
+     * 选择本批的合法变种，采集和合成共用同一份选择。
      *
      * @param item     要分解的物品
      * @param count    需要多少个（树里的所有数量按这个基数展开）
@@ -84,6 +82,12 @@ public class LitematListIntegration {
      * @return 观察到的层数；从未观察到时为 -1
      */
     public static int getObservedPlayerDepth() { return observedPlayerDepth; }
+
+    /** 显式配置优先，否则沿用观察到的界面层数，未观察到时使用分析器默认层数。 */
+    public static int resolveRawDepth(int configured) {
+        if (configured >= 0) return configured;
+        return observedPlayerDepth >= 0 ? observedPlayerDepth : DEFAULT_RAW_DEPTH;
+    }
 
     /** 供 compat mixin 写入观察到的层数。 */
     public static void observePlayerDepth(int depth) { observedPlayerDepth = depth; }

@@ -1,34 +1,44 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
-import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
-import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialListReader;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ItemTransferExecutor;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerSearcher;
-import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
-import com.alonediamond.playercontrolpp.feature.automaterial.navigation.BaritonePathingController;
-import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
-import com.alonediamond.playercontrolpp.feature.automaterial.shulker.MixedBoxReturn;
-import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialTask;
-import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
-
-import com.alonediamond.playercontrolpp.feature.ClientFeature;
-import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
-import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
-import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
-import com.alonediamond.playercontrolpp.util.MessageUtil;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
-import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
-import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueue;
-import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualPreparationMode;
-import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualRawMaterialPlan;
+import com.alonediamond.playercontrolpp.Playercontrolpp;
+import com.alonediamond.playercontrolpp.compat.CraftingRecipes;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.MaterialSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
+import com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature;
+import com.alonediamond.playercontrolpp.feature.ClientFeature;
+import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
+import com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerSearcher;
+import com.alonediamond.playercontrolpp.feature.automaterial.container.ItemTransferExecutor;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.KnownMiningSurvey;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialTask;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialBatch;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueue;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualPreparationMode;
+import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualRawMaterialPlan;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialListReader;
+import com.alonediamond.playercontrolpp.feature.automaterial.navigation.BaritonePathingController;
+import com.alonediamond.playercontrolpp.feature.automaterial.restock.AutoRestockFeature;
+import com.alonediamond.playercontrolpp.feature.automaterial.shulker.MixedBoxReturn;
+import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
+import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
+import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
+import com.alonediamond.playercontrolpp.integration.LitematicaIntegration;
+import com.alonediamond.playercontrolpp.util.MessageUtil;
+
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import com.alonediamond.playercontrolpp.Playercontrolpp;
+
+import java.util.List;
+import java.util.Map;
 
 /** 自动备货入口和主状态机；生命周期、状态转换以及子任务衔接由本类统一拥有。 */
 public final class AutoMaterialGatherer implements ClientFeature {
@@ -43,7 +53,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
     private ManualPreparationMode manualPreparationMode = ManualPreparationMode.DIRECT;
     private ManualRawMaterialPlan rawPreparation;
     private boolean preparingRaw;
-    private java.util.List<MaterialItemEntry> rawPreparationTargets = java.util.List.of();
+    private List<MaterialItemEntry> rawPreparationTargets = List.of();
     private final ManualMaterialQueue manualQueue =
             ManualMaterialQueue.getInstance();
     private int currentItemIndex;
@@ -132,8 +142,8 @@ public final class AutoMaterialGatherer implements ClientFeature {
         }
 
         if (AutoRestockFeature.getInstance().isActive()
-                || com.alonediamond.playercontrolpp.feature.AutoCacheNearbyContainersFeature.isEnabled()
-                || com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature.isActive()) {
+                || AutoCacheNearbyContainersFeature.isEnabled()
+                || SchematicSelectionContainerCacheFeature.isActive()) {
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.busy");
             return false;
         }
@@ -181,19 +191,18 @@ public final class AutoMaterialGatherer implements ClientFeature {
         try {
             tickTask();
         } catch (Exception e) {
-            com.alonediamond.playercontrolpp.Playercontrolpp.LOGGER.error("Auto material task failed", e);
+            Playercontrolpp.LOGGER.error("Auto material task failed", e);
             setState(State.STOPPED, "playercontrolpp.message.baritone.transfer_interrupted");
         }
     }
 
     @Override
     public void onWorldChange() {
-        com.alonediamond.playercontrolpp.compat.CraftingRecipes.clearCache();
+        CraftingRecipes.clearCache();
         manualQueue.stop();
         clearRawPreparation();
         if (active) {
-            stop();
-            MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.world_change");
+            setState(State.STOPPED);
         }
     }
 
@@ -207,33 +216,10 @@ public final class AutoMaterialGatherer implements ClientFeature {
     private void analyze() {
         try {
             if (manualRun) {
-                var batch = manualQueue.activeBatch();
-                if (batch == null) { setState(State.STOPPED); return; }
-                if (manualPreparationMode != ManualPreparationMode.DIRECT && rawPreparation == null) {
-                    var definition = manualQueue.batches().get(batch.index());
-                    ManualRawMaterialPlan analyzed = ManualRawMaterialPlan.analyze(definition);
-                    if (manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT && analyzed.unsupportedRecipe()) {
-                        setState(State.STOPPED, "playercontrolpp.message.baritone.manual_raw_unsupported");
-                        return;
-                    }
-                    boolean rawOnly = manualPreparationMode == ManualPreparationMode.RAW_ONLY;
-                    java.util.List<MaterialItemEntry> targets = java.util.List.of();
-                    if (rawOnly) {
-                        var reserves = ManualRawMaterialPlan.reserves(definition, batch.targets(), manualQueue.completedTargets());
-                        targets = analyzed.rawOnlyTargets(reserves, ctx::countHeld);
-                        manualQueue.replaceActiveTargets(targets);
-                    }
-                    // 分析与数量校验全部成功后才发布，恢复时不能把半成品计划当成完成的快照。
-                    rawPreparation = analyzed;
-                    rawPreparationTargets = targets;
-                    preparingRaw = rawOnly;
-                }
-                ctx.requirements.replaceWith(preparingRaw ? rawPreparationTargets : batch.targets());
-                currentItemIndex = 0;
-                if (!startInitialStorage()) setState(State.NEXT_ITEM);
+                analyzeManualBatch();
                 return;
             }
-            var result = materialReader.read(ctx.client.player);
+            MaterialListReader.Result result = materialReader.read(ctx.client.player);
             if (result.error() != null) {
                 MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone." + result.error());
                 setState(State.STOPPED);
@@ -249,6 +235,36 @@ public final class AutoMaterialGatherer implements ClientFeature {
             MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.analyze_error", e.toString());
             setState(State.STOPPED);
         }
+    }
+
+    private void analyzeManualBatch() {
+        ManualMaterialQueue.ActiveBatch batch = manualQueue.activeBatch();
+        if (batch == null) {
+            setState(State.STOPPED);
+            return;
+        }
+        if (manualPreparationMode != ManualPreparationMode.DIRECT && rawPreparation == null) {
+            ManualMaterialBatch definition = manualQueue.batches().get(batch.index());
+            ManualRawMaterialPlan analyzed = ManualRawMaterialPlan.analyze(definition);
+            if (manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT && analyzed.unsupportedRecipe()) {
+                setState(State.STOPPED, "playercontrolpp.message.baritone.manual_raw_unsupported");
+                return;
+            }
+            boolean rawOnly = manualPreparationMode == ManualPreparationMode.RAW_ONLY;
+            List<MaterialItemEntry> targets = List.of();
+            if (rawOnly) {
+                Map<Item, Integer> reserves = ManualRawMaterialPlan.reserves(definition, batch.targets(), manualQueue.completedTargets());
+                targets = analyzed.rawOnlyTargets(reserves, ctx::countHeld);
+                manualQueue.replaceActiveTargets(targets);
+            }
+            // 分析与数量校验全部成功后才发布，恢复时不能把半成品计划当成完成的快照。
+            rawPreparation = analyzed;
+            rawPreparationTargets = targets;
+            preparingRaw = rawOnly;
+        }
+        ctx.requirements.replaceWith(preparingRaw ? rawPreparationTargets : batch.targets());
+        currentItemIndex = 0;
+        if (!startInitialStorage()) setState(State.NEXT_ITEM);
     }
 
     private boolean isCurrentItemSatisfied() {
@@ -319,7 +335,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     private void clearRawPreparation() {
         rawPreparation = null;
-        rawPreparationTargets = java.util.List.of();
+        rawPreparationTargets = List.of();
         preparingRaw = false;
     }
 
@@ -426,7 +442,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     /** 整轮备货结束时的收尾：额外取消追溯任务（它可能正开着合成界面或让 Baritone 挖着矿）。 */
     private void stopEverythingAndTasks() {
-        com.alonediamond.playercontrolpp.feature.automaterial.crafting.KnownMiningSurvey.clear();
+        KnownMiningSurvey.clear();
         ContainerHighlightFeature.getInstance().clearGatherTarget();
         stopEverything();
         rawMaterialTask.cancel(ctx.client);
@@ -684,11 +700,11 @@ public final class AutoMaterialGatherer implements ClientFeature {
         if (manualRun && manualPreparationMode == ManualPreparationMode.RAW_ONLY) {
             // 只备临时表的叶子，不重新从叶子展开，避免越过玩家指定的白名单或追溯深度。
             if (mode != RawMaterialMode.WORLD_SEARCH) return false;
-            String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(ctx.targetItem()).toString();
-            return rawMaterialTask.start(ctx, this, ctx.targetItem(), gap,
-                    new LitematListIntegration.RawNode(id, gap, "base", java.util.List.of()));
+            String id = BuiltInRegistries.ITEM.getKey(ctx.targetItem()).toString();
+            return rawMaterialTask.start(ctx, ctx.targetItem(), gap,
+                    new LitematListIntegration.RawNode(id, gap, "base", List.of()));
         }
-        return rawMaterialTask.start(ctx, this, ctx.targetItem(), gap,
+        return rawMaterialTask.start(ctx, ctx.targetItem(), gap,
                 rawPreparation == null ? null : rawPreparation.rootFor(ctx.targetItem()));
     }
 
@@ -702,7 +718,10 @@ public final class AutoMaterialGatherer implements ClientFeature {
         rawMaterialPrereqChecked = true;
 
         if (!LitematListIntegration.getInstance().isLoaded()) return false;
-        if (manualRun) { rawMaterialPrereqOk = true; return true; }
+        if (manualRun) {
+            rawMaterialPrereqOk = true;
+            return true;
+        }
         if (Configs.BaritoneSettings.MATERIAL_LIST_SOURCE.getOptionListValue() != MaterialSource.LITEMATLIST) {
             MessageUtil.sendActionBar(ctx.client,
                     "playercontrolpp.message.baritone.raw_material_needs_source");

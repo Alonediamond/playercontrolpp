@@ -1,13 +1,17 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
+import com.alonediamond.playercontrolpp.config.Configs;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
-import net.minecraft.client.Minecraft;
-import com.alonediamond.playercontrolpp.config.Configs;
+import net.minecraft.world.level.block.Block;
 
-import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +38,10 @@ final class MiningSources {
 
     /** 物品 → 挖了能直接掉出它的方块（按优先级排列）。 */
     private static final Map<Item, List<String>> SOURCES = sources();
-    private static final List<String> BLOCK_IDS = SOURCES.values().stream().flatMap(List::stream).distinct().toList();
+    private static final List<String> BLOCK_IDS = SOURCES.values().stream()
+            .flatMap(List::stream)
+            .distinct()
+            .toList();
 
     /**
      * @param item 目标物品
@@ -53,19 +60,23 @@ final class MiningSources {
     /** 不推断维度生成规则；只在当前维度有限范围内确有方块证据时尝试。 */
     static List<String> availableBlocks(Minecraft mc, Item item) {
         if (mc.level == null || mc.player == null) return List.of();
-        var known = survey().positions();
+        Map<String, List<BlockPos>> known = survey().positions();
         int radius = Configs.BaritoneSettings.MINING_SEARCH_RADIUS.getIntegerValue();
-        Map<String, Double> distances = new java.util.HashMap<>();
+        Map<String, Double> distances = new HashMap<>();
         for (String id : blocksFor(item)) {
-            var block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(id)).orElse(null);
+            Block block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(id)).orElse(null);
             double distance = known.getOrDefault(id, List.of()).stream()
                     .filter(pos -> !mc.level.hasChunkAt(pos) || block != null && mc.level.getBlockState(pos).is(block))
                     .mapToDouble(pos -> pos.distSqr(mc.player.blockPosition()))
-                    .filter(value -> value <= (long) radius * radius).min().orElse(Double.POSITIVE_INFINITY);
+                    .filter(value -> value <= (long) radius * radius)
+                    .min()
+                    .orElse(Double.POSITIVE_INFINITY);
             distances.put(id, distance);
         }
-        return blocksFor(item).stream().filter(id -> Double.isFinite(distances.get(id)))
-                .sorted(java.util.Comparator.comparingDouble(distances::get)).toList();
+        return blocksFor(item).stream()
+                .filter(id -> Double.isFinite(distances.get(id)))
+                .sorted(Comparator.comparingDouble(distances::get))
+                .toList();
     }
 
     static KnownMiningSurvey.Status survey() {
@@ -107,10 +118,10 @@ final class MiningSources {
                 "mangrove", "cherry", "bamboo")) {
             String block = "bamboo".equals(wood) ? "minecraft:bamboo_block" : "minecraft:" + wood + "_log";
             Item item = item(block);
-            if (item != null) map.put(item, single(block));
+            if (item != null) map.put(item, List.of(block));
         }
-        map.put(item("minecraft:crimson_stem"), single("minecraft:crimson_stem"));
-        map.put(item("minecraft:warped_stem"), single("minecraft:warped_stem"));
+        map.put(item("minecraft:crimson_stem"), List.of("minecraft:crimson_stem"));
+        map.put(item("minecraft:warped_stem"), List.of("minecraft:warped_stem"));
 
         // 石头类建材：直接自掉落，是最常见的建筑原料。
         for (String id : List.of(
@@ -126,7 +137,7 @@ final class MiningSources {
                 "minecraft:prismarine", "minecraft:dark_prismarine", "minecraft:sea_lantern",
                 "minecraft:terracotta")) {
             Item item = item(id);
-            if (item != null) map.put(item, single(id));
+            if (item != null) map.put(item, List.of(id));
         }
 
         // ---- 作物：Baritone 会走到成熟的作物前收割 ----
@@ -149,9 +160,4 @@ final class MiningSources {
         }
     }
 
-    private static List<String> single(String id) {
-        List<String> list = new ArrayList<>(1);
-        list.add(id);
-        return List.copyOf(list);
-    }
 }

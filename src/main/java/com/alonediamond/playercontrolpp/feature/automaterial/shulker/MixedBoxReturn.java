@@ -1,13 +1,15 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.shulker;
 
+import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
+import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ContainerOpener;
-import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
-
-import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
@@ -15,7 +17,8 @@ import net.minecraft.world.phys.Vec3;
 /** 只处理借用潜影盒的归还，优先原槽位；拒绝归还时保留盒子并排除来源，避免反复借取。 */
 public final class MixedBoxReturn {
     public static void start(GatherContext ctx, AutoMaterialGatherer task, ContainerOpener opener) {
-        if (ctx.mixedBoxReturnTarget == null || ctx.client.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(ctx.mixedBoxReturnTarget)) > PlayerUtil.blockReachSq(ctx.client.player)) {
+        if (ctx.mixedBoxReturnTarget == null || ctx.client.player.getEyePosition()
+                .distanceToSqr(Vec3.atCenterOf(ctx.mixedBoxReturnTarget)) > PlayerUtil.blockReachSq(ctx.client.player)) {
             finish(ctx, task, false); return;
         }
         task.setState(State.OPENING_CONTAINER);
@@ -23,8 +26,8 @@ public final class MixedBoxReturn {
     }
 
     public static void opened(GatherContext ctx, AutoMaterialGatherer task, ContainerOpener opener) {
-        var mc = ctx.client;
-        var menu = mc.player.containerMenu;
+        Minecraft mc = ctx.client;
+        AbstractContainerMenu menu = mc.player.containerMenu;
         if (menu == mc.player.inventoryMenu) {
             if (++ctx.openAttemptCount < 3) opener.openContainerWithRetry(ctx.mixedBoxReturnTarget, ctx.openAttemptCount, ctx);
             else finish(ctx, task, false);
@@ -40,8 +43,14 @@ public final class MixedBoxReturn {
             Slot original = menu.getSlot(ctx.mixedBoxOriginSlot);
             if (accepts(ctx, original)) target = original;
         }
-        if (target == null) for (Slot slot : menu.slots) if (accepts(ctx, slot)) { target = slot; break; }
-        if (target == null) { finish(ctx, task, false); return; }
+        if (target == null) for (Slot slot : menu.slots) if (accepts(ctx, slot)) {
+            target = slot;
+            break;
+        }
+        if (target == null) {
+            finish(ctx, task, false);
+            return;
+        }
         SlotActionCompat.pickup(mc, menu.containerId, source);
         SlotActionCompat.pickup(mc, menu.containerId, target.index);
         if (!menu.getCarried().isEmpty()) SlotActionCompat.pickup(mc, menu.containerId, source);

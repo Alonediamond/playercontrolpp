@@ -1,14 +1,16 @@
 package com.alonediamond.playercontrolpp.feature;
 
 import com.alonediamond.playercontrolpp.config.Configs;
-import com.alonediamond.playercontrolpp.render.WorldBoxRenderer;
 import com.alonediamond.playercontrolpp.render.BoxStyle;
+import com.alonediamond.playercontrolpp.render.WorldBoxRenderer;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -100,7 +102,7 @@ public final class ContainerHighlightFeature implements ClientFeature {
             if (opacity <= 0.0F) return;
             BoxStyle style = new BoxStyle(((color >> 16) & 0xFF) / 255.0F,
                     ((color >> 8) & 0xFF) / 255.0F, (color & 0xFF) / 255.0F, opacity);
-            WorldBoxRenderer.renderBoxes(java.util.List.of(gatherTarget), style);
+            WorldBoxRenderer.renderBoxes(List.of(gatherTarget), style);
         }
     }
 

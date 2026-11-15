@@ -2,9 +2,11 @@ package com.alonediamond.playercontrolpp.record;
 
 import com.alonediamond.playercontrolpp.compat.InputCompat;
 import com.alonediamond.playercontrolpp.util.MessageUtil;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec2;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -106,7 +108,7 @@ public class InputRecorder {
             MessageUtil.sendActionBar(client, "playercontrolpp.message.recording.active");
         }
 
-        var movementVec = player.input.getMoveVector();
+        Vec2 movementVec = player.input.getMoveVector();
         float fw = movementVec.y;
         float sw = movementVec.x;
         boolean j = InputCompat.isJumping(player);

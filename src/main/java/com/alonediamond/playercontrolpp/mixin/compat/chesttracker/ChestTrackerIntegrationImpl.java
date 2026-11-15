@@ -4,17 +4,6 @@ import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 
-import red.jackf.chesttracker.api.memory.Memory;
-import red.jackf.chesttracker.api.memory.MemoryBank;
-import red.jackf.chesttracker.api.memory.MemoryBankAccess;
-import red.jackf.chesttracker.api.memory.MemoryKey;
-import red.jackf.chesttracker.api.providers.InteractionTracker;
-import red.jackf.chesttracker.api.providers.MemoryBuilder;
-import red.jackf.chesttracker.api.providers.ProviderUtils;
-import red.jackf.chesttracker.impl.memory.MemoryBankImpl;
-import red.jackf.chesttracker.impl.memory.metadata.Metadata;
-import red.jackf.chesttracker.impl.memory.metadata.SearchSettings;
-
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -27,17 +16,28 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
-
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Unique;
+import red.jackf.chesttracker.api.memory.Memory;
+import red.jackf.chesttracker.api.memory.MemoryBank;
+import red.jackf.chesttracker.api.memory.MemoryBankAccess;
+import red.jackf.chesttracker.api.memory.MemoryKey;
+import red.jackf.chesttracker.api.providers.InteractionTracker;
+import red.jackf.chesttracker.api.providers.MemoryBuilder;
+import red.jackf.chesttracker.api.providers.ProviderUtils;
+import red.jackf.chesttracker.impl.memory.MemoryBankImpl;
+import red.jackf.chesttracker.impl.memory.metadata.Metadata;
+import red.jackf.chesttracker.impl.memory.metadata.SearchSettings;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiPredicate;
 
 /**
@@ -63,10 +63,10 @@ public abstract class ChestTrackerIntegrationImpl {
             Optional<MemoryKey> key = bank.getKey(dimension);
             if (key.isEmpty()) return result;
             // 双箱的共享 Memory 只统计一次，避免把同一批材料估算两遍。
-            java.util.Set<Memory> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-            var memories = new ArrayList<>(key.get().getMemories().entrySet());
+            Set<Memory> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+            List<Map.Entry<BlockPos, Memory>> memories = new ArrayList<>(key.get().getMemories().entrySet());
             memories.sort(Comparator.comparingDouble(entry -> entry.getKey().distSqr(origin)));
-            for (var entry : memories) {
+            for (Map.Entry<BlockPos, Memory> entry : memories) {
                 if (entry.getKey().distSqr(origin) > (long) range * range || !seen.add(entry.getValue())) continue;
                 for (ItemStack stack : entry.getValue().items()) {
                     if (stack.isEmpty()) continue;

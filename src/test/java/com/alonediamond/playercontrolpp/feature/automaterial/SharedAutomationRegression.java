@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import net.minecraft.world.item.Item;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialRequirements;
 import com.alonediamond.playercontrolpp.feature.automaterial.restock.RestockMaterials;
@@ -43,7 +44,7 @@ final class SharedAutomationRegression {
         check(requirements.entries().getFirst().item == Items.DIRT, "清单仍按需求总量降序");
         check(requirements.includingTarget(Items.STONE, 10).get(1).neededCount == 64,
                 "追溯目标较小时保留清单总量");
-        var expanded = requirements.includingTarget(Items.STONE, 80);
+        List<MaterialItemEntry> expanded = requirements.includingTarget(Items.STONE, 80);
         check(expanded.size() == 2 && expanded.get(1).neededCount == 80, "追溯增加目标而不重复条目");
         check(requirements.targetFor(Items.STONE) == 64, "临时取物目标不改写清单预留量");
         check(requirements.includingTarget(Items.OAK_LOG, 16).size() == 3, "中间材料加入本次取物");
@@ -83,9 +84,9 @@ final class SharedAutomationRegression {
 
     private static void restockBalancesLooseMaterials() {
         RestockMaterials materials = new RestockMaterials();
-        Map<net.minecraft.world.item.Item, Integer> held = new HashMap<>();
+        Map<Item, Integer> held = new HashMap<>();
         held.put(Items.STONE, 64);
-        var entries = List.of(
+        List<LitematicaIntegration.MaterialEntry> entries = List.of(
                 new LitematicaIntegration.MaterialEntry(new ItemStack(Items.STONE), 1000, 9999, false),
                 new LitematicaIntegration.MaterialEntry(new ItemStack(Items.DIRT), 128, 0, false),
                 new LitematicaIntegration.MaterialEntry(new ItemStack(Items.OAK_LOG), 64, 0, true));
@@ -96,7 +97,7 @@ final class SharedAutomationRegression {
 
         Slot stone = new Slot(new SimpleContainer(new ItemStack(Items.STONE, 64)), 0, 0, 0);
         Slot dirt = new Slot(new SimpleContainer(new ItemStack(Items.DIRT, 64)), 0, 0, 0);
-        var selection = materials.selectLooseStack(List.of(stone, dirt), slot -> true,
+        RestockMaterials.Selection selection = materials.selectLooseStack(List.of(stone, dirt), slot -> true,
                 item -> held.getOrDefault(item, 0));
         check(selection.slot() == dirt, "优先补满足比例更低的材料");
         held.put(Items.DIRT, 64);
