@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial.solver;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -37,6 +38,7 @@ final class SupplySolver {
     private static final long PRESSURE_SCALE = 1_000_000L;
     private static final int MAX_BLOCKED_EXAMPLES = 8;
     private static final int MAX_ACTIVE_FRAMES = 768;
+    private static final int MAX_DELIVERY_STATES = 4096;
 
     private sealed interface Task permits Demand, Finish, Deliver {}
     private record Demand(List<String> choices, Set<String> ancestors, Hint parentHint, Hint rootHint) implements Task {
@@ -44,6 +46,8 @@ final class SupplySolver {
     }
     private record Finish(Recipe recipe, Hint hint) implements Task {}
     private record Deliver(int goalIndex, int remaining) implements Task {}
+    private record DeliveryState(Deliver progress, List<Integer> stock, Map<String, Long> surplus) {}
+    private record Prefix(Score score, int deviations) {}
 
     /** 一条尚未承诺的尝试：stock 按货源记剩余实物，available 按物品扣除硬下限，surplus 是本分支已制出的余料。 */
     private static final class Branch {
@@ -85,6 +89,7 @@ final class SupplySolver {
     private final Map<String, Long> initial = new HashMap<>();
     private final Map<String, List<Integer>> sources = new HashMap<>();
     private final Set<List<String>> blocked = new LinkedHashSet<>();
+    private final Map<DeliveryState, Prefix> deliveries = new HashMap<>();
     private Plan best;
     private int bestDeviations;
 
@@ -138,6 +143,7 @@ final class SupplySolver {
                 bestDeviations = branch.deviations;
             } else if (task instanceof Deliver deliver) {
                 branch.bindings.removeLast();
+                if (dominatedAtDelivery(branch, deliver)) continue;
                 scheduleGoal(branch, deliver.goalIndex, deliver.remaining);
                 frontier.push(List.of(branch).iterator());
             } else if (task instanceof Finish finish) {
@@ -148,6 +154,20 @@ final class SupplySolver {
             }
         }
         return result(best == null ? Status.NO_PLAN_IN_MODEL : Status.BEST_IN_MODEL, explored);
+    }
+
+    private boolean dominatedAtDelivery(Branch branch, Deliver progress) {
+        // 仅在一个顶层单位交付完毕时归并：这时没有悬挂格位或父配方。货源余量决定已访问的箱子和各物品可取额度。
+        DeliveryState state = new DeliveryState(progress, Arrays.stream(branch.stock).boxed().toList(), Map.copyOf(branch.surplus));
+        Prefix prior = deliveries.get(state);
+        if (prior != null) {
+            int order = prior.score.compare(branch.score, request.policy());
+            if (order < 0 || order == 0 && prior.deviations <= branch.deviations) return true;
+        }
+        if (prior != null || deliveries.size() < MAX_DELIVERY_STATES) {
+            deliveries.put(state, new Prefix(branch.score, branch.deviations));
+        }
+        return false;
     }
 
     private Result result(Status status, long explored) {

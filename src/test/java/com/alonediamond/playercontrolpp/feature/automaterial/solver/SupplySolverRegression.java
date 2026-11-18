@@ -38,6 +38,12 @@ public final class SupplySolverRegression {
 
     public static void main(String[] args) {
         SupplySolverRegression suite = new SupplySolverRegression();
+        if (List.of(args).contains("--two-fences")) {
+            suite.showPlans = true;
+            suite.twoFences();
+            System.out.println("Two fences: " + suite.checks + " checks passed");
+            return;
+        }
         if (List.of(args).contains("--survival-piston")) {
             suite.showPlans = true;
             suite.survivalPiston();
@@ -55,6 +61,7 @@ public final class SupplySolverRegression {
     private int runChecks() {
         pistons();
         survivalPiston();
+        twoFences();
         mineralRoutes();
         sharedAndRounded();
         cyclesAndLimits();
@@ -157,6 +164,33 @@ public final class SupplySolverRegression {
             System.out.println("单做活塞：" + singlePlan.shoppingList() + "；九格：" + pistonStep.grid());
             System.out.println("再交付 24 白桦原木：" + combinedPlan.shoppingList());
         }
+    }
+
+    /** 专用板和通用棍共用库存；不预先告诉求解器应把哪种原木留给谁。 */
+    private void twoFences() {
+        String oakFence = "minecraft:oak_fence";
+        String spruceFence = "minecraft:spruce_fence";
+        String spruce = "minecraft:spruce_log";
+        String birch = "minecraft:birch_log";
+        String stick = "minecraft:stick";
+        List<Recipe> recipes = List.of(RecipeFixtures.read(oakFence), RecipeFixtures.read(spruceFence),
+                RecipeFixtures.read(stick), RecipeFixtures.read(OAK), RecipeFixtures.read("minecraft:spruce_planks"),
+                RecipeFixtures.read(BIRCH));
+        List<Source> stock = List.of(stock(LOG, 2), stock(spruce, 2), stock(birch, 1));
+        List<Goal> goals = List.of(goal(oakFence, 6), goal(spruceFence, 6));
+        for (List<Goal> order : List.of(goals, goals.reversed())) {
+            Plan plan = solved(request(recipes, stock, order, 3));
+            check(plan.shoppingList().equals(Map.of(LOG, 2L, spruce, 2L, birch, 1L)) && plan.surplus().isEmpty(),
+                    "五根原木恰好满足两种栅栏，无需软偏好或库存下限");
+            List<Make> batches = plan.actions().stream().filter(Make.class::isInstance).map(Make.class::cast)
+                    .filter(make -> make.recipe().output().equals(stick)).toList();
+            check(batches.size() == 2 && batches.stream().allMatch(make -> make.recipe().yield() == 4
+                    && make.grid().stream().filter(item -> !item.isEmpty()).toList().equals(List.of(BIRCH, BIRCH))),
+                    "两次制棍均使用两块白桦板；不是只检查原木采购总数");
+            if (showPlans) System.out.println(order + " -> " + plan.shoppingList() + "; sticks: " + batches.getFirst().grid());
+        }
+        Result missing = SupplySolver.solve(request(recipes, stock.subList(0, 2), goals, 3), BUDGET);
+        check(missing.status() == Status.NO_PLAN_IN_MODEL && missing.plan() == null, "拿走白桦原木后不是同一可行订单");
     }
 
     private void sharedAndRounded() {
