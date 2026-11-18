@@ -12,6 +12,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.container.Container
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialPlanRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RecipeAllocationRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.StonecutterBatchRegression;
+import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplySolverRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueueRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualRawMaterialPlanRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.restock.LayerBuildControllerRegression;
@@ -77,6 +78,7 @@ public final class MaterialCollectorRegression {
         checks += ManualMaterialQueueRegression.run();
         checks += RecipeAllocationRegression.run();
         checks += StonecutterBatchRegression.run();
+        checks += SupplySolverRegression.run();
         checks += LayerBuildControllerRegression.run();
         checks += SecondsConfigOptionRegression.run();
         checks += ConfigSearchRegression.run();
