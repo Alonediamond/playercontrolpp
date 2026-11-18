@@ -117,9 +117,10 @@ jobs:
           name: mod-jars
           path: mod-jars/*.jar
 
-      # push 触发的开发构建直接挂到一个滚动的 pre-release（tag: dev-build），
-      # 附件同名覆盖，链接永远指向最新构建。PR / 正式发布（release.yml）不走这里。
+      # push 触发的开发构建挂到滚动预发布（tag: dev-build）。
+      # 上传成功后按本次附件 ID 清理旧 jar；失败时保留上次可下载的版本。
       - name: Attach mod jars to rolling dev release
+        id: dev_release
         if: ${{ github.event_name == 'push' }}
         uses: softprops/action-gh-release@v2
         with:
@@ -134,6 +135,34 @@ jobs:
           make_latest: false
           files: mod-jars/*.jar
           overwrite_files: true
+          fail_on_unmatched_files: true
+
+      - name: Remove older jars from rolling dev release
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/github-script@v8
+        env:
+          DEV_RELEASE_ID: ${{ steps.dev_release.outputs.id }}
+          NEW_RELEASE_ASSETS: ${{ steps.dev_release.outputs.assets }}
+        with:
+          script: |
+            const fs = require('fs')
+            const uploaded = JSON.parse(process.env.NEW_RELEASE_ASSETS || '[]')
+            const expectedCount = fs.readdirSync('mod-jars').filter(name => name.endsWith('.jar')).length
+            const currentIds = new Set(uploaded.map(asset => asset.id))
+            if (expectedCount === 0 || currentIds.size !== expectedCount) {
+              throw new Error(`Expected ${expectedCount} uploaded jars, got ${currentIds.size}; keeping old assets`)
+            }
+
+            const { owner, repo } = context.repo
+            const release_id = Number(process.env.DEV_RELEASE_ID)
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner, repo, release_id, per_page: 100,
+            })
+            for (const asset of assets) {
+              if (asset.name.endsWith('.jar') && !currentIds.has(asset.id)) {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: asset.id })
+              }
+            }
 
 #      # [FEATURE] FALLENS_MAVEN
 #      - name: Publish with gradle

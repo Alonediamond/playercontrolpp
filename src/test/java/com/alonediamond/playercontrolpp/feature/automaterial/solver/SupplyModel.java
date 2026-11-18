@@ -91,6 +91,7 @@ final class SupplyModel {
     }
 
     record Score(long protectedUnits, long pressure, long operations) {
+        /** 比较整单而非某个格位。省库存依次比较软保护用量、库存消耗比例、操作成本；少操作则把操作成本放在首位。 */
         int compare(Score other, Policy policy) {
             if (policy == Policy.FEWEST_OPERATIONS) {
                 int order = Long.compare(operations, other.operations);

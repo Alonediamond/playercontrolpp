@@ -38,6 +38,12 @@ public final class SupplySolverRegression {
 
     public static void main(String[] args) {
         SupplySolverRegression suite = new SupplySolverRegression();
+        if (List.of(args).contains("--survival-piston")) {
+            suite.showPlans = true;
+            suite.survivalPiston();
+            System.out.println("Survival piston: " + suite.checks + " checks passed");
+            return;
+        }
         suite.showPlans = List.of(args).contains("--demo");
         System.out.println("Supply solver: " + suite.runChecks() + " checks passed");
     }
@@ -48,6 +54,7 @@ public final class SupplySolverRegression {
 
     private int runChecks() {
         pistons();
+        survivalPiston();
         mineralRoutes();
         sharedAndRounded();
         cyclesAndLimits();
@@ -109,6 +116,49 @@ public final class SupplySolverRegression {
                 && table.slots().get(5).choices().isEmpty(), "真实 2×2 图案保留行距");
     }
 
+    /** IDEA 选 26.2 的测试类路径，以 --survival-piston 调试 main，可跳过其余回归。 */
+    private void survivalPiston() {
+        String birchLog = "minecraft:birch_log";
+        String spruceLog = "minecraft:spruce_log";
+        String ironBlock = "minecraft:iron_block";
+        String redBlock = "minecraft:redstone_block";
+        Recipe piston = RecipeFixtures.read(PISTON);
+        Catalog catalog = new Catalog(List.of(piston, RecipeFixtures.read(OAK), RecipeFixtures.read(BIRCH),
+                RecipeFixtures.read("minecraft:spruce_planks"), RecipeFixtures.read(DUST),
+                RecipeFixtures.read("minecraft:iron_ingot_from_iron_block")));
+        // 石材格是单个物品而非石材标签；放入更多深板岩圆石不能使它成为合法解。
+        List<Source> stock = List.of(stock(OAK, 3), stock(LOG, 8), stock(birchLog, 24), stock(spruceLog, 1),
+                stock(COBBLE, 12), stock("minecraft:cobbled_deepslate", 64),
+                stock(DUST, 2), stock(redBlock, 8), stock(IRON, 12), stock(ironBlock, 1));
+        // 故意先推荐橡木。三个木板格不绑定木种；只有深度、真实配方与库存是硬条件。
+        Hint oakRoute = RecipeFixtures.hint(new RawNode(PISTON, 1, "crafting_shaped", List.of(
+                new RawNode(OAK, 3, "crafting_shapeless", List.of(leaf(LOG, 1))), leaf(COBBLE, 4),
+                new RawNode(DUST, 1, "crafting_shapeless", List.of(leaf(redBlock, 1))),
+                new RawNode(IRON, 1, "crafting_shapeless", List.of(leaf(ironBlock, 1))))));
+        Goal target = new Goal(PISTON, 1, oakRoute);
+        Request single = new Request(catalog, stock, List.of(target), Map.of(), Set.of(), Set.of(), 2,
+                Policy.SAVE_STOCK, Mode.PREPARE);
+        Plan singlePlan = solved(single);
+        check(singlePlan.shoppingList().equals(Map.of(birchLog, 1L, COBBLE, 4L, redBlock, 1L, IRON, 1L)),
+                "省库存：不耗尽橡木板、不碰稀少云杉、用白桦制板，拆红石块但不拆铁块");
+        check(singlePlan.surplus().equals(Map.of(BIRCH, 1L, DUST, 8L)), "只用三块板和一份粉，其余留给后续需求");
+        Make pistonStep = singlePlan.actions().stream().filter(Make.class::isInstance).map(Make.class::cast)
+                .filter(step -> step.recipe().output().equals(PISTON)).findFirst().orElseThrow();
+        check(pistonStep.grid().equals(List.of(BIRCH, BIRCH, BIRCH, COBBLE, IRON, COBBLE, COBBLE, DUST, COBBLE)),
+                "最终摆料与选定变种相同，而非临时改用背包里的橡木板");
+
+        // 还是同一份库存，只多一项必须交付的订单，不设置硬保留。只求活塞的最优解现在不再可行。
+        Request combined = new Request(catalog, stock, List.of(target, goal(birchLog, 24)), Map.of(), Set.of(),
+                Set.of(), 2, Policy.SAVE_STOCK, Mode.PREPARE);
+        Plan combinedPlan = solved(combined);
+        check(combinedPlan.shoppingList().equals(Map.of(LOG, 1L, birchLog, 24L, COBBLE, 4L, redBlock, 1L, IRON, 1L)),
+                "全单最优：交付全部白桦原木时，活塞改用橡木原木");
+        if (showPlans) {
+            System.out.println("单做活塞：" + singlePlan.shoppingList() + "；九格：" + pistonStep.grid());
+            System.out.println("再交付 24 白桦原木：" + combinedPlan.shoppingList());
+        }
+    }
+
     private void sharedAndRounded() {
         Recipe flexible = simple("flex", "first", 1, List.of(new Slot(List.of("oak", "spruce"))));
         Recipe strict = simple("strict", "second", 1, List.of(new Slot(List.of("oak"))));
@@ -123,6 +173,13 @@ public final class SupplySolverRegression {
         check(rounded.surplus().equals(Map.of("K", 3L)) && rounded.shoppingList().equals(Map.of("A", 6L)), "3A→4K 两次留 3K");
         Plan reused = solved(request(List.of(bulk), List.of(stock("A", 3)), List.of(goal("K", 2), goal("K", 2)), 1));
         check(reused.surplus().isEmpty() && reused.shoppingList().get("A") == 3, "两项需求共享同批余料");
+        // 末项的两格只能取现成材料（已达深度上限）。若第二项一见余料就用，末项会误报缺料。
+        Recipe doubleBoard = simple("saw", "board", 2, List.of(new Slot(List.of("log"))));
+        Recipe pair = simple("pair", "pair", 1, Collections.nCopies(2, new Slot(List.of("board"))));
+        Plan saved = solved(request(List.of(doubleBoard, pair), List.of(stock("log", 2)),
+                List.of(goal("board", 2), goal("pair", 1)), 1));
+        check(saved.shoppingList().equals(Map.of("log", 2L)) && saved.surplus().isEmpty(),
+                "可分解的需求先再做一批，保存两块余板给不可分解的后续需求");
         List<Source> sources = List.of(new Source("far", "A", 1, 10), new Source("near", "A", 1, 1));
         Plan near = solved(request(List.of(), sources, List.of(goal("A", 1)), 0));
         check(((Take) near.actions().getFirst()).source() == 1, "同物品选择近箱");

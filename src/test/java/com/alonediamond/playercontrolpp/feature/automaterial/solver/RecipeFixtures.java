@@ -24,6 +24,7 @@ final class RecipeFixtures {
         return new Hint(node.itemId(), node.count(), node.recipeType(), node.children().stream().map(RecipeFixtures::hint).toList());
     }
 
+    /** 从该 MC 版本的测试类路径读取指定配方。标签可展开成多个选择，但单一物品绝不按外观补充“类似材料”。 */
     static Recipe read(String id) {
         JsonObject json = resource("recipe", id);
         String type = json.get("type").getAsString();

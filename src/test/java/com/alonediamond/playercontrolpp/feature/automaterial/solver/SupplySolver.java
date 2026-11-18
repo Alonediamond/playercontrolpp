@@ -29,6 +29,10 @@ import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.
 import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Status;
 import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Take;
 
+/**
+ * 只在测试中运行的订单规划器。Demand 解决一个格位或一个交付单位；Finish 等子材料到齐再摆料；
+ * Deliver 把产物交给订单。顺序压入这些任务，等价于沿一棵候选树试做，不必预先生成每种格位组合。
+ */
 final class SupplySolver {
     private static final long PRESSURE_SCALE = 1_000_000L;
     private static final int MAX_BLOCKED_EXAMPLES = 8;
@@ -41,6 +45,7 @@ final class SupplySolver {
     private record Finish(Recipe recipe, Hint hint) implements Task {}
     private record Deliver(int goalIndex, int remaining) implements Task {}
 
+    /** 一条尚未承诺的尝试：stock 按货源记剩余实物，available 按物品扣除硬下限，surplus 是本分支已制出的余料。 */
     private static final class Branch {
         final Deque<Task> todo;
         final List<String> bindings;
@@ -62,6 +67,7 @@ final class SupplySolver {
             actions = new ArrayList<>();
         }
 
+        // 兄弟分支不能共享可变账本；试用白桦失败时，橡木分支应从同一份父库存出发。
         Branch(Branch parent) {
             todo = new ArrayDeque<>(parent.todo);
             bindings = new ArrayList<>(parent.bindings);
@@ -127,6 +133,7 @@ final class SupplySolver {
             if (!competitive(branch)) continue;
             Task task = branch.todo.poll();
             if (task == null) {
+                // 推荐的结果断点：此时所有目标都已交付。首个到这里的不是最终答案，观察后续 best 的替换。
                 best = new Plan(branch.actions, branch.surplus, branch.score, request.mode());
                 bestDeviations = branch.deviations;
             } else if (task instanceof Deliver deliver) {
@@ -147,6 +154,7 @@ final class SupplySolver {
         return new Result(status, best, explored, best == null ? List.copyOf(blocked) : List.of());
     }
 
+    /** 现有模型只累加取货和制作成本；半成品方案的成本已不可能胜出时，其后代也不用再试。 */
     private boolean competitive(Branch branch) {
         if (best == null) return true;
         int order = branch.score.compare(best.score(), request.policy());
@@ -187,24 +195,28 @@ final class SupplySolver {
 
     private Stream<Branch> alternatives(Branch parent, Demand demand, String item) {
         if (request.mode() == Mode.RAW_ONLY && demand.ancestors.contains(item)) return Stream.empty();
-        if (parent.surplus.getOrDefault(item, 0L) > 0) {
-            Branch child = new Branch(parent);
-            if (child.surplus.merge(item, -1L, Long::sum) == 0) child.surplus.remove(item);
-            child.bindings.add(item);
-            return Stream.of(child);
-        }
         Hint hint = demand.hintFor(item);
         boolean hintedStop = hint != null && hint.children().isEmpty();
         List<Recipe> recipes = !hintedStop && canExpand(item, demand) ? request.catalog().forOutput(item) : List.of();
         Stream<Recipe> ordered = recipes.stream();
         if (hint != null) ordered = ordered.sorted(Comparator.comparing(recipe -> !typeMatches(recipe, hint)));
         Stream<Branch> produce = ordered.map(recipe -> openRecipe(parent, demand, recipe, hint));
-        if (request.mode() == Mode.RAW_ONLY && !recipes.isEmpty()) return produce;
-        Stream<Branch> take = parent.available.getOrDefault(item, 0L) <= 0 ? Stream.empty()
+        boolean hasSurplus = parent.surplus.getOrDefault(item, 0L) > 0;
+        // 普通备货允许在任一出现点拿现货：有相同余料时可把拿现货延后，不会更贵。
+        // RAW_ONLY 只允许叶子拿现货，不能把这个推论用于它的非叶子格位。
+        boolean allowTake = request.mode() == Mode.RAW_ONLY ? recipes.isEmpty() : !hasSurplus;
+        Stream<Branch> take = !allowTake || parent.available.getOrDefault(item, 0L) <= 0 ? Stream.empty()
                 : sources.getOrDefault(item, List.of()).stream().filter(index -> parent.stock[index] > 0)
                         .map(index -> withdraw(parent, index));
-        return request.policy() == Policy.SAVE_STOCK && request.preferKeeping().contains(item)
+        // concat 只决定先试哪一边；有木板现货时，「从原木制板」并没有被排除。
+        Stream<Branch> supply = request.policy() == Policy.SAVE_STOCK && request.preferKeeping().contains(item)
                 ? Stream.concat(produce, take) : Stream.concat(take, produce);
+        if (!hasSurplus) return supply;
+        // 优先试免费余料，但不能直接返回它：后面的深度受限格位也许只能用现成品。
+        Branch child = new Branch(parent);
+        if (child.surplus.merge(item, -1L, Long::sum) == 0) child.surplus.remove(item);
+        child.bindings.add(item);
+        return Stream.concat(Stream.of(child), supply);
     }
 
     private Branch withdraw(Branch parent, int index) {
@@ -214,6 +226,8 @@ final class SupplySolver {
         branch.available.merge(source.item(), -1L, Long::sum);
         branch.bindings.add(source.item());
         branch.actions.add(new Take(index, source.item()));
+        // 断点看 source.item() 和 stockPressure：同取一根，消耗 1/24 白桦比 1/8 橡木便宜。
+        // 分母是期初可动用总量，不是取走一个后重新计算；稀有只代表分高，不是禁用。
         long stockPressure = Math.ceilDiv(PRESSURE_SCALE, initial.get(source.item()));
         branch.score = new Score(branch.score.protectedUnits() + (request.preferKeeping().contains(source.item()) ? 1 : 0),
                 Math.addExact(branch.score.pressure(), stockPressure),
@@ -226,6 +240,7 @@ final class SupplySolver {
         Set<String> path = new HashSet<>(demand.ancestors);
         path.add(recipe.output());
         Set<String> ancestors = Set.copyOf(path);
+        // 后进先出：先挂起完成动作，再倒序压入格位，最后能按真实图案顺序重建九格。
         branch.todo.push(new Finish(recipe, hint));
         for (Slot slot : recipe.slots().reversed()) {
             if (!slot.choices().isEmpty()) branch.todo.push(new Demand(slot.choices(), ancestors, hint, null));
@@ -246,6 +261,7 @@ final class SupplySolver {
         List<String> grid = recipe.slots().stream().map(slot -> slot.choices().isEmpty() ? "" : items.next()).toList();
         boolean follows = matchesHint(recipe, finish.hint, allocated);
         if (!follows && finish.hint != null) branch.deviations++;
+        // 只归约这次制作的格位；一份产物交回上层，余下的从此刻起才可用。
         allocated.clear();
         branch.bindings.add(recipe.output());
         if (recipe.yield() > 1) branch.surplus.merge(recipe.output(), recipe.yield() - 1L, Math::addExact);

@@ -10,6 +10,11 @@ on:
       - ".github/**"
   pull_request:
 
+concurrency:
+  # 所有 push 共用一个滚动预发布；新推送取消尚未完成的旧开发构建。
+  group: ${{ github.event_name == 'push' && 'playercontrolpp-dev-release' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 
 jobs:
   build:
