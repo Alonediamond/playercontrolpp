@@ -10,6 +10,7 @@ import com.litematlist.RawMaterialTreeAnalyzer;
 import com.litematlist.RecipeTreeNode;
 import com.litematlist.api.LitematListAPI.MaterialItem;
 import com.litematlist.api.LitematListAPI;
+import com.litematlist.config.RawMaterialConfig;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
@@ -18,6 +19,7 @@ import org.spongepowered.asm.mixin.Unique;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * {@link LitematListIntegration} 的直连实现，由 MixinPlugin 在 LitematList 在场时注入。
@@ -109,5 +111,15 @@ public abstract class LitematListIntegrationImpl {
             children.add(toNode(child));
         }
         return new RawNode(node.itemId, node.count, node.recipeType, children);
+    }
+
+    @Overwrite(remap = false)
+    public Set<Item> rawTraceStops() {
+        try {
+            return Set.copyOf(RawMaterialConfig.currentWhitelist);
+        } catch (Throwable e) {
+            Playercontrolpp.LOGGER.debug("Unable to read LitematList raw trace stops", e);
+            return null;
+        }
     }
 }

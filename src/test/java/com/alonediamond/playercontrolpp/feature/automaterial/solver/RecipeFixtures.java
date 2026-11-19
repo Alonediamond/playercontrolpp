@@ -1,12 +1,12 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.solver;
 
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Hint;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Recipe;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Slot;
+import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Recipe;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Slot;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Hint;
-import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
 
 import java.io.IOException;
 import java.io.InputStream;

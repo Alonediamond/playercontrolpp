@@ -18,13 +18,28 @@ public final class ContainerMaterialCollector {
     public record Selection(Slot slot, int amount, boolean unpack) {}
 
     public static Selection select(GatherContext ctx, List<Slot> slots, Predicate<Slot> canAttempt) {
+        Predicate<Slot> usable = slot -> slot.container != ctx.client.player.getInventory()
+                && slot.mayPickup(ctx.client.player) && canAttempt.test(slot);
+        if (ctx.boundLooseSource() != null) {
+            return selectBoundLoose(ctx.targetItem(), ctx.boundLooseGap(), slots, usable);
+        }
         InventoryCounts counts = InventoryCounts.capture(
                 ctx.client.player.getInventory()::getItem, ctx.extractionBoxSlots);
-        return select(ctx.wantedEntries(), counts::owned, slots,
-                slot -> slot.container != ctx.client.player.getInventory() && slot.mayPickup(ctx.client.player)
-                        && canAttempt.test(slot),
+        return select(ctx.wantedEntries(), counts::owned, slots, usable,
                 Configs.BaritoneSettings.SHULKER_BOX_PRIORITY_THRESHOLD.getIntegerValue(),
                 Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue());
+    }
+
+    /** 固定来源只取本步的默认堆栈，实际点击额度需同时受来源槽数量限制。 */
+    public static Selection selectBoundLoose(Item item, int gap, List<Slot> slots, Predicate<Slot> usable) {
+        if (gap <= 0) return null;
+        for (Slot slot : slots) {
+            ItemStack stack = slot.getItem();
+            if (ItemUtil.is(stack, item) && ItemUtil.isPlainLoose(stack) && usable.test(slot)) {
+                return new Selection(slot, Math.min(gap, stack.getCount()), false);
+            }
+        }
+        return null;
     }
 
     public static Selection select(List<MaterialItemEntry> requirements, ToIntFunction<Item> held, List<Slot> slots,

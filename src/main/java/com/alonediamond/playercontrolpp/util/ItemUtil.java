@@ -43,6 +43,11 @@ public final class ItemUtil {
         return stack.getItem() == item;
     }
 
+    /** 求解器用物品 ID 记账，只收录默认组件的非潜影盒堆栈。 */
+    public static boolean isPlainLoose(ItemStack stack) {
+        return !stack.isEmpty() && !isShulkerBox(stack) && stack.getComponentsPatch().isEmpty();
+    }
+
     /** @return 潜影盒里的非空物品堆；没有容器组件时返回空表。读的是客户端最后同步到的内容。 */
     public static List<ItemStack> contentsOf(ItemStack shulkerBox) {
         ItemContainerContents contents = shulkerBox.get(DataComponents.CONTAINER);
@@ -100,6 +105,19 @@ public final class ItemUtil {
         for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
             ItemStack stack = inventory.getItem(i);
             if (is(stack, item)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    public static int countPlainLoose(Player player, Item item) {
+        if (player == null || item == null) return 0;
+        Inventory inventory = player.getInventory();
+        int count = 0;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (is(stack, item) && isPlainLoose(stack)) {
                 count += stack.getCount();
             }
         }

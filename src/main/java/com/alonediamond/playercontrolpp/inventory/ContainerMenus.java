@@ -3,6 +3,8 @@ package com.alonediamond.playercontrolpp.inventory;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 /** 菜单状态与 Screen 分开判断：自动缓存会屏蔽 GUI，但菜单仍然正常同步。 */
 public final class ContainerMenus {
@@ -10,6 +12,11 @@ public final class ContainerMenus {
 
     public static boolean isOpen(Minecraft mc) {
         return mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu;
+    }
+
+    /** 固定来源的取料只操作可按普通储物菜单核对的方块。 */
+    public static boolean isPlainStorageBlock(Block block) {
+        return block == Blocks.CHEST || block == Blocks.TRAPPED_CHEST || block == Blocks.BARREL;
     }
 
     /** 只检查容器侧，玩家背包里的物品不能作为内容已出现的依据。 */

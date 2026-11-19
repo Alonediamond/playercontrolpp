@@ -7,6 +7,10 @@ import com.alonediamond.playercontrolpp.config.RawMaterialMode;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer.State;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Balance;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Craft;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Fetch;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Step;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialPlan.Frame;
 import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxAccess;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
@@ -24,13 +28,16 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * 「材料备货追溯原材料并合成」的执行器。
@@ -60,11 +67,15 @@ public final class RawMaterialTask {
      */
     private static final int MAX_UNPACKS_PER_FRAME = 4;
     private static final int RECIPE_UNLOCK_WAIT_TICKS = 40;
+    private static final String SOLVER_MESSAGE = "playercontrolpp.message.baritone.raw_material_solver_";
 
     private enum Stage {
         IDLE,
         /** 正在决定"下一个要保证的子材料"或发起合成。 */
         GATHER,
+        OPTIMIZE,
+        EXECUTE_PLAN,
+        EXACT_CRAFT,
         /** 来源快照尚未就绪；空的处理中结果不能当成挖不到。 */
         SURVEY,
         /** 已经把某个子材料交给主状态机去采集，等它的回调。 */
@@ -90,6 +101,16 @@ public final class RawMaterialTask {
 
     private Stage stage = Stage.IDLE;
     private final RawMaterialPlan plan = new RawMaterialPlan();
+    private OptimizedCraftBatch optimized;
+    private final Deque<Step> optimizedSteps = new ArrayDeque<>();
+    private final Set<BlockPos> failedSources = new HashSet<>();
+    private boolean optimizeBatches;
+    private boolean replanUsed;
+    private boolean feasibleLimitShown;
+    private int exactOperations;
+    private int exactOutputTarget;
+    private int boundCloseWaitTicks;
+    private boolean verifyClosedMenu;
 
     /** 本次追溯的顶层物品；失败时记进 ctx.tracedItems，避免反复重试。 */
     private Item rootItem;
@@ -181,6 +202,9 @@ public final class RawMaterialTask {
         // 这样一次只为"一组"备料——需要 10 组活塞时，不会把几十组原材料一次塞进背包，
         // 更不会因为背包放不下而卡死在"取不出来"上。
         plan.pushBatches(item, root, need, total, null);
+        optimizeBatches = Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()
+                && !ctx.client.player.isCreative() && !ctx.client.player.isSpectator()
+                && CraftingRecipes.isSupportedType(root.recipeType());
         this.stage = Stage.GATHER;
         MessageUtil.sendActionBar(ctx.client,
                 "playercontrolpp.message.baritone.raw_material_start", name(item));
@@ -194,6 +218,9 @@ public final class RawMaterialTask {
         }
         switch (this.stage) {
             case GATHER -> gatherTick(ctx, tsm);
+            case OPTIMIZE -> optimizeTick(ctx, tsm);
+            case EXECUTE_PLAN -> executePlan(ctx, tsm);
+            case EXACT_CRAFT -> exactCraftTick(ctx, tsm);
             case SURVEY -> {
                 if (MiningSources.survey().ready()) afterGatherFailed(ctx, tsm, dispatchedItem, true);
             }
@@ -219,6 +246,12 @@ public final class RawMaterialTask {
         // 只认"我们确实在等"的回调：合成中、取料中冒出来的 satisfied 事件不能拿来推进计划，
         // 否则会把正开着的合成界面丢在那里不管。
         if (this.stage != Stage.DISPATCHED && this.stage != Stage.MINING) return;
+        if (optimized != null) {
+            restoreRootTarget(ctx);
+            optimizedSteps.removeFirst();
+            stage = Stage.EXECUTE_PLAN;
+            return;
+        }
         if (this.dispatchedItem == null) return;
         boolean wasRoot = this.dispatchedIsRoot;
         this.dispatchedItem = null;
@@ -251,6 +284,12 @@ public final class RawMaterialTask {
     /** 派出去的那一项在缓存里没有。 */
     public void onSubItemUnavailable(GatherContext ctx, AutoMaterialGatherer tsm) {
         if (this.stage != Stage.DISPATCHED) return;
+        if (optimized != null) {
+            BlockPos source = ctx.boundLooseSource();
+            if (source != null) failedSources.add(source);
+            recoverOptimized(ctx, "changed");
+            return;
+        }
         Item item = this.dispatchedItem;
         if (item == null) {
             failChain(ctx, tsm, this.rootItem);
@@ -262,6 +301,17 @@ public final class RawMaterialTask {
     // ---- 计划推进 ----
 
     private void gatherTick(GatherContext ctx, AutoMaterialGatherer tsm) {
+        if (boundCloseWaitTicks > 0) {
+            boundCloseWaitTicks--;
+            return;
+        }
+        if (verifyClosedMenu) {
+            verifyClosedMenu = false;
+            if (ctx.client.player.containerMenu != ctx.client.player.inventoryMenu) {
+                tsm.setState(State.STOPPED, "playercontrolpp.message.baritone.transfer_interrupted");
+                return;
+            }
+        }
         Frame frame = this.plan.current();
         if (frame == null) {
             finish(ctx, tsm);
@@ -270,8 +320,15 @@ public final class RawMaterialTask {
 
         // 这一批的目标已经达到（别的帧顺手做了出来、或玩家自己补上了）：直接收工。
         // 否则会拿着已经满足的数量再开一次工作台，白摆一次料。
-        if (ctx.countHeld(frame.item) >= frame.targetTotal) {
+        int batchLimit = frame.optimizedBatchTarget > 0 ? frame.optimizedBatchTarget : frame.targetTotal;
+        if (ctx.countHeld(frame.item) >= batchLimit) {
             popFrame(ctx, tsm);
+            return;
+        }
+
+        if (frame.parent == null && optimizeBatches
+                && Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()) {
+            startOptimized(ctx, tsm, frame);
             return;
         }
 
@@ -332,7 +389,8 @@ public final class RawMaterialTask {
         }
         if (frame.ingredients != null) return true;
 
-        frame.batchTarget = Math.min(frame.targetTotal, RecipeAllocation.target(ctx.countHeld(frame.item), frame.need));
+        int batchLimit = frame.optimizedBatchTarget > 0 ? frame.optimizedBatchTarget : frame.targetTotal;
+        frame.batchTarget = Math.min(batchLimit, RecipeAllocation.target(ctx.countHeld(frame.item), frame.need));
         if ("stonecutting".equals(frame.node.recipeType())) {
             frame.ingredients = treeIngredients(frame);
             return true;
@@ -388,7 +446,10 @@ public final class RawMaterialTask {
         this.stage = Stage.DISPATCHED;
 
         ctx.setTarget(item, this.dispatchedTarget);
+        startGatherSearch(ctx, tsm);
+    }
 
+    private static void startGatherSearch(GatherContext ctx, AutoMaterialGatherer tsm) {
         ctx.currentPosIndex = 0;
         ctx.chestRetryCount = 0;
         ctx.foundPositions.clear();
@@ -396,6 +457,181 @@ public final class RawMaterialTask {
         ctx.adjacentContainerTargets = null;
         ctx.adjacentTryIndex = 0;
         tsm.setState(State.SEARCHING);
+    }
+
+    private void startOptimized(GatherContext ctx, AutoMaterialGatherer tsm, Frame frame) {
+        int held = ctx.countHeld(rootItem);
+        if (frame.optimizedBatchTarget == 0) {
+            frame.optimizedBatchTarget = Math.min(frame.targetTotal, RecipeAllocation.target(held, frame.need));
+        }
+        if (held >= frame.optimizedBatchTarget) {
+            popFrame(ctx, tsm);
+            return;
+        }
+        int target = Math.min(frame.optimizedBatchTarget,
+                RecipeAllocation.target(held, OptimizedCraftBatch.MAX_OUTPUT_PER_WINDOW));
+        optimized = new OptimizedCraftBatch(ctx, rootItem, frame.node, target, failedSources);
+        stage = Stage.OPTIMIZE;
+    }
+
+    private void optimizeTick(GatherContext ctx, AutoMaterialGatherer tsm) {
+        if (windowComplete(ctx, tsm)) return;
+        switch (optimized.advance(ctx)) {
+            case PENDING -> { }
+            case READY -> {
+                if (optimized.feasibleAtLimit() && !feasibleLimitShown) {
+                    feasibleLimitShown = true;
+                    MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + "feasible_limit", name(rootItem));
+                }
+                optimizedSteps.addAll(optimized.steps());
+                stage = Stage.EXECUTE_PLAN;
+            }
+            case LIMIT -> fallbackOptimized(ctx, "limit");
+            case NO_PLAN -> fallbackOptimized(ctx, "no_plan");
+            case UNAVAILABLE -> fallbackOptimized(ctx, "unsupported");
+            case STALE -> recoverOptimized(ctx, "changed");
+        }
+    }
+
+    private void executePlan(GatherContext ctx, AutoMaterialGatherer tsm) {
+        if (windowComplete(ctx, tsm)) return;
+        if (!optimized.isCurrent(ctx) || optimizedSteps.isEmpty()) {
+            recoverOptimized(ctx, "changed");
+            return;
+        }
+        if (ctx.client.player.containerMenu != ctx.client.player.inventoryMenu
+                || !ctx.client.player.inventoryMenu.getCarried().isEmpty()) {
+            tsm.setState(State.STOPPED, "playercontrolpp.message.baritone.transfer_interrupted");
+            return;
+        }
+
+        Step next = optimizedSteps.getFirst();
+        if (next instanceof Fetch fetch) {
+            remember(ctx, fetch.item());
+            ctx.setTarget(fetch.item(), RecipeAllocation.target(
+                    ItemUtil.countPlainLoose(ctx.client.player, fetch.item()), fetch.amount()));
+            ctx.bindLooseAcquisition(fetch.container());
+            stage = Stage.DISPATCHED;
+            startGatherSearch(ctx, tsm);
+        } else if (next instanceof Craft craft) {
+            startExactCraft(ctx, craft);
+        }
+    }
+
+    private boolean windowComplete(GatherContext ctx, AutoMaterialGatherer tsm) {
+        int held = ctx.countHeld(rootItem);
+        if (held < optimized.target()) return false;
+        clearOptimized();
+        stage = Stage.GATHER;
+        if (held >= plan.current().optimizedBatchTarget) popFrame(ctx, tsm);
+        return true;
+    }
+
+    private void startExactCraft(GatherContext ctx, Craft craft) {
+        CraftingRecipes.Plan layout = optimized.bind(ctx, craft);
+        if (layout == null) {
+            recoverOptimized(ctx, "changed");
+            return;
+        }
+        exactOperations = Math.min(craft.operations(), CraftingController.maxExactOperations(layout));
+        if (exactOperations <= 0 || !hasExactInputs(ctx, craft, exactOperations)) {
+            recoverOptimized(ctx, "changed");
+            return;
+        }
+        remember(ctx, craft.item());
+        for (Item input : craft.inputs().keySet()) remember(ctx, input);
+        int operations = exactOperations;
+        exactOutputTarget = RecipeAllocation.target(ItemUtil.countPlainLoose(ctx.client.player, craft.item()),
+                operations * craft.layout().recipe().yield());
+        if (!crafting.startExact(ctx.client, craft.item(), operations, layout,
+                () -> ItemUtil.countPlainLoose(ctx.client.player, craft.item()),
+                () -> hasExactInputs(ctx, craft, operations),
+                () -> optimized != null && optimized.isCurrent(ctx) && optimized.bind(ctx, craft) != null,
+                () -> keepsExactReserves(ctx, craft))) {
+            fallbackOptimized(ctx, "unsupported");
+            return;
+        }
+        stage = Stage.EXACT_CRAFT;
+    }
+
+    private static boolean hasExactInputs(GatherContext ctx, Craft step, int operations) {
+        Function<Item, Balance> balance = OptimizedCraftBatch.balances(ctx);
+        for (Map.Entry<Item, Integer> input : step.inputs().entrySet()) {
+            if (balance.apply(input.getKey()).usable() < input.getValue() * operations) return false;
+        }
+        return true;
+    }
+
+    private static boolean keepsExactReserves(GatherContext ctx, Craft step) {
+        Function<Item, Balance> balance = OptimizedCraftBatch.balances(ctx);
+        for (Item input : step.inputs().keySet()) {
+            Balance available = balance.apply(input);
+            if (available.owned() < available.reserve()) return false;
+        }
+        return true;
+    }
+
+    private void exactCraftTick(GatherContext ctx, AutoMaterialGatherer tsm) {
+        Craft craft = (Craft) optimizedSteps.getFirst();
+        switch (crafting.tickExact(ctx.client, optimized.isCurrent(ctx))) {
+            case ACTIVE -> { }
+            case DONE -> {
+                if (ItemUtil.countPlainLoose(ctx.client.player, craft.item()) < exactOutputTarget) {
+                    recoverOptimized(ctx, "changed");
+                    return;
+                }
+                optimizedSteps.removeFirst();
+                if (craft.operations() > exactOperations) {
+                    optimizedSteps.addFirst(new Craft(craft.layout(), craft.item(), craft.inputs(),
+                            craft.operations() - exactOperations));
+                }
+                stage = Stage.EXECUTE_PLAN;
+            }
+            case FAILED -> {
+                crafting.cancel(ctx.client);
+                recoverOptimized(ctx, "changed");
+            }
+            case INVENTORY_FULL -> handleCraftInventoryFull(ctx, tsm);
+        }
+    }
+
+    /** 绑定取料期间由主流程驱动容器。失效后先停止交互，再从实际库存重新开始。 */
+    public boolean discardStaleAcquisition(GatherContext ctx, AutoMaterialGatherer tsm) {
+        if (stage != Stage.DISPATCHED || optimized == null || optimized.isCurrent(ctx)) return false;
+        tsm.cancelRawMaterialAcquisition();
+        boundCloseWaitTicks = Configs.BaritoneSettings.CONTAINER_CLOSE_DELAY.getIntegerValue();
+        verifyClosedMenu = true;
+        recoverOptimized(ctx, "changed");
+        return true;
+    }
+
+    private void recoverOptimized(GatherContext ctx, String reason) {
+        if (replanUsed || !Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()) {
+            fallbackOptimized(ctx, reason);
+            return;
+        }
+        replanUsed = true;
+        clearOptimized();
+        restoreRootTarget(ctx);
+        stage = Stage.GATHER;
+    }
+
+    private void fallbackOptimized(GatherContext ctx, String reason) {
+        clearOptimized();
+        restoreRootTarget(ctx);
+        optimizeBatches = false;
+        stage = Stage.GATHER;
+        MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + reason, name(rootItem));
+    }
+
+    private void restoreRootTarget(GatherContext ctx) {
+        ctx.setTarget(rootItem, ctx.targetFor(rootItem));
+    }
+
+    private void clearOptimized() {
+        if (optimized != null) optimized.cancel();
+        optimized = null;
+        optimizedSteps.clear();
     }
 
     private void startCraft(GatherContext ctx, AutoMaterialGatherer tsm, Frame frame) {
@@ -459,18 +695,16 @@ public final class RawMaterialTask {
                 this.crafting.cancel(ctx.client);
                 failChain(ctx, tsm, frame == null ? rootItem : frame.item);
             }
-            case INVENTORY_FULL -> {
-                // 界面先关掉，再把背包满交给主状态机（存盒 / 停机提示）。
-                // 刻意不记进 tracedItems：腾出空间之后这一项还可以再追溯一次。
-                this.crafting.cancel(ctx.client);
-                Item root = this.rootItem;
-                reset();
-                if (root != null) {
-                    ctx.setTarget(root, ctx.targetFor(root));
-                }
-                tsm.onInventoryFull();
-            }
+            case INVENTORY_FULL -> handleCraftInventoryFull(ctx, tsm);
         }
+    }
+
+    private void handleCraftInventoryFull(GatherContext ctx, AutoMaterialGatherer tsm) {
+        // 先关闭工作站，再交给原有满包整理。腾出空间后可按剩余缺口再次追溯。
+        crafting.cancel(ctx.client);
+        restoreRootTarget(ctx);
+        reset();
+        tsm.onInventoryFull();
     }
 
     /** 某个子材料"散装不够、但盒里还有"时的取料需求。 */
@@ -727,6 +961,13 @@ public final class RawMaterialTask {
     // ---- 工具 ----
 
     private void reset() {
+        clearOptimized();
+        failedSources.clear();
+        optimizeBatches = false;
+        replanUsed = false;
+        feasibleLimitShown = false;
+        boundCloseWaitTicks = 0;
+        verifyClosedMenu = false;
         this.stage = Stage.IDLE;
         this.plan.clear();
         this.rootItem = null;

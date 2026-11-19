@@ -12,6 +12,15 @@ public final class SlotTransfer {
     private SlotTransfer() {}
 
     public static int toPlayer(Minecraft mc, Slot source, int requested) {
+        return toPlayer(mc, source, requested, true);
+    }
+
+    /** 服务端的来源堆叠可能晚于客户端同步，固定取货额度不能交给整堆快移。 */
+    public static int toPlayerExact(Minecraft mc, Slot source, int requested) {
+        return toPlayer(mc, source, requested, false);
+    }
+
+    private static int toPlayer(Minecraft mc, Slot source, int requested, boolean allowQuickMove) {
         AbstractContainerMenu menu = mc.player.containerMenu;
         ItemStack original = source.getItem().copy();
         if (requested <= 0 || original.isEmpty() || !source.mayPickup(mc.player) || !menu.getCarried().isEmpty()) return 0;
@@ -20,7 +29,7 @@ public final class SlotTransfer {
         int amount = Math.min(Math.min(requested, original.getCount()), capacity);
         if (amount <= 0) return 0;
         // 普通储物菜单的整堆转移交给原版；部分堆叠按精确数量放入玩家槽。
-        if (amount == original.getCount()) {
+        if (allowQuickMove && amount == original.getCount()) {
             SlotActionCompat.quickMove(mc, menu.containerId, source.index);
         } else {
             SlotActionCompat.pickup(mc, menu.containerId, source.index);

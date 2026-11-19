@@ -329,6 +329,11 @@ public class Configs implements IConfigHandler {
                 "Opacity of the current auto-gather target highlight, from 0 to 100 percent.")
                 .apply(KEY_BARITONE);
 
+        public static final ConfigBoolean USE_SUPPLY_SOLVER = new ConfigBoolean(
+                "useSupplySolver", false,
+                "Try the asynchronous supply solver for raw-material crafting batches.")
+                .apply(KEY_BARITONE);
+
         /** 磁盘键集合；GUI 按备货与追溯合成分开展示。新增项只追加，避免改动既有存储。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 MATERIAL_LIST_SOURCE, CLICK_COOLDOWN, INTRA_CONTAINER_CLICK_DELAY, CONTAINER_CLOSE_DELAY,
@@ -339,7 +344,7 @@ public class Configs implements IConfigHandler {
                 CRAFT_STATION_SOURCE, CRAFTING_TABLE_POSITIONS, STONECUTTER_POSITIONS,
                 ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST,
                 GATHER_TARGET_HIGHLIGHT, GATHER_TARGET_COLOR, GATHER_TARGET_OPACITY,
-                MINING_SEARCH_RADIUS, MINING_ATTEMPT_TICKS);
+                MINING_SEARCH_RADIUS, MINING_ATTEMPT_TICKS, USE_SUPPLY_SOLVER);
     }
 
     public static class CacheNearbySettings {

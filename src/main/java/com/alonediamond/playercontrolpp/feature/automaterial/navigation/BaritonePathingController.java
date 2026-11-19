@@ -77,7 +77,8 @@ public final class BaritonePathingController {
             return;
         }
 
-        if (isInventoryFull(ctx.client)) {
+        boolean bound = ctx.boundLooseSource() != null;
+        if (!bound && isInventoryFull(ctx.client)) {
             tsm.onInventoryFull();
             return;
         }
@@ -93,7 +94,8 @@ public final class BaritonePathingController {
             if (currentPos.distanceToSqr(lastPlayerPos) < MOVED_EPSILON_SQ) {
                 stuckTicks++;
                 if (stuckTicks >= STUCK_LIMIT_TICKS) {
-                    tsm.setState(State.STOPPED, "playercontrolpp.message.baritone.pathing_stuck");
+                    tsm.setState(bound ? State.FAILED : State.STOPPED,
+                            "playercontrolpp.message.baritone.pathing_stuck");
                     return;
                 }
             } else {

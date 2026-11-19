@@ -12,15 +12,22 @@ import java.util.List;
 public final class MaterialRequirements {
     private final List<MaterialItemEntry> entries = new ArrayList<>();
     private final List<MaterialItemEntry> view = Collections.unmodifiableList(entries);
+    private long revision;
 
     public void replaceWith(Collection<MaterialItemEntry> requirements) {
         entries.clear();
         entries.addAll(requirements);
         entries.sort(Comparator.comparingInt((MaterialItemEntry entry) -> entry.neededCount).reversed());
+        revision++;
     }
 
     public void clear() {
         entries.clear();
+        revision++;
+    }
+
+    public long revision() {
+        return revision;
     }
 
     public List<MaterialItemEntry> entries() {

@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.mixin.compat.chesttracker;
 
 import com.alonediamond.playercontrolpp.Playercontrolpp;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+import com.alonediamond.playercontrolpp.integration.CachedLooseStockScan;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 
 import net.minecraft.core.BlockPos;
@@ -52,6 +53,30 @@ import java.util.function.BiPredicate;
  */
 @Mixin(ChestTrackerIntegration.class)
 public abstract class ChestTrackerIntegrationImpl {
+
+    @Overwrite(remap = false)
+    public ChestTrackerIntegration.LooseStockScan scanLoose(BlockPos origin, int range, Set<Item> items) {
+        try {
+            MemoryBank bank = loadedMemoryBank();
+            Identifier dimension = ProviderUtils.getPlayersCurrentKey().orElse(null);
+            if (bank != null && dimension != null) {
+                MemoryKey key = bank.getKey(dimension).orElse(null);
+                if (key != null) {
+                    return new CachedLooseStockScan<>(origin, range, items, key.getMemories().entrySet().iterator(),
+                            entry -> {
+                                Memory memory = entry.getValue();
+                                return new CachedLooseStockScan.Storage(entry.getKey(), memory.container().orElse(null),
+                                        memory.otherPositions(), memory.items());
+                            },
+                            () -> loadedMemoryBank() == bank && dimension.equals(ProviderUtils.getPlayersCurrentKey().orElse(null))
+                                    && bank.getKey(dimension).orElse(null) == key);
+                }
+            }
+        } catch (Throwable error) {
+            Playercontrolpp.LOGGER.debug("Unable to start a loose stock scan", error);
+        }
+        return ChestTrackerIntegration.EMPTY_LOOSE_SCAN;
+    }
 
     @Overwrite(remap = false)
     public List<ChestTrackerIntegration.Stock> stockSnapshot(BlockPos origin, int range, boolean includeBoxes) {

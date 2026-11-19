@@ -269,7 +269,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     private boolean isCurrentItemSatisfied() {
         if (ctx.targetItem() == null) return false;
-        return ctx.countHeld(ctx.targetItem()) >= ctx.targetTotal();
+        return ctx.countTargetHeld() >= ctx.targetTotal();
     }
 
     /** 换到下一个缺失物品，或者结束。 */
@@ -342,7 +342,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
     /** 关闭容器后重新数一遍，然后决定推进还是换下一个位置。 */
     private void verifyTransfer() {
 
-        if (ctx.countHeld(ctx.targetItem()) >= ctx.targetTotal()) {
+        if (isCurrentItemSatisfied()) {
             onCurrentTargetSatisfied();
             return;
         }
@@ -446,6 +446,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
         ContainerHighlightFeature.getInstance().clearGatherTarget();
         stopEverything();
         rawMaterialTask.cancel(ctx.client);
+        ctx.clearLooseAcquisition();
         shulkerAccess.cancel(ctx.client);
         clearMixedBoxReturn();
     }
@@ -466,6 +467,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
         if (tickRequestedStorage()) return;
         if (tickStorageSynchronization()) return;
+        if (rawMaterialTask.discardStaleAcquisition(ctx, this)) return;
 
         // ---- 原材料追溯子系统：只在它需要拿主意时接管，派出去采集时让路给下面的状态 ----
         if (rawMaterialTask.isActive() && rawMaterialTask.ownsFlow()) {
@@ -741,6 +743,16 @@ public final class AutoMaterialGatherer implements ClientFeature {
     /** 追溯任务跑完了一整份计划（不论顶层物品最终有没有凑齐）。 */
     public void onRawMaterialTaskFinished() {
         continueAfterExtraction();
+    }
+
+    /** 绑定的取料计划失效后先结束原容器操作，避免下一份计划沿用旧菜单。 */
+    public void cancelRawMaterialAcquisition() {
+        stopEverything();
+        ctx.containerJustOpened = false;
+        ctx.openAttemptCount = 0;
+        ctx.currentContainerTarget = null;
+        ctx.transferCooldown = 0;
+        ctx.clearLooseAcquisition();
     }
 
     // ---- 开盒取物之后的收尾 ----

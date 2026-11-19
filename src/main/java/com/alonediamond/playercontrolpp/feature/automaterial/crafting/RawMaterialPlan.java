@@ -39,6 +39,7 @@ final class RawMaterialPlan {
         RecipeAllocation allocation;
         List<Map.Entry<Item, Integer>> ingredients;
         int batchTarget;
+        int optimizedBatchTarget;
         int remainingAfter;
         boolean warmingRecipe;
         boolean recipeWarmupComplete;

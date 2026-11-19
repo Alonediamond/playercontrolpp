@@ -1,4 +1,4 @@
-package com.alonediamond.playercontrolpp.feature.automaterial.solver;
+package com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -12,33 +12,36 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Action;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Goal;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Hint;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Make;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Mode;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Plan;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Policy;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Recipe;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Request;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Result;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Score;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Slot;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Source;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Status;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Take;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Action;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Goal;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Hint;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Make;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Mode;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Plan;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Policy;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Recipe;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Request;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Result;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Score;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Slot;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Source;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Status;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Take;
 
 /**
- * 只在测试中运行的订单规划器。Demand 解决一个格位或一个交付单位；Finish 等子材料到齐再摆料；
- * Deliver 把产物交给订单。顺序压入这些任务，等价于沿一棵候选树试做，不必预先生成每种格位组合。
+ * 纯 Java 规划器，由工作线程调用。先求一个格位或一个交付单位，再确认对应制作和交付。
+ * 只沿当前分支记录模拟库存，无需预先生成配方的每种格位组合。
  */
-final class SupplySolver {
+public final class SupplySolver {
     private static final long PRESSURE_SCALE = 1_000_000L;
     private static final int MAX_BLOCKED_EXAMPLES = 8;
     private static final int MAX_ACTIVE_FRAMES = 768;
     private static final int MAX_DELIVERY_STATES = 4096;
+    private static final StockEstimate FREE = new StockEstimate(0, 0);
+    private static final StockEstimate UNKNOWN = new StockEstimate(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY);
 
     private sealed interface Task permits Demand, Finish, Deliver {}
     private record Demand(List<String> choices, Set<String> ancestors, Hint parentHint, Hint rootHint) implements Task {
@@ -48,6 +51,18 @@ final class SupplySolver {
     private record Deliver(int goalIndex, int remaining) implements Task {}
     private record DeliveryState(Deliver progress, List<Integer> stock, Map<String, Long> surplus) {}
     private record Prefix(Score score, int deviations) {}
+
+    private record StockEstimate(double protectedUnits, double pressure) implements Comparable<StockEstimate> {
+        @Override
+        public int compareTo(StockEstimate other) {
+            int order = Double.compare(protectedUnits, other.protectedUnits);
+            return order != 0 ? order : Double.compare(pressure, other.pressure);
+        }
+
+        StockEstimate min(StockEstimate other) {
+            return compareTo(other) <= 0 ? this : other;
+        }
+    }
 
     /** 一条尚未承诺的尝试：stock 按货源记剩余实物，available 按物品扣除硬下限，surplus 是本分支已制出的余料。 */
     private static final class Branch {
@@ -86,54 +101,75 @@ final class SupplySolver {
     }
 
     private final Request request;
+    private final long started = System.nanoTime();
+    private final long maxNanos;
     private final Map<String, Long> initial = new HashMap<>();
     private final Map<String, List<Integer>> sources = new HashMap<>();
+    private final Map<String, StockEstimate> recipeEstimates = new HashMap<>();
     private final Set<List<String>> blocked = new LinkedHashSet<>();
     private final Map<DeliveryState, Prefix> deliveries = new HashMap<>();
     private Plan best;
     private int bestDeviations;
 
-    private SupplySolver(Request request) {
+    private SupplySolver(Request request, long maxNanos) {
         this.request = request;
+        this.maxNanos = maxNanos;
+    }
+
+    private boolean indexStock() {
         for (int index = 0; index < request.stock().size(); index++) {
+            if (timedOut()) return false;
             Source source = request.stock().get(index);
+            if (source.count() == 0) continue;
             initial.merge(source.item(), (long) source.count(), Math::addExact);
             sources.computeIfAbsent(source.item(), ignored -> new ArrayList<>()).add(index);
         }
-        request.floors().forEach((item, floor) -> initial.merge(item, -(long) floor, Math::addExact));
+        for (Map.Entry<String, Integer> floor : request.floors().entrySet()) {
+            if (timedOut()) return false;
+            initial.merge(floor.getKey(), -(long) floor.getValue(), Math::addExact);
+        }
+        return !timedOut();
     }
 
-    static Result solve(Request request, long maxNodes) {
+    public static Result solve(Request request, long maxNodes) {
         return solve(request, maxNodes, Long.MAX_VALUE);
     }
 
-    static Result solve(Request request, long maxNodes, long maxNanos) {
+    /** 时间或节点预算耗尽时，仅返回已经完整交付的候选。调用方可中断工作线程取消。 */
+    public static Result solve(Request request, long maxNodes, long maxNanos) {
         if (maxNodes < 1 || maxNanos < 0) throw new IllegalArgumentException("无效搜索预算");
-        long started = System.nanoTime();
-        return new SupplySolver(request).search(maxNodes, started, maxNanos);
+        return new SupplySolver(request, maxNanos).search(maxNodes);
     }
 
-    private Result search(long maxNodes, long started, long maxNanos) {
-        Branch start = new Branch(request, initial);
+    private boolean timedOut() {
+        return Thread.currentThread().isInterrupted() || System.nanoTime() - started >= maxNanos;
+    }
+
+    private Result search(long maxNodes) {
+        if (!indexStock()) return result(Status.UNKNOWN_LIMIT, 0);
         for (Map.Entry<String, Long> entry : initial.entrySet()) {
-            if (entry.getValue() < 0)
+            if (timedOut()) return result(Status.UNKNOWN_LIMIT, 0);
+            if (entry.getValue() < 0) {
                 return new Result(Status.NO_PLAN_IN_MODEL, null, 0, List.of(List.of(entry.getKey())));
+            }
         }
+        Branch start = new Branch(request, initial);
         scheduleGoal(start, 0, 0);
-        Deque<Iterator<Branch>> frontier = new ArrayDeque<>();
-        frontier.push(List.of(start).iterator());
+        Deque<Iterator<Supplier<Branch>>> frontier = new ArrayDeque<>();
+        frontier.push(singleBranch(start));
         long explored = 0;
         while (!frontier.isEmpty()) {
-            if (Thread.currentThread().isInterrupted() || explored >= maxNodes || frontier.size() > MAX_ACTIVE_FRAMES
-                    || System.nanoTime() - started >= maxNanos) {
-                return result(best == null ? Status.UNKNOWN_LIMIT : Status.FEASIBLE_LIMIT, explored);
+            if (explored >= maxNodes || frontier.size() > MAX_ACTIVE_FRAMES || timedOut()) {
+                return limited(explored);
             }
-            Iterator<Branch> alternatives = frontier.peek();
-            if (!alternatives.hasNext()) {
+            Iterator<Supplier<Branch>> alternatives = frontier.peek();
+            boolean hasBranch = alternatives.hasNext();
+            if (timedOut()) return limited(explored);
+            if (!hasBranch) {
                 frontier.pop();
                 continue;
             }
-            Branch branch = alternatives.next();
+            Branch branch = alternatives.next().get();
             explored++;
             if (!competitive(branch)) continue;
             Task task = branch.todo.poll();
@@ -145,15 +181,19 @@ final class SupplySolver {
                 branch.bindings.removeLast();
                 if (dominatedAtDelivery(branch, deliver)) continue;
                 scheduleGoal(branch, deliver.goalIndex, deliver.remaining);
-                frontier.push(List.of(branch).iterator());
+                frontier.push(singleBranch(branch));
             } else if (task instanceof Finish finish) {
                 assemble(branch, finish);
-                frontier.push(List.of(branch).iterator());
+                frontier.push(singleBranch(branch));
             } else if (task instanceof Demand demand) {
                 frontier.push(expand(branch, demand).iterator());
             }
         }
         return result(best == null ? Status.NO_PLAN_IN_MODEL : Status.BEST_IN_MODEL, explored);
+    }
+
+    private static Iterator<Supplier<Branch>> singleBranch(Branch branch) {
+        return List.<Supplier<Branch>>of(() -> branch).iterator();
     }
 
     private boolean dominatedAtDelivery(Branch branch, Deliver progress) {
@@ -174,6 +214,10 @@ final class SupplySolver {
         return new Result(status, best, explored, best == null ? List.copyOf(blocked) : List.of());
     }
 
+    private Result limited(long explored) {
+        return result(best == null ? Status.UNKNOWN_LIMIT : Status.FEASIBLE_LIMIT, explored);
+    }
+
     /** 现有模型只累加取货和制作成本；半成品方案的成本已不可能胜出时，其后代也不用再试。 */
     private boolean competitive(Branch branch) {
         if (best == null) return true;
@@ -191,13 +235,23 @@ final class SupplySolver {
         branch.todo.push(new Demand(List.of(goal.item()), Set.of(), null, goal.hint()));
     }
 
-    private Stream<Branch> expand(Branch parent, Demand demand) {
+    private Stream<Supplier<Branch>> expand(Branch parent, Demand demand) {
         List<String> choices = demand.choices;
-        if (choices.size() > 1 && demand.parentHint != null)
-            choices = choices.stream().sorted(Comparator.comparing(item -> demand.hintFor(item) == null)).toList();
-        if (blocked.size() < MAX_BLOCKED_EXAMPLES && choices.stream().noneMatch(item -> potentiallyAvailable(parent, item, demand)))
+        if (choices.size() > 1 && (rankStockAlternatives() || demand.parentHint != null)) {
+            Comparator<String> order = Comparator.comparing(item -> demand.hintFor(item) == null);
+            if (rankStockAlternatives()) {
+                Map<String, StockEstimate> estimates = new HashMap<>();
+                order = Comparator.<String, StockEstimate>comparing(item ->
+                        estimates.computeIfAbsent(item, key -> estimateChoice(parent, demand, key))).thenComparing(order);
+            }
+            choices = choices.stream().sorted(order).toList();
+        }
+        if (blocked.size() < MAX_BLOCKED_EXAMPLES && choices.stream().takeWhile(item -> !timedOut())
+                .noneMatch(item -> potentiallyAvailable(parent, item, demand)) && !timedOut()) {
             blocked.add(choices);
-        return choices.stream().flatMap(item -> alternatives(parent, demand, item));
+        }
+        // 流迭代器可能提前枚举同一物品的多个来源，选中候选时才复制账本。
+        return choices.stream().takeWhile(item -> !timedOut()).flatMap(item -> alternatives(parent, demand, item));
     }
 
     private boolean canExpand(String item, Demand demand) {
@@ -207,36 +261,92 @@ final class SupplySolver {
 
     private boolean potentiallyAvailable(Branch branch, String item, Demand demand) {
         if (request.mode() == Mode.RAW_ONLY && demand.ancestors.contains(item)) return false;
-        Hint hint = demand.hintFor(item);
         return branch.surplus.getOrDefault(item, 0L) > 0 || branch.available.getOrDefault(item, 0L) > 0
-                || (hint == null || !hint.children().isEmpty()) && canExpand(item, demand)
-                    && !request.catalog().forOutput(item).isEmpty();
+                || !recipesFor(item, demand, demand.hintFor(item)).isEmpty();
     }
 
-    private Stream<Branch> alternatives(Branch parent, Demand demand, String item) {
+    private List<Recipe> recipesFor(String item, Demand demand, Hint hint) {
+        // LitematList 的空叶还可能来自该次展开无路可走。成品求解的硬终点由快照的 stopAt 决定。
+        boolean hintedStop = request.mode() == Mode.RAW_ONLY && hint != null && hint.children().isEmpty();
+        return !hintedStop && canExpand(item, demand) ? request.catalog().forOutput(item) : List.of();
+    }
+
+    private boolean rankStockAlternatives() {
+        return request.policy() == Policy.SAVE_STOCK && request.mode() == Mode.PREPARE;
+    }
+
+    private StockEstimate estimateChoice(Branch branch, Demand demand, String item) {
+        if (branch.surplus.getOrDefault(item, 0L) > 0) return FREE;
+        StockEstimate estimate = directEstimate(item, branch.available.getOrDefault(item, 0L));
+        for (Recipe recipe : recipesFor(item, demand, demand.hintFor(item))) {
+            if (timedOut()) break;
+            estimate = estimate.min(estimateRecipe(recipe));
+        }
+        return estimate;
+    }
+
+    private StockEstimate directEstimate(String item, long available) {
+        if (available <= 0) return UNKNOWN;
+        return new StockEstimate(request.preferKeeping().contains(item) ? 1 : 0,
+                Math.ceilDiv(PRESSURE_SCALE, initial.get(item)));
+    }
+
+    /** 按期初散装估算一次制作，并按产量摊销。这个数只决定探索顺序，深层和暂不可估分支仍可参与搜索。 */
+    private StockEstimate estimateRecipe(Recipe recipe) {
+        return recipeEstimates.computeIfAbsent(recipe.id(), ignored -> {
+            double protectedUnits = 0;
+            double pressure = 0;
+            for (Slot slot : recipe.slots()) {
+                if (timedOut()) return UNKNOWN;
+                if (slot.choices().isEmpty()) continue;
+                StockEstimate best = UNKNOWN;
+                for (String choice : slot.choices()) {
+                    if (timedOut()) return UNKNOWN;
+                    best = best.min(directEstimate(choice, initial.getOrDefault(choice, 0L)));
+                }
+                if (best == UNKNOWN) return UNKNOWN;
+                protectedUnits += best.protectedUnits();
+                pressure += best.pressure();
+            }
+            return new StockEstimate(protectedUnits / recipe.yield(), pressure / recipe.yield());
+        });
+    }
+
+    private Stream<Supplier<Branch>> alternatives(Branch parent, Demand demand, String item) {
         if (request.mode() == Mode.RAW_ONLY && demand.ancestors.contains(item)) return Stream.empty();
         Hint hint = demand.hintFor(item);
-        boolean hintedStop = hint != null && hint.children().isEmpty();
-        List<Recipe> recipes = !hintedStop && canExpand(item, demand) ? request.catalog().forOutput(item) : List.of();
-        Stream<Recipe> ordered = recipes.stream();
-        if (hint != null) ordered = ordered.sorted(Comparator.comparing(recipe -> !typeMatches(recipe, hint)));
-        Stream<Branch> produce = ordered.map(recipe -> openRecipe(parent, demand, recipe, hint));
+        List<Recipe> recipes = recipesFor(item, demand, hint);
+        Comparator<Recipe> order = Comparator.comparing(recipe -> !typeMatches(recipe, hint));
+        boolean produceFirst = request.policy() == Policy.SAVE_STOCK && request.preferKeeping().contains(item);
+        if (rankStockAlternatives() && !recipes.isEmpty()) {
+            StockEstimate cheapest = recipes.stream().map(this::estimateRecipe).min(StockEstimate::compareTo).orElse(UNKNOWN);
+            StockEstimate direct = directEstimate(item, parent.available.getOrDefault(item, 0L));
+            produceFirst = cheapest.compareTo(direct) < 0;
+            order = Comparator.comparing(this::estimateRecipe).thenComparing(order);
+        }
+        Stream<Recipe> ordered = recipes.size() > 1 ? recipes.stream().sorted(order) : recipes.stream();
+        Stream<Supplier<Branch>> produce = ordered.takeWhile(recipe -> !timedOut())
+                .map(recipe -> () -> openRecipe(parent, demand, recipe, hint));
         boolean hasSurplus = parent.surplus.getOrDefault(item, 0L) > 0;
         // 普通备货允许在任一出现点拿现货：有相同余料时可把拿现货延后，不会更贵。
         // RAW_ONLY 只允许叶子拿现货，不能把这个推论用于它的非叶子格位。
         boolean allowTake = request.mode() == Mode.RAW_ONLY ? recipes.isEmpty() : !hasSurplus;
-        Stream<Branch> take = !allowTake || parent.available.getOrDefault(item, 0L) <= 0 ? Stream.empty()
-                : sources.getOrDefault(item, List.of()).stream().filter(index -> parent.stock[index] > 0)
-                        .map(index -> withdraw(parent, index));
+        Stream<Supplier<Branch>> take = !allowTake || parent.available.getOrDefault(item, 0L) <= 0 ? Stream.empty()
+                : sources.getOrDefault(item, List.of()).stream().takeWhile(index -> !timedOut())
+                        .filter(index -> parent.stock[index] > 0).map(index -> () -> withdraw(parent, index));
         // concat 只决定先试哪一边；有木板现货时，「从原木制板」并没有被排除。
-        Stream<Branch> supply = request.policy() == Policy.SAVE_STOCK && request.preferKeeping().contains(item)
+        Stream<Supplier<Branch>> supply = produceFirst
                 ? Stream.concat(produce, take) : Stream.concat(take, produce);
         if (!hasSurplus) return supply;
         // 优先试免费余料，但不能直接返回它：后面的深度受限格位也许只能用现成品。
+        return Stream.concat(Stream.of(() -> useSurplus(parent, item)), supply);
+    }
+
+    private Branch useSurplus(Branch parent, String item) {
         Branch child = new Branch(parent);
         if (child.surplus.merge(item, -1L, Long::sum) == 0) child.surplus.remove(item);
         child.bindings.add(item);
-        return Stream.concat(Stream.of(child), supply);
+        return child;
     }
 
     private Branch withdraw(Branch parent, int index) {

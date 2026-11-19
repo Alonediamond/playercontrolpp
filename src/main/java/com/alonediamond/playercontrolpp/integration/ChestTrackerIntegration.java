@@ -9,6 +9,7 @@ import net.minecraft.world.item.Item;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * ChestTracker 联动的默认实现（stub）。真正的方法体在
@@ -51,6 +52,22 @@ public class ChestTrackerIntegration {
     public record Stock(Item item, int count, BlockPos position) {}
 
     public List<Stock> stockSnapshot(BlockPos origin, int range, boolean includeBoxes) { return List.of(); }
+
+    /** 每 tick 在客户端线程读取一部分缓存；完成前返回 null，失效时返回空列表。 */
+    public interface LooseStockScan {
+        List<Stock> tick();
+        boolean valid();
+    }
+
+    public static final LooseStockScan EMPTY_LOOSE_SCAN = new LooseStockScan() {
+        @Override
+        public List<Stock> tick() { return List.of(); }
+
+        @Override
+        public boolean valid() { return true; }
+    };
+
+    public LooseStockScan scanLoose(BlockPos origin, int range, Set<Item> items) { return EMPTY_LOOSE_SCAN; }
 
     /** 把一个已同步的容器菜单直接写进箱子追踪当前加载的缓存库，不另建缓存库。 */
     public boolean cacheContainer(

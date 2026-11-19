@@ -5,6 +5,7 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * LitematList 联动的默认实现（stub）。真正的方法体在
@@ -71,6 +72,9 @@ public class LitematListIntegration {
     /** 自有临时需求，不上传到 LitematList，也不替换其界面或全局清单。 */
     public record RawRequest(Item item, int count) {}
     public List<RawNode> analyzeTemporaryMaterials(List<RawRequest> requests, int maxDepth) { return List.of(); }
+
+    /** 显式停止分解的物品。空引用表示联动无法提供白名单。 */
+    public Set<Item> rawTraceStops() { return null; }
 
     /**
      * LitematList 原材料界面当前使用的显示层数（由 {@code RawMaterialScreenMixin} 观察写入）。

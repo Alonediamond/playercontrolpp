@@ -3,13 +3,17 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialRequirements;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialTarget;
+import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -39,6 +43,21 @@ public final class GatherContext {
     // 材料清单数据
     public final MaterialRequirements requirements = new MaterialRequirements();
     private MaterialTarget target;
+    private LooseAcquisition looseAcquisition;
+
+    private static final class LooseAcquisition {
+        final BlockPos source;
+        final ClientLevel level;
+        int remaining;
+        Block block;
+        AbstractContainerMenu menu;
+
+        LooseAcquisition(BlockPos source, ClientLevel level, int amount) {
+            this.source = source.immutable();
+            this.level = level;
+            this.remaining = amount;
+        }
+    }
 
     // 箱子搜索数据
     public final List<BlockPos> foundPositions = new ArrayList<>();
@@ -109,7 +128,60 @@ public final class GatherContext {
     public int adjacentTryIndex;
 
     public void setTarget(Item item, int neededTotal) {
+        clearLooseAcquisition();
         target = new MaterialTarget(item, neededTotal);
+    }
+
+    /** 当前目标总量在固定来源模式表示目标散装数，绑定只准从该坐标补一次缺口。 */
+    public void bindLooseAcquisition(BlockPos source) {
+        int held = ItemUtil.countPlainLoose(client.player, targetItem());
+        looseAcquisition = new LooseAcquisition(source, client.level, Math.max(0, targetTotal() - held));
+    }
+
+    public void clearLooseAcquisition() {
+        looseAcquisition = null;
+    }
+
+    public BlockPos boundLooseSource() {
+        return looseAcquisition == null ? null : looseAcquisition.source;
+    }
+
+    public int countTargetHeld() {
+        return looseAcquisition == null ? countHeld(targetItem()) : ItemUtil.countPlainLoose(client.player, targetItem());
+    }
+
+    public int boundLooseGap() {
+        return Math.min(looseAcquisition.remaining, Math.max(0, targetTotal() - countTargetHeld()));
+    }
+
+    /** 先扣点击上限，预测未生效或玩家移走散装时也不会再从箱里拿超。 */
+    public void spendBoundLooseQuota(int amount) {
+        looseAcquisition.remaining -= amount;
+    }
+
+    public boolean beginBoundLooseOpen(BlockPos position) {
+        looseAcquisition.menu = null;
+        looseAcquisition.block = null;
+        if (client.level != looseAcquisition.level || !looseAcquisition.source.equals(position)
+                || ContainerMenus.isOpen(client) || client.player.isSecondaryUseActive()) return false;
+        Block block = client.level.getBlockState(position).getBlock();
+        if (!ContainerMenus.isPlainStorageBlock(block)) return false;
+        looseAcquisition.block = block;
+        return true;
+    }
+
+    public boolean isBoundLooseBlockCurrent() {
+        return looseAcquisition.block != null && client.level == looseAcquisition.level
+                && looseAcquisition.source.equals(currentContainerTarget)
+                && client.level.getBlockState(looseAcquisition.source).getBlock() == looseAcquisition.block;
+    }
+
+    public void acceptBoundLooseMenu(AbstractContainerMenu menu) {
+        looseAcquisition.menu = menu;
+    }
+
+    public boolean ownsBoundLooseMenu(AbstractContainerMenu menu) {
+        return looseAcquisition.menu == menu;
     }
 
     public Item targetItem() {
@@ -145,6 +217,7 @@ public final class GatherContext {
         storageAfterExtraction = false;
         requirements.clear();
         target = null;
+        clearLooseAcquisition();
 
         foundPositions.clear();
         currentPosIndex = 0;

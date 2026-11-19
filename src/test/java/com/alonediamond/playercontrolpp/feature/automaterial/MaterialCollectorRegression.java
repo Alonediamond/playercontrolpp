@@ -1,9 +1,11 @@
 package com.alonediamond.playercontrolpp.feature.automaterial;
 
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActionsRegression;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.data.registries.VanillaRegistries;
 import com.alonediamond.playercontrolpp.config.SecondsConfigOptionRegression;
+import com.alonediamond.playercontrolpp.compat.CraftingRecipesRegression;
 import com.alonediamond.playercontrolpp.gui.ConfigSearchRegression;
 import com.alonediamond.playercontrolpp.inventory.shulker.ShulkerStorageCapacityRegression;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.MiningSnapshotSearchRegression;
@@ -20,16 +22,18 @@ import com.alonediamond.playercontrolpp.feature.automaterial.restock.LayerBuildC
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.*;
 import net.minecraft.world.item.component.ItemContainerContents;
+import java.io.IOException;
 import java.util.*;
 
 /** 使用真实物品组件验证取物规则，不需要启动游戏窗口或服务器。 */
 public final class MaterialCollectorRegression {
     private static int checks;
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         //#if MC >= 260000
@@ -72,20 +76,41 @@ public final class MaterialCollectorRegression {
         result = ContainerMaterialCollector.select(needs, item -> 0, List.of(loose, dirtBox), s -> true, 864, false);
         check(result.slot() == dirtBox, "同一容器其他缺失材料也按满盒优先");
         check(ContainerMaterialCollector.select(needs, item -> 0, List.of(loose), s -> false, 864, true) == null, "不可操作槽位被排除");
+        checkBoundLooseSelection(stone, loose, fullSlot, dirtBox);
         checks += TransferSessionRegression.run();
         checks += SharedAutomationRegression.run();
         checks += RawMaterialPlanRegression.run();
+        checks += CraftBatchActionsRegression.run();
+        checks += CachedLooseStockRegression.run();
         checks += ManualMaterialQueueRegression.run();
         checks += RecipeAllocationRegression.run();
         checks += StonecutterBatchRegression.run();
         checks += SupplySolverRegression.run();
+        checks += CraftingRecipesRegression.run();
         checks += LayerBuildControllerRegression.run();
         checks += SecondsConfigOptionRegression.run();
         checks += ConfigSearchRegression.run();
         checks += ShulkerStorageCapacityRegression.run();
         checks += MiningSnapshotSearchRegression.run();
         checks += ManualRawMaterialPlanRegression.run();
+        checks += CraftingRecipesRegression.runVanillaPistons();
         System.out.println("Material collector regression: " + checks + " checks passed");
+    }
+
+    private static void checkBoundLooseSelection(Item stone, Slot loose, Slot fullBox, Slot dirtBox) {
+        ItemStack renamed = new ItemStack(stone, 8);
+        renamed.set(DataComponents.CUSTOM_NAME, Component.literal("keep"));
+        List<Slot> slots = List.of(slot(renamed), fullBox, dirtBox, slot(new ItemStack(Items.DIRT)), loose);
+
+        ContainerMaterialCollector.Selection result = ContainerMaterialCollector.selectBoundLoose(stone, 3, slots, s -> true);
+        check(result != null && result.slot() == loose && result.amount() == 3 && !result.unpack(),
+                "绑定货源只取本步所需的默认组件散装");
+        result = ContainerMaterialCollector.selectBoundLoose(stone, 70, slots, s -> true);
+        check(result != null && result.slot() == loose && result.amount() == 64, "绑定货源点击额度以来源堆叠封顶");
+        check(ContainerMaterialCollector.selectBoundLoose(stone, 3, slots, s -> s != loose) == null,
+                "绑定货源无可取散装时不尝试命名堆、满盒或其他物品");
+        check(ContainerMaterialCollector.selectBoundLoose(stone, 0, slots, s -> true) == null,
+                "绑定货源用光本步额度时不再点击");
     }
     private static ContainerMaterialCollector.Selection select(Item item, int total, int held, List<Slot> slots, int threshold, boolean mixed) {
         return ContainerMaterialCollector.select(List.of(new MaterialItemEntry(item, total, item.getDefaultMaxStackSize())), i -> held, slots, s -> true, threshold, mixed);

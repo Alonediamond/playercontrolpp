@@ -1,9 +1,14 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.container;
 
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
-import java.util.*;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /** 备货和建造续料共享的缓存查询边界：当前维度、有限范围、去重。 */
 public final class CachedContainerSource {
@@ -20,6 +25,14 @@ public final class CachedContainerSource {
         if (limit > 0) range = Math.min(range, limit);
         if (range == Integer.MAX_VALUE) return new Scope(0, "playercontrolpp.message.baritone.range_infinite");
         return new Scope(range, null);
+    }
+
+    public ChestTrackerIntegration.LooseStockScan scanLoose(Minecraft mc, BlockPos origin, Set<Item> items) {
+        Scope scope = scope(0);
+        if (mc.level == null || scope.error() != null || items.isEmpty()) {
+            return ChestTrackerIntegration.EMPTY_LOOSE_SCAN;
+        }
+        return tracker.scanLoose(origin, scope.range(), items);
     }
 
     public List<BlockPos> find(Item item, BlockPos origin, int range, boolean boxesFirst, boolean includeBoxes) {

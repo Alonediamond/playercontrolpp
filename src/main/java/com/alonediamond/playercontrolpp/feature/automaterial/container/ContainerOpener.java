@@ -13,7 +13,8 @@ import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ChestMenu;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +49,12 @@ public final class ContainerOpener {
         // 上一次尝试的回退路径按下的键现在已经过期了。
         releaseKeys();
 
+        boolean bound = ctx.boundLooseSource() != null;
+        if (bound && !ctx.beginBoundLooseOpen(target)) {
+            ctx.transferCooldown = 1;
+            ctx.containerJustOpened = true;
+            return;
+        }
         try {
             BlockInteraction.lookAt(ctx.client.player, target);
             BlockInteraction.useNearestFace(ctx.client, target);
@@ -58,7 +65,7 @@ public final class ContainerOpener {
         } catch (Exception e) {
             // useItemOn 直接失败了——退回让原版自己的射线检测来做，办法是按住右键。
             // 这个按住登记在 SimulatedInput 上，opener 停止时会被释放，不会把右键按死。
-            SimulatedInput.hold(ctx.client.options.keyUse, this);
+            if (!bound) SimulatedInput.hold(ctx.client.options.keyUse, this);
             ctx.transferCooldown = FALLBACK_WAIT_TICKS;
             ctx.containerJustOpened = true;
         }
@@ -78,6 +85,10 @@ public final class ContainerOpener {
         // 点击已经有了结果（成或不成），两种情况都不再按住右键。
         releaseKeys();
 
+        if (ctx.boundLooseSource() != null) {
+            checkBoundOpenResult(ctx, tsm);
+            return;
+        }
         // 归还借盒时跳过取料判断，沿用归还流程的重试规则。
         if (ctx.mixedBoxReturnSlot >= 0) {
             MixedBoxReturn.opened(ctx, tsm, this);
@@ -104,6 +115,36 @@ public final class ContainerOpener {
                 retryAdjacentOrFail(ctx, tsm, pathing);
             }
         }
+    }
+
+    private void checkBoundOpenResult(GatherContext ctx, AutoMaterialGatherer task) {
+        if (!ctx.isBoundLooseBlockCurrent()) {
+            finishBoundVisit(ctx, task);
+            return;
+        }
+        AbstractContainerMenu menu = ctx.client.player.containerMenu;
+        if (menu instanceof ChestMenu chest && (chest.getRowCount() == 3 || chest.getRowCount() == 6)) {
+            ctx.acceptBoundLooseMenu(menu);
+            if (containerHasAnyMissingItem(ctx)) {
+                task.setState(State.TRANSFERRING_ITEM);
+                ctx.transferCooldown = 4;
+                ctx.openAttemptCount = 0;
+                return;
+            }
+        } else if (menu == ctx.client.player.inventoryMenu && ++ctx.openAttemptCount < MAX_OPEN_ATTEMPTS) {
+            openContainerWithRetry(ctx.boundLooseSource(), ctx.openAttemptCount, ctx);
+            return;
+        }
+        finishBoundVisit(ctx, task);
+    }
+
+    static void finishBoundVisit(GatherContext ctx, AutoMaterialGatherer task) {
+        ctx.exhaustedPositions.add(ctx.boundLooseSource());
+        if (ctx.ownsBoundLooseMenu(ctx.client.player.containerMenu)) {
+            ctx.client.player.closeContainer();
+            ctx.transferCooldown = Configs.BaritoneSettings.CONTAINER_CLOSE_DELAY.getIntegerValue();
+        }
+        task.setState(State.VERIFYING);
     }
 
     /** 当前目标打不开、或打开了但没有有用的东西时调用。 */

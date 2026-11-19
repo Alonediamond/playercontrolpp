@@ -30,6 +30,11 @@ public final class ItemTransferExecutor {
         if (ctx.transferCooldown > 0) return;
         Minecraft mc = ctx.client;
         AbstractContainerMenu menu = mc.player.containerMenu;
+        boolean bound = ctx.boundLooseSource() != null;
+        if (bound && (!ctx.ownsBoundLooseMenu(menu) || !ctx.isBoundLooseBlockCurrent())) {
+            ContainerOpener.finishBoundVisit(ctx, task);
+            return;
+        }
         if (menu == mc.player.inventoryMenu) {
             task.setState(State.VERIFYING);
             return;
@@ -49,14 +54,22 @@ public final class ItemTransferExecutor {
                 shulkerAccess.startContainerBoxTake(ctx, selection.slot().index, ctx.currentContainerTarget);
                 return;
             }
-            TransferSession.Result result = transfers.attempt(selection.slot(),
-                    slot -> SlotTransfer.toPlayer(mc, slot, selection.amount()));
+            if (bound) ctx.spendBoundLooseQuota(selection.amount());
+            TransferSession.Result result = transfers.attempt(selection.slot(), slot -> bound
+                    ? SlotTransfer.toPlayerExact(mc, slot, selection.amount())
+                    : SlotTransfer.toPlayer(mc, slot, selection.amount()));
             // 同一个容器内的两次点击之间用单独的间隔：它不受寻路影响，可以比跨容器更短。
             ctx.transferCooldown = Configs.BaritoneSettings.INTRA_CONTAINER_CLICK_DELAY.getIntegerValue();
-            if (result == TransferSession.Result.UNCHANGED && PlayerUtil.isInventoryFull(mc.player)) task.onInventoryFull();
+            if (!bound && result == TransferSession.Result.UNCHANGED && PlayerUtil.isInventoryFull(mc.player)) {
+                task.onInventoryFull();
+            }
             return;
         }
 
+        if (bound) {
+            ContainerOpener.finishBoundVisit(ctx, task);
+            return;
+        }
         // 这个容器对"当前这几种缺料"已经没有东西可取了；换物品时清空，因为里面可能还有别的材料。
         if (ctx.currentContainerTarget != null) ctx.exhaustedPositions.add(ctx.currentContainerTarget);
         mc.player.closeContainer();

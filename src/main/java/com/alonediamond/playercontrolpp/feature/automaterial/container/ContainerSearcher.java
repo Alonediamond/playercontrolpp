@@ -14,6 +14,20 @@ public final class ContainerSearcher {
     private final CachedContainerSource source = new CachedContainerSource();
 
     public void search(GatherContext ctx, AutoMaterialGatherer task, ContainerOpener opener, BaritonePathingController pathing) {
+        BlockPos bound = ctx.boundLooseSource();
+        if (bound != null) {
+            if (ctx.countTargetHeld() >= ctx.targetTotal()) {
+                task.onCurrentTargetSatisfied();
+            } else if (ctx.boundLooseGap() == 0 || ctx.exhaustedPositions.contains(bound)
+                    || !isWithinCacheRange(ctx, bound)) {
+                task.onCurrentTargetUnavailable();
+            } else {
+                ctx.foundPositions.clear();
+                ctx.foundPositions.add(bound);
+                navigate(ctx, task, opener, pathing);
+            }
+            return;
+        }
         if (PlayerUtil.isInventoryFull(ctx.client.player)) {
             task.onInventoryFull();
             return;
@@ -38,6 +52,17 @@ public final class ContainerSearcher {
             task.onCurrentTargetUnavailable();
             return;
         }
+        navigate(ctx, task, opener, pathing);
+    }
+
+    private boolean isWithinCacheRange(GatherContext ctx, BlockPos pos) {
+        CachedContainerSource.Scope scope = source.scope(0);
+        return scope.error() == null
+                && pos.distSqr(ctx.client.player.blockPosition()) <= (long) scope.range() * scope.range();
+    }
+
+    private void navigate(GatherContext ctx, AutoMaterialGatherer task, ContainerOpener opener,
+                          BaritonePathingController pathing) {
         ctx.currentPosIndex = 0;
         ctx.chestRetryCount = 0;
         ctx.adjacentContainerTargets = null;

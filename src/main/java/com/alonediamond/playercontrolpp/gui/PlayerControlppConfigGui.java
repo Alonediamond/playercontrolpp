@@ -170,6 +170,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
             case CRAFTING:
                 return ConfigOptionWrapper.createFor(List.of(
                         Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE,
+                        Configs.BaritoneSettings.USE_SUPPLY_SOLVER,
                         Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH,
                         Configs.BaritoneSettings.MINING_STALL_SECONDS,
                         Configs.BaritoneSettings.MINING_SEARCH_RADIUS,

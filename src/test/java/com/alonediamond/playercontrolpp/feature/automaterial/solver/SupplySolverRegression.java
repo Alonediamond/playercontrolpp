@@ -1,20 +1,21 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.solver;
 
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Action;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Catalog;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Goal;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Hint;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Make;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Mode;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Plan;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Policy;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Recipe;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Request;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Result;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Slot;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Source;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Status;
-import com.alonediamond.playercontrolpp.feature.automaterial.solver.SupplyModel.Take;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Action;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Catalog;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Goal;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Hint;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Make;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Mode;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Plan;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Policy;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Recipe;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Request;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Result;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Slot;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Source;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Status;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Take;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySolver;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
 
 import java.util.ArrayList;
@@ -60,11 +61,13 @@ public final class SupplySolverRegression {
 
     private int runChecks() {
         pistons();
+        pistonUnderNodeLimit();
         survivalPiston();
         twoFences();
         mineralRoutes();
         sharedAndRounded();
         cyclesAndLimits();
+        cancelledBeforeIndexing();
         smallOracle();
         return checks;
     }
@@ -121,6 +124,23 @@ public final class SupplySolverRegression {
         Recipe table = RecipeFixtures.read("minecraft:crafting_table");
         check(!table.slots().get(4).choices().isEmpty() && table.slots().get(2).choices().isEmpty()
                 && table.slots().get(5).choices().isEmpty(), "真实 2×2 图案保留行距");
+    }
+
+    private void pistonUnderNodeLimit() {
+        String birchLog = "minecraft:birch_log";
+        Catalog catalog = new Catalog(List.of(RecipeFixtures.read(PISTON), RecipeFixtures.read(OAK), RecipeFixtures.read(BIRCH),
+                RecipeFixtures.read("minecraft:acacia_planks"), RecipeFixtures.read("minecraft:birch_wood"),
+                RecipeFixtures.read("minecraft:iron_ingot_from_iron_block")));
+        List<Source> stock = List.of(stock(OAK, 500), stock(birchLog, 1000), stock(COBBLE, 16), stock(IRON, 4), stock(DUST, 4));
+        Hint oakRoute = RecipeFixtures.hint(new RawNode(PISTON, 4, "crafting_shaped", List.of(
+                new RawNode(OAK, 12, "crafting_shapeless", List.of(leaf(LOG, 3))),
+                leaf(COBBLE, 16), leaf(IRON, 4), leaf(DUST, 4))));
+        Request order = new Request(catalog, stock, List.of(new Goal(PISTON, 4, oakRoute)), Map.of(),
+                Set.of(), Set.of(), 5, Policy.SAVE_STOCK, Mode.PREPARE);
+        Result result = SupplySolver.solve(order, 128);
+        check(result.status() == Status.FEASIBLE_LIMIT && result.plan().shoppingList()
+                        .equals(Map.of(birchLog, 3L, COBBLE, 16L, IRON, 4L, DUST, 4L)),
+                "省库存须在节点限额内优先尝试富余白桦原木，同时保留其他分支");
     }
 
     /** IDEA 选 26.2 的测试类路径，以 --survival-piston 调试 main，可跳过其余回归。 */
@@ -237,6 +257,9 @@ public final class SupplySolverRegression {
         check(SupplySolver.solve(new Request(full.catalog(), stock, List.of(new Goal("A", 1, stopped)),
                 Map.of(), Set.of(), Set.of(), 2, Policy.SAVE_STOCK, Mode.RAW_ONLY), BUDGET).plan() == null,
                 "原树明确停止的 B 即使有配方也不擅自继续分解");
+        check(solved(new Request(full.catalog(), stock, List.of(new Goal("A", 1, stopped)),
+                Map.of(), Set.of(), Set.of(), 2, Policy.SAVE_STOCK, Mode.PREPARE)).shoppingList().get("C") == 1,
+                "成品求解可为提示树的空叶使用已知配方");
         check(SupplySolver.solve(new Request(full.catalog(), stock, full.goals(), Map.of(), Set.of(), Set.of("B"),
                 2, Policy.SAVE_STOCK, Mode.PREPARE), BUDGET).plan() == null, "显式终点在自建图也有效");
         check(SupplySolver.solve(full, 1).status() == Status.UNKNOWN_LIMIT, "限额不是缺料证明");
@@ -245,6 +268,22 @@ public final class SupplySolverRegression {
                 List.of(goal("A", Integer.MAX_VALUE)), 0), BUDGET).status() == Status.UNKNOWN_LIMIT, "大订单惰性展开并限制活动帧");
         Request options = request(List.of(), List.of(new Source("far", "A", 1, 8), new Source("near", "A", 1, 1)), List.of(goal("A", 1)), 0);
         check(SupplySolver.solve(options, 3).status() == Status.FEASIBLE_LIMIT, "已找到可行解但尚未搜索完毕");
+    }
+
+    private void cancelledBeforeIndexing() {
+        Request impossible = new Request(new Catalog(List.of()), List.of(), List.of(goal("A", 1)),
+                Map.of("B", 1), Set.of(), Set.of(), 1, Policy.SAVE_STOCK, Mode.PREPARE);
+        check(SupplySolver.solve(impossible, BUDGET, 0).status() == Status.UNKNOWN_LIMIT,
+                "时间预算耗尽时不读取快照并推断无解");
+        Thread.currentThread().interrupt();
+        try {
+            Result cancelled = SupplySolver.solve(impossible, BUDGET);
+            check(cancelled.status() == Status.UNKNOWN_LIMIT && cancelled.plan() == null && cancelled.explored() == 0,
+                    "中断发生在搜索前时不交付结果");
+            check(Thread.currentThread().isInterrupted(), "取消不会清除调用线程的中断标记");
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     private void smallOracle() {
