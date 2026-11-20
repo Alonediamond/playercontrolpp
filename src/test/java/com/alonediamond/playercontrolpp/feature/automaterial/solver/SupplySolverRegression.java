@@ -42,6 +42,7 @@ public final class SupplySolverRegression {
         if (List.of(args).contains("--two-fences")) {
             suite.showPlans = true;
             suite.twoFences();
+            suite.fencesUnderRuntimeBudget();
             System.out.println("Two fences: " + suite.checks + " checks passed");
             return;
         }
@@ -64,6 +65,7 @@ public final class SupplySolverRegression {
         pistonUnderNodeLimit();
         survivalPiston();
         twoFences();
+        fencesUnderRuntimeBudget();
         mineralRoutes();
         sharedAndRounded();
         cyclesAndLimits();
@@ -213,6 +215,39 @@ public final class SupplySolverRegression {
         check(missing.status() == Status.NO_PLAN_IN_MODEL && missing.plan() == null, "拿走白桦原木后不是同一可行订单");
     }
 
+    private void fencesUnderRuntimeBudget() {
+        String oakFence = "minecraft:oak_fence";
+        String birchFence = "minecraft:birch_fence";
+        String spareLog = "minecraft:spruce_log";
+        String sparePlanks = "minecraft:spruce_planks";
+        String stick = "minecraft:stick";
+        Recipe sticks = RecipeFixtures.read(stick);
+        List<Recipe> recipes = new ArrayList<>(List.of(RecipeFixtures.read(oakFence), RecipeFixtures.read(birchFence), sticks));
+        for (String planks : sticks.slots().getFirst().choices()) {
+            recipes.add(RecipeFixtures.read(planks));
+        }
+        for (String wood : List.of("oak", "birch", "spruce")) {
+            recipes.add(RecipeFixtures.read("minecraft:" + wood + "_wood"));
+        }
+        List<Source> stock = List.of(stock(LOG, 2), stock("minecraft:birch_log", 2), stock(spareLog, 1));
+        Hint oakStick = new Hint(stick, 4, "crafting_shaped", List.of(
+                new Hint(OAK, 2, "crafting_shapeless", List.of(new Hint(LOG, 1, "base", List.of())))));
+        Hint birchHint = new Hint(birchFence, 6, "crafting_shaped", List.of(oakStick));
+        List<Goal> goals = List.of(new Goal(birchFence, 6, birchHint), goal(oakFence, 6));
+        for (List<Goal> order : List.of(goals, goals.reversed())) {
+            Request request = request(recipes, stock, order, 5);
+            Result result = SupplySolver.solve(request, 256);
+            check(result.plan() != null, "运行时大标签下先取得两种栅栏均可交付的方案");
+            Plan plan = result.plan();
+            List<Make> sticksMade = plan.actions().stream().filter(Make.class::isInstance).map(Make.class::cast)
+                    .filter(make -> make.recipe().output().equals(stick)).toList();
+            check(sticksMade.size() == 2 && sticksMade.stream().allMatch(make -> make.grid().stream()
+                            .filter(item -> !item.isEmpty()).toList().equals(List.of(sparePlanks, sparePlanks))),
+                    "通用木棍用富余木料，保留橡木和白桦给各自的固定格");
+            replay(request, plan);
+        }
+    }
+
     private void sharedAndRounded() {
         Recipe flexible = simple("flex", "first", 1, List.of(new Slot(List.of("oak", "spruce"))));
         Recipe strict = simple("strict", "second", 1, List.of(new Slot(List.of("oak"))));
@@ -309,7 +344,11 @@ public final class SupplySolverRegression {
     private Plan solved(Request request) {
         Result result = SupplySolver.solve(request, BUDGET);
         check(result.status() == Status.BEST_IN_MODEL, "应完成搜索: " + result.status() + " " + request.goals());
-        Plan plan = result.plan();
+        replay(request, result.plan());
+        return result.plan();
+    }
+
+    private void replay(Request request, Plan plan) {
         Map<String, Long> inventory = new HashMap<>();
         int[] capacity = request.stock().stream().mapToInt(Source::count).toArray();
         for (Action action : plan.actions()) {
@@ -329,7 +368,6 @@ public final class SupplySolverRegression {
         for (Goal goal : request.goals()) check(inventory.merge(goal.item(), -(long) goal.units(), Long::sum) >= 0, "满足每项交付");
         inventory.values().removeIf(amount -> amount == 0);
         check(inventory.equals(plan.surplus()), "模拟回放与余料账本一致");
-        return plan;
     }
 
     private static RawNode leaf(String item, int count) { return new RawNode(item, count, "base", List.of()); }

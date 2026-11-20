@@ -15,6 +15,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatch
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Stock;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySolver;
+import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
@@ -32,9 +33,11 @@ import net.minecraft.world.item.Items;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +48,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 
 /** 客户端分批冻结这一制作窗口的数据，工作线程只接收求解器的不可变请求。 */
 final class OptimizedCraftBatch {
@@ -96,6 +100,7 @@ final class OptimizedCraftBatch {
     private int ticks;
     private boolean feasibleAtLimit;
     private List<Step> steps = List.of();
+    private Map<Item, Integer> targets;
 
     OptimizedCraftBatch(GatherContext ctx, Item root, RawNode tree, int target, Set<BlockPos> excluded) {
         this.level = ctx.client.level;
@@ -114,7 +119,6 @@ final class OptimizedCraftBatch {
         this.excluded = Set.copyOf(excluded);
         this.origin = this.player.blockPosition();
         this.recipes = CraftingRecipes.captureForSolver(ctx.client);
-        enqueue(rootId, 0);
     }
 
     private static int configuredDepth() {
@@ -133,9 +137,17 @@ final class OptimizedCraftBatch {
                 && configuredDepth() == depth && (recipes == null || recipes.isCurrent(ctx.client));
     }
 
-    int target() { return target; }
     List<Step> steps() { return steps; }
     boolean feasibleAtLimit() { return feasibleAtLimit; }
+
+    boolean isComplete(GatherContext ctx) {
+        if (targets == null) return ctx.countHeld(root) >= target;
+        return targets.entrySet().stream().allMatch(entry -> ctx.countHeld(entry.getKey()) >= entry.getValue());
+    }
+
+    Set<Item> targetItems() {
+        return targets == null ? Set.of(root) : targets.keySet();
+    }
 
     CraftingRecipes.Plan bind(GatherContext ctx, CraftBatchActions.Craft action) {
         if (!traceStopsCurrent()) return null;
@@ -152,6 +164,13 @@ final class OptimizedCraftBatch {
         if (future != null) return poll(ctx);
         if (recipes == null || traceStops == null || depth <= 0) return Progress.UNAVAILABLE;
         if (!recipes.tick(ctx.client)) return Progress.PENDING;
+        if (targets == null) {
+            List<MaterialItemEntry> candidates = ctx.requirements.entries().stream()
+                    .filter(entry -> !traceStops.contains(entry.item) && !ctx.tracedItems.contains(entry.item))
+                    .toList();
+            targets = windowTargets(root, target, candidates, item -> recipes.recipesFor(id(item)), ctx::countHeld);
+            for (Item item : targets.keySet()) enqueue(id(item), 0);
+        }
         if (scan == null) {
             Progress progress = captureGraph();
             if (progress != Progress.READY) return progress;
@@ -161,6 +180,40 @@ final class OptimizedCraftBatch {
         if (!scan.valid()) return Progress.STALE;
         if (cached == null) return Progress.PENDING;
         return submit(ctx, cached);
+    }
+
+    /** 共用固定原料的小目标放入同一窗口，保持当前目标优先并限制窗口的总缺口。 */
+    static Map<Item, Integer> windowTargets(Item root, int target, List<MaterialItemEntry> candidates,
+                                           Function<Item, List<SolverRecipe>> recipes, ToIntFunction<Item> held) {
+        Map<Item, Integer> selected = new LinkedHashMap<>();
+        selected.put(root, target);
+        int room = MAX_OUTPUT_PER_WINDOW - Math.max(0, target - held.applyAsInt(root));
+        if (room <= 0) return selected;
+        Set<String> required = fixedInputs(recipes.apply(root));
+        if (required.isEmpty()) return selected;
+        for (MaterialItemEntry candidate : candidates) {
+            if (candidate.item == root || Collections.disjoint(required, fixedInputs(recipes.apply(candidate.item)))) continue;
+            int gap = candidate.neededCount - held.applyAsInt(candidate.item);
+            if (gap <= 0 || gap > room) continue;
+            selected.put(candidate.item, candidate.neededCount);
+            room -= gap;
+            if (room == 0) break;
+        }
+        return selected;
+    }
+
+    private static Set<String> fixedInputs(List<SolverRecipe> recipes) {
+        Set<String> required = null;
+        for (SolverRecipe recipe : recipes) {
+            Set<String> fixed = new HashSet<>();
+            for (List<String> slot : recipe.grid()) {
+                if (slot.size() == 1) fixed.add(slot.getFirst());
+            }
+            if (required == null) required = fixed;
+            else required.retainAll(fixed);
+            if (required.isEmpty()) return Set.of();
+        }
+        return required == null ? Set.of() : required;
     }
 
     private Progress captureGraph() {
@@ -196,14 +249,38 @@ final class OptimizedCraftBatch {
         Function<Item, Balance> current = balances(ctx);
         int gap = target - current.apply(root).owned();
         if (gap <= 0 || gap > MAX_OUTPUT_PER_WINDOW) return Progress.STALE;
+        int[] hintNodes = { MAX_HINT_NODES };
+        SupplyModel.Hint hint = hint(tree, depth, hintNodes);
+        if (hint == null) return Progress.UNAVAILABLE;
+        List<SupplyModel.Goal> goals = new ArrayList<>();
+        goals.add(new SupplyModel.Goal(rootId, gap, hint));
+        Set<Item> cachedItems = new HashSet<>();
+        for (ChestTrackerIntegration.Stock source : cached) {
+            if (!excluded.contains(source.position())) cachedItems.add(source.item());
+        }
+        int room = MAX_OUTPUT_PER_WINDOW - gap;
+        // 有成品货源的同组条目留给正常采集。选中目标继续以清单的绝对数量核对。
+        Iterator<Map.Entry<Item, Integer>> pending = targets.entrySet().iterator();
+        while (pending.hasNext()) {
+            Map.Entry<Item, Integer> entry = pending.next();
+            Item item = entry.getKey();
+            if (item == root) continue;
+            int missing = entry.getValue() - current.apply(item).owned();
+            if (missing <= 0 || missing > room || cachedItems.contains(item)) {
+                pending.remove();
+                continue;
+            }
+            goals.add(new SupplyModel.Goal(id(item), missing, null));
+            room -= missing;
+        }
         for (Map.Entry<String, Item> entry : items.entrySet()) {
-            if (entry.getValue() == root) continue;
+            if (targets.containsKey(entry.getValue())) continue;
             int usable = current.apply(entry.getValue()).usable();
             if (usable > 0) stock.add(new Stock(new SupplyModel.Source(PLAYER_STOCK, entry.getKey(), usable, 0), null));
         }
         // 清单本来就缺的物品不从缓存计为可消耗库存。执行仍逐次按自有预留核对。
         for (ChestTrackerIntegration.Stock source : cached) {
-            if (source.item() == root || excluded.contains(source.position())) continue;
+            if (targets.containsKey(source.item()) || excluded.contains(source.position())) continue;
             Balance balance = current.apply(source.item());
             if (balance.owned() < balance.reserve()) continue;
             if (stock.size() >= MAX_STOCK_SOURCES) break;
@@ -212,14 +289,11 @@ final class OptimizedCraftBatch {
             stock.add(new Stock(new SupplyModel.Source(source.position().toShortString(), id(source.item()),
                     source.count(), cost), source.position()));
         }
-        int[] hintNodes = { MAX_HINT_NODES };
-        SupplyModel.Hint hint = hint(tree, depth, hintNodes);
-        if (hint == null) return Progress.UNAVAILABLE;
         Set<String> stopIds = new HashSet<>();
         for (Item item : traceStops) stopIds.add(id(item));
         SupplyModel.Request request = new SupplyModel.Request(
                 new SupplyModel.Catalog(modelRecipes), stock.stream().map(Stock::model).toList(),
-                List.of(new SupplyModel.Goal(rootId, gap, hint)), Map.of(), Set.of(), stopIds, depth,
+                goals, Map.of(), Set.of(), stopIds, depth,
                 SupplyModel.Policy.SAVE_STOCK, SupplyModel.Mode.PREPARE);
         future = new FutureTask<>(() -> SupplySolver.solve(request, SOLVE_NODE_LIMIT, SOLVE_NANOS_LIMIT));
         WORKER.execute(future);
@@ -241,7 +315,7 @@ final class OptimizedCraftBatch {
         }
         if (plan.actions().size() > MAX_MODEL_ACTIONS) return Progress.LIMIT;
         List<Step> translated = CraftBatchActions.translate(plan, stock, items);
-        if (!CraftBatchActions.canExecute(translated, balances(ctx), root, target)) return Progress.STALE;
+        if (!CraftBatchActions.canExecute(translated, balances(ctx), targets)) return Progress.STALE;
         steps = CraftBatchActions.group(translated, new CraftInventory(player.getInventory()::getItem));
         feasibleAtLimit = result.status() == SupplyModel.Status.FEASIBLE_LIMIT;
         return Progress.READY;

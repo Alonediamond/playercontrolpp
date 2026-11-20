@@ -1,6 +1,5 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -33,21 +32,14 @@ public final class SupplyModel {
         }
     }
 
-    public static final class Catalog {
-        private final Map<String, List<Recipe>> index;
-
-        public Catalog(List<Recipe> recipes) {
-            Map<String, List<Recipe>> byOutput = new LinkedHashMap<>();
+    public record Catalog(List<Recipe> recipes) {
+        public Catalog {
+            recipes = List.copyOf(recipes);
             Set<String> ids = new HashSet<>();
             for (Recipe recipe : recipes) {
                 if (!ids.add(recipe.id)) throw new IllegalArgumentException("重复配方: " + recipe.id);
-                byOutput.computeIfAbsent(recipe.output, ignored -> new ArrayList<>()).add(recipe);
             }
-            byOutput.replaceAll((item, options) -> List.copyOf(options));
-            index = Map.copyOf(byOutput);
         }
-
-        public List<Recipe> forOutput(String item) { return index.getOrDefault(item, List.of()); }
     }
 
     public record Source(String box, String item, int count, int visitCost) {

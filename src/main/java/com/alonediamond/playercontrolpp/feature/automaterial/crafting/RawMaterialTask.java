@@ -520,11 +520,10 @@ public final class RawMaterialTask {
     }
 
     private boolean windowComplete(GatherContext ctx, AutoMaterialGatherer tsm) {
-        int held = ctx.countHeld(rootItem);
-        if (held < optimized.target()) return false;
+        if (!optimized.isComplete(ctx)) return false;
         clearOptimized();
         stage = Stage.GATHER;
-        if (held >= plan.current().optimizedBatchTarget) popFrame(ctx, tsm);
+        if (ctx.countHeld(rootItem) >= plan.current().optimizedBatchTarget) popFrame(ctx, tsm);
         return true;
     }
 
@@ -617,6 +616,12 @@ public final class RawMaterialTask {
     }
 
     private void fallbackOptimized(GatherContext ctx, String reason) {
+        if (optimized.targetItems().size() > 1 && Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()) {
+            // 逐项回退会把还没下单的目标所需原料当富余。结束这一组追溯，仍可从容器直接取得成品。
+            ctx.tracedItems.addAll(optimized.targetItems());
+            plan.clear();
+            reason = "shared";
+        }
         clearOptimized();
         restoreRootTarget(ctx);
         optimizeBatches = false;

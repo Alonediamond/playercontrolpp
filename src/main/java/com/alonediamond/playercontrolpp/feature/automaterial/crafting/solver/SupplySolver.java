@@ -105,6 +105,9 @@ public final class SupplySolver {
     private final long maxNanos;
     private final Map<String, Long> initial = new HashMap<>();
     private final Map<String, List<Integer>> sources = new HashMap<>();
+    private final Set<String> reachable = new HashSet<>();
+    private final Map<String, List<Recipe>> reachableRecipes = new HashMap<>();
+    private final Set<String> fixedGoalInputs = new HashSet<>();
     private final Map<String, StockEstimate> recipeEstimates = new HashMap<>();
     private final Set<List<String>> blocked = new LinkedHashSet<>();
     private final Map<DeliveryState, Prefix> deliveries = new HashMap<>();
@@ -131,6 +134,47 @@ public final class SupplySolver {
         return !timedOut();
     }
 
+    /** 忽略数量与祖先限制，只排除连期初种子都没有的配方分支。 */
+    private boolean indexReachability() {
+        for (Map.Entry<String, Long> stock : initial.entrySet()) {
+            if (stock.getValue() > 0) reachable.add(stock.getKey());
+        }
+        List<Recipe> recipes = request.catalog().recipes();
+        boolean grew;
+        do {
+            grew = false;
+            for (Recipe recipe : recipes) {
+                if (timedOut()) return false;
+                if (!reachable.contains(recipe.output()) && !request.stopAt().contains(recipe.output())
+                        && hasReachableInputs(recipe)) {
+                    grew |= reachable.add(recipe.output());
+                }
+            }
+        } while (grew);
+        for (Recipe recipe : recipes) {
+            if (timedOut()) return false;
+            if (hasReachableInputs(recipe)) {
+                reachableRecipes.computeIfAbsent(recipe.output(), ignored -> new ArrayList<>()).add(recipe);
+            }
+        }
+        for (Goal goal : request.goals()) {
+            for (Recipe recipe : reachableRecipes.getOrDefault(goal.item(), List.of())) {
+                if (timedOut()) return false;
+                for (Slot slot : recipe.slots()) {
+                    if (slot.choices().size() == 1) fixedGoalInputs.add(slot.choices().getFirst());
+                }
+            }
+        }
+        return !timedOut();
+    }
+
+    private boolean hasReachableInputs(Recipe recipe) {
+        for (Slot slot : recipe.slots()) {
+            if (!slot.choices().isEmpty() && slot.choices().stream().noneMatch(reachable::contains)) return false;
+        }
+        return true;
+    }
+
     public static Result solve(Request request, long maxNodes) {
         return solve(request, maxNodes, Long.MAX_VALUE);
     }
@@ -153,6 +197,7 @@ public final class SupplySolver {
                 return new Result(Status.NO_PLAN_IN_MODEL, null, 0, List.of(List.of(entry.getKey())));
             }
         }
+        if (!indexReachability()) return result(Status.UNKNOWN_LIMIT, 0);
         Branch start = new Branch(request, initial);
         scheduleGoal(start, 0, 0);
         Deque<Iterator<Supplier<Branch>>> frontier = new ArrayDeque<>();
@@ -236,19 +281,19 @@ public final class SupplySolver {
     }
 
     private Stream<Supplier<Branch>> expand(Branch parent, Demand demand) {
-        List<String> choices = demand.choices;
-        if (choices.size() > 1 && (rankStockAlternatives() || demand.parentHint != null)) {
-            Comparator<String> order = Comparator.comparing(item -> demand.hintFor(item) == null);
+        List<String> choices = demand.choices.stream().filter(reachable::contains).toList();
+        if (choices.size() > 1) {
+            // 通用格优先尝试不会与成品的固定格争料的选项。保留其余选项供回溯。
+            Comparator<String> order = Comparator.comparing(fixedGoalInputs::contains);
             if (rankStockAlternatives()) {
                 Map<String, StockEstimate> estimates = new HashMap<>();
-                order = Comparator.<String, StockEstimate>comparing(item ->
-                        estimates.computeIfAbsent(item, key -> estimateChoice(parent, demand, key))).thenComparing(order);
+                order = order.thenComparing(item -> estimates.computeIfAbsent(item, key -> estimateChoice(parent, demand, key)));
             }
-            choices = choices.stream().sorted(order).toList();
+            choices = choices.stream().sorted(order.thenComparing(item -> demand.hintFor(item) == null)).toList();
         }
         if (blocked.size() < MAX_BLOCKED_EXAMPLES && choices.stream().takeWhile(item -> !timedOut())
                 .noneMatch(item -> potentiallyAvailable(parent, item, demand)) && !timedOut()) {
-            blocked.add(choices);
+            blocked.add(demand.choices);
         }
         // 流迭代器可能提前枚举同一物品的多个来源，选中候选时才复制账本。
         return choices.stream().takeWhile(item -> !timedOut()).flatMap(item -> alternatives(parent, demand, item));
@@ -268,7 +313,8 @@ public final class SupplySolver {
     private List<Recipe> recipesFor(String item, Demand demand, Hint hint) {
         // LitematList 的空叶还可能来自该次展开无路可走。成品求解的硬终点由快照的 stopAt 决定。
         boolean hintedStop = request.mode() == Mode.RAW_ONLY && hint != null && hint.children().isEmpty();
-        return !hintedStop && canExpand(item, demand) ? request.catalog().forOutput(item) : List.of();
+        if (hintedStop || !canExpand(item, demand)) return List.of();
+        return reachableRecipes.getOrDefault(item, List.of());
     }
 
     private boolean rankStockAlternatives() {

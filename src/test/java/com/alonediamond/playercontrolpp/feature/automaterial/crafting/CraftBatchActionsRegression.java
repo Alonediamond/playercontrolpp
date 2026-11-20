@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
+import com.alonediamond.playercontrolpp.compat.CraftingRecipes.SolverRecipe;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Balance;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Craft;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Fetch;
@@ -32,6 +33,7 @@ public final class CraftBatchActionsRegression {
         regression.cachedStockAndCraftOrder();
         regression.fixedVariantsAndReserves();
         regression.stonecuttingFeedsPistons();
+        regression.relatedTargetsShareAWindow();
         regression.conversionKeepsItsSeedOrder();
         regression.tightInventoryKeepsFetchOrder();
         regression.fitsResultsAndReturnedInputs();
@@ -57,10 +59,10 @@ public final class CraftBatchActionsRegression {
         check(steps.get(1) instanceof Craft first && first.item() == Items.BIRCH_PLANKS
                         && steps.getLast() instanceof Craft last && last.operations() == 2 && last.recipe().yield() == 4,
                 "先制板，再合并相邻两次相同格位；产量必须保留");
-        check(CraftBatchActions.canExecute(steps, item -> new Balance(0, 0, 0), Items.STICK, 8),
+        check(CraftBatchActions.canExecute(steps, item -> new Balance(0, 0, 0), Map.of(Items.STICK, 8)),
                 "执行前能重放取料、制作及中间余料");
         check(!CraftBatchActions.canExecute(List.of(steps.getFirst(), steps.getLast(), steps.get(1)),
-                        item -> new Balance(0, 0, 0), Items.STICK, 8),
+                        item -> new Balance(0, 0, 0), Map.of(Items.STICK, 8)),
                 "库存终值相同也不能提前执行依赖子产物的制作");
     }
 
@@ -90,13 +92,13 @@ public final class CraftBatchActionsRegression {
                 "身上散装不用发取物点击；同一配方用不同变种时保留两次固定摆料");
         Function<Item, Balance> protectedStock = item -> item == Items.STICK ? new Balance(3, 3, 3)
                 : new Balance(5, 2, 3);
-        check(CraftBatchActions.canExecute(steps, protectedStock, Items.STICK, 11),
+        check(CraftBatchActions.canExecute(steps, protectedStock, Map.of(Items.STICK, 11)),
                 "已有成品只抵扣一次，盒内库存可满足预留");
         check(!CraftBatchActions.canExecute(steps, item -> item == Items.OAK_PLANKS
-                        ? new Balance(4, 2, 3) : protectedStock.apply(item), Items.STICK, 11),
+                        ? new Balance(4, 2, 3) : protectedStock.apply(item), Map.of(Items.STICK, 11)),
                 "预留减少到必须占用散装时拒绝执行同一份旧计划");
         check(!CraftBatchActions.canExecute(steps, item -> item == Items.BIRCH_PLANKS
-                        ? new Balance(5, 1, 3) : protectedStock.apply(item), Items.STICK, 11),
+                        ? new Balance(5, 1, 3) : protectedStock.apply(item), Map.of(Items.STICK, 11)),
                 "同 ID 的盒内或带组件物品不能补足普通散装输入");
     }
 
@@ -172,7 +174,7 @@ public final class CraftBatchActionsRegression {
                 Items.BIRCH_LOG, new Balance(254, 254, 251), Items.OAK_PLANKS, new Balance(16, 16, 16),
                 Items.IRON_INGOT, new Balance(28, 28, 24), Items.REDSTONE, new Balance(28, 28, 24));
         check(CraftBatchActions.canExecute(steps, item -> inventory.getOrDefault(item, new Balance(0, 0, 0)),
-                Items.PISTON, 4), "按两种工作站的计划重放，保留原料和木板预留");
+                Map.of(Items.PISTON, 4)), "按两种工作站的计划重放，保留原料和木板预留");
 
         BlockPos chest = new BlockPos(3, 64, 12);
         List<Step> cached = CraftBatchActions.translate(plan,
@@ -181,8 +183,42 @@ public final class CraftBatchActionsRegression {
         Map<Item, Integer> amounts = Map.of(Items.STONE, 16, Items.BIRCH_LOG, 3, Items.IRON_INGOT, 4, Items.REDSTONE, 4);
         check(fetched.size() == 4 && fetched.getFirst().equals(new Fetch(chest, amounts)),
                 "同一来源的四种原料在一次开箱中按各自额度取齐");
-        check(CraftBatchActions.canExecute(fetched, item -> new Balance(0, 0, 0), Items.PISTON, 4),
+        check(CraftBatchActions.canExecute(fetched, item -> new Balance(0, 0, 0), Map.of(Items.PISTON, 4)),
                 "集中取货、切石和制板以后才能一次摆齐四次活塞");
+    }
+
+    private void relatedTargetsShareAWindow() {
+        List<String> oakGrid = List.of("oak", "stick", "oak", "oak", "stick", "oak", "", "", "");
+        List<String> birchGrid = List.of("birch", "stick", "birch", "birch", "stick", "birch", "", "", "");
+        SupplyModel.Recipe oak = recipe("oak_fence", "oak_fence", 3, oakGrid);
+        SupplyModel.Recipe birch = recipe("birch_fence", "birch_fence", 3, birchGrid);
+        SupplyModel.Recipe wall = recipe("stone_wall", "stone_wall", 6, grid("stone", "stone"));
+        Map<Item, List<SolverRecipe>> catalog = Map.of(Items.OAK_FENCE, List.of(snapshot(oak)),
+                Items.BIRCH_FENCE, List.of(snapshot(birch)), Items.COBBLESTONE_WALL, List.of(snapshot(wall)));
+        Item root = Items.BIRCH_FENCE;
+        List<MaterialItemEntry> requirements = List.of(new MaterialItemEntry(Items.COBBLESTONE_WALL, 1, 64),
+                new MaterialItemEntry(Items.OAK_FENCE, 6, 64));
+        Function<Item, List<SolverRecipe>> recipes = item -> catalog.getOrDefault(item, List.of());
+        Map<Item, Integer> targets = OptimizedCraftBatch.windowTargets(root, 6, requirements, recipes, item -> 0);
+        check(targets.equals(Map.of(Items.BIRCH_FENCE, 6, Items.OAK_FENCE, 6)) && targets.keySet().iterator().next() == root,
+                "只把共用木棍的未完成栅栏加入当前窗口并保留当前目标顺序");
+        check(OptimizedCraftBatch.windowTargets(root, 11, requirements, recipes, item -> 0).equals(Map.of(root, 11)),
+                "合计超过窗口的另一项目继续单独备货");
+        check(OptimizedCraftBatch.windowTargets(root, 6, requirements, recipes, item -> item == Items.OAK_FENCE ? 6 : 0)
+                .equals(Map.of(root, 6)), "已满足的同组项目由预留保护且不重复生产");
+
+        Craft first = new Craft(birch, birchGrid, root, Map.of(Items.BIRCH_PLANKS, 4, Items.STICK, 2), 2);
+        Craft second = new Craft(oak, oakGrid, Items.OAK_FENCE, Map.of(Items.OAK_PLANKS, 4, Items.STICK, 2), 2);
+        Function<Item, Balance> stock = item -> catalog.containsKey(item) ? new Balance(0, 0, 6) : new Balance(8, 8, 0);
+        check(!CraftBatchActions.canExecute(List.of(first), stock, targets),
+                "第一种栅栏完成时仍不能把同一窗口的另一种视为已交付");
+        check(CraftBatchActions.canExecute(List.of(first, second), stock, targets),
+                "核对联合方案的两个成品总数");
+    }
+
+    private static SolverRecipe snapshot(SupplyModel.Recipe recipe) {
+        return new SolverRecipe(recipe.id(), recipe.type(), recipe.output(), recipe.yield(),
+                recipe.slots().stream().map(SupplyModel.Slot::choices).toList());
     }
 
     private void tightInventoryKeepsFetchOrder() {

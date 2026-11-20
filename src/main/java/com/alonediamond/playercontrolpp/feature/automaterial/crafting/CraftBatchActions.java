@@ -123,7 +123,7 @@ final class CraftBatchActions {
         return List.copyOf(steps);
     }
 
-    static boolean canExecute(List<Step> steps, Function<Item, Balance> current, Item root, int target) {
+    static boolean canExecute(List<Step> steps, Function<Item, Balance> current, Map<Item, Integer> targets) {
         Map<Item, Balance> ledger = new HashMap<>();
         Function<Item, Balance> remaining = item -> ledger.computeIfAbsent(item, current);
         for (Step step : steps) {
@@ -140,6 +140,6 @@ final class CraftBatchActions {
                 }
             }
         }
-        return remaining.apply(root).owned() >= target;
+        return targets.entrySet().stream().allMatch(target -> remaining.apply(target.getKey()).owned() >= target.getValue());
     }
 }

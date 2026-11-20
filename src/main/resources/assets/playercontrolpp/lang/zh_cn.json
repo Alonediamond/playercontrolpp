@@ -200,6 +200,7 @@
   "playercontrolpp.message.baritone.raw_material_solver_no_plan": "%s 在已建模的配方和库存中无解，使用原有追溯逻辑。",
   "playercontrolpp.message.baritone.raw_material_solver_unsupported": "%s 当前无法使用批次方案，使用原有追溯逻辑。",
   "playercontrolpp.message.baritone.raw_material_solver_changed": "%s 的批次方案复核失败，按实际库存继续原有追溯。",
+  "playercontrolpp.message.baritone.raw_material_solver_shared": "%s 与其他目标共用材料。当前没有可执行的联合方案，本轮保留剩余原料。",
   "playercontrolpp.config.baritone.comment.rawMaterialMaxDepth": "把一个缺失材料向下分解为原材料时最多追溯多少层配方。\n-1即跟随 LitematList 原材料界面上的层数设置（其默认值为 5）；0~10 = 使用本配置项指定的层数。",
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] 背包已满 — 正在将材料存入潜影盒...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] 潜影盒存储完成，继续备货。",

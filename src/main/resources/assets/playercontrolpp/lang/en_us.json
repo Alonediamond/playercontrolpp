@@ -200,6 +200,7 @@
   "playercontrolpp.message.baritone.raw_material_solver_no_plan": "The modeled recipes and stock could not supply %s. Continuing with regular tracing.",
   "playercontrolpp.message.baritone.raw_material_solver_unsupported": "A batch plan cannot be used for %s. Continuing with regular tracing.",
   "playercontrolpp.message.baritone.raw_material_solver_changed": "The batch plan for %s failed its checks. Continuing with regular tracing from the current inventory.",
+  "playercontrolpp.message.baritone.raw_material_solver_shared": "%s shares ingredients with other targets. This run will keep the remaining ingredients.",
   "playercontrolpp.config.baritone.comment.rawMaterialMaxDepth": "How many recipe layers to look through when breaking a missing item down into raw materials.\n-1 follows LitematList's raw material screen (default 5); 0-10 uses this setting instead.",
   "playercontrolpp.message.baritone.shulker_store_start": "[PlayerControl++] Inventory full — storing materials to shulker box...",
   "playercontrolpp.message.baritone.shulker_store_done": "[PlayerControl++] Shulker box storage complete, resuming gathering.",
