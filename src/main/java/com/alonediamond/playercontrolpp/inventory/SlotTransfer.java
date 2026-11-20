@@ -35,18 +35,30 @@ public final class SlotTransfer {
             SlotActionCompat.pickup(mc, menu.containerId, source.index);
             try {
                 int remaining = amount;
-                for (int i = menu.slots.size() - 1; i >= 0 && remaining > 0; i--) {
-                    Slot slot = menu.slots.get(i);
-                    if (!isPlayerSlot(mc, slot)) continue;
-                    int count = Math.min(remaining, space(slot, original));
-                    for (int n = 0; n < count; n++) SlotActionCompat.pickupRight(mc, menu.containerId, slot.index);
-                    remaining -= count;
+                // 固定取料保留空槽给其他配方材料，与合成前的容量模拟一致。
+                if (!allowQuickMove) {
+                    remaining = deposit(mc, menu, original, remaining, true);
                 }
+                deposit(mc, menu, original, remaining, false);
             } finally {
                 if (!menu.getCarried().isEmpty()) SlotActionCompat.pickup(mc, menu.containerId, source.index);
             }
         }
         return Math.max(0, original.getCount() - source.getItem().getCount());
+    }
+
+    private static int deposit(Minecraft mc, AbstractContainerMenu menu, ItemStack stack, int remaining,
+                               boolean skipEmptySlots) {
+        for (int index = menu.slots.size() - 1; index >= 0 && remaining > 0; index--) {
+            Slot slot = menu.slots.get(index);
+            if (!isPlayerSlot(mc, slot) || skipEmptySlots && !slot.hasItem()) continue;
+            int count = Math.min(remaining, space(slot, stack));
+            for (int moved = 0; moved < count; moved++) {
+                SlotActionCompat.pickupRight(mc, menu.containerId, slot.index);
+            }
+            remaining -= count;
+        }
+        return remaining;
     }
 
     public static boolean isPlayerSlot(Minecraft mc, Slot slot) {

@@ -10,9 +10,15 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.Sup
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialRequirements;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,6 +32,9 @@ public final class CraftBatchActionsRegression {
         regression.cachedStockAndCraftOrder();
         regression.fixedVariantsAndReserves();
         regression.stonecuttingFeedsPistons();
+        regression.conversionKeepsItsSeedOrder();
+        regression.tightInventoryKeepsFetchOrder();
+        regression.fitsResultsAndReturnedInputs();
         regression.statusAndInvalidation();
         return regression.checks;
     }
@@ -39,13 +48,14 @@ public final class CraftBatchActionsRegression {
                 List.of(log), List.of(new SupplyModel.Goal("stick", 8, null)), Map.of(), Set.of(), Set.of(), 2,
                 SupplyModel.Policy.FEWEST_OPERATIONS, SupplyModel.Mode.PREPARE);
         SupplyModel.Result solved = SupplySolver.solve(request, 5000);
-        List<Step> steps = CraftBatchActions.translate(CraftBatchActions.executable(solved),
+        List<Step> ordered = CraftBatchActions.translate(CraftBatchActions.executable(solved),
                 List.of(new Stock(log, chest)), Map.of("board", Items.BIRCH_PLANKS, "log", Items.BIRCH_LOG,
                         "stick", Items.STICK));
-        check(steps.size() == 3 && steps.getFirst().equals(new Fetch(chest, Items.BIRCH_LOG, 1)),
+        List<Step> steps = CraftBatchActions.group(ordered, new CraftInventory(slot -> ItemStack.EMPTY));
+        check(steps.size() == 3 && steps.getFirst().equals(new Fetch(chest, Map.of(Items.BIRCH_LOG, 1))),
                 "缓存取料准确绑定到具体箱和物品数量");
         check(steps.get(1) instanceof Craft first && first.item() == Items.BIRCH_PLANKS
-                        && steps.getLast() instanceof Craft last && last.operations() == 2 && last.produced() == 8,
+                        && steps.getLast() instanceof Craft last && last.operations() == 2 && last.recipe().yield() == 4,
                 "先制板，再合并相邻两次相同格位；产量必须保留");
         check(CraftBatchActions.canExecute(steps, item -> new Balance(0, 0, 0), Items.STICK, 8),
                 "执行前能重放取料、制作及中间余料");
@@ -67,10 +77,16 @@ public final class CraftBatchActionsRegression {
                 new SupplyModel.Take(0, "oak"), new SupplyModel.Make(recipe, oak, false),
                 new SupplyModel.Make(recipe, birch, false)), Map.of(), new SupplyModel.Score(0, 0, 0),
                 SupplyModel.Mode.PREPARE);
-        List<Step> steps = CraftBatchActions.translate(plan, List.of(new Stock(owned, null)),
+        List<Step> ordered = CraftBatchActions.translate(plan, List.of(new Stock(owned, null)),
                 Map.of("oak", Items.OAK_PLANKS, "birch", Items.BIRCH_PLANKS, "stick", Items.STICK));
-        check(steps.size() == 2 && steps.getFirst() instanceof Craft first && first.layout().grid().equals(oak)
-                        && steps.getLast() instanceof Craft second && second.layout().grid().equals(birch),
+        CraftInventory loose = new CraftInventory(slot -> switch (slot) {
+            case 0 -> new ItemStack(Items.OAK_PLANKS, 2);
+            case 1 -> new ItemStack(Items.BIRCH_PLANKS, 2);
+            default -> ItemStack.EMPTY;
+        });
+        List<Step> steps = CraftBatchActions.group(ordered, loose);
+        check(steps.size() == 2 && steps.getFirst() instanceof Craft first && first.grid().equals(oak)
+                        && steps.getLast() instanceof Craft second && second.grid().equals(birch),
                 "身上散装不用发取物点击；同一配方用不同变种时保留两次固定摆料");
         Function<Item, Balance> protectedStock = item -> item == Items.STICK ? new Balance(3, 3, 3)
                 : new Balance(5, 2, 3);
@@ -136,20 +152,101 @@ public final class CraftBatchActionsRegression {
         Map<String, Item> items = Map.of("stone", Items.STONE, "cobble", Items.COBBLESTONE,
                 "oak", Items.OAK_PLANKS, "birch", Items.BIRCH_PLANKS, "log", Items.BIRCH_LOG,
                 "piston", Items.PISTON, "iron", Items.IRON_INGOT, "redstone", Items.REDSTONE);
-        List<Step> steps = CraftBatchActions.translate(plan,
+        List<Step> ordered = CraftBatchActions.translate(plan,
                 sources.stream().map(source -> new Stock(source, null)).toList(), items);
-        int cuts = 0;
-        for (Step step : steps) {
-            if (step instanceof Craft craft && "stonecutting".equals(craft.layout().recipe().type())) {
-                cuts += craft.operations();
-            }
-        }
-        check(cuts == 16, "切石动作保留工位类型和十六次操作额度");
+        ItemStack[] slots = {
+                new ItemStack(Items.STONE, 64), new ItemStack(Items.STONE, 64),
+                new ItemStack(Items.STONE, 64), new ItemStack(Items.STONE, 64),
+                new ItemStack(Items.BIRCH_LOG, 64), new ItemStack(Items.BIRCH_LOG, 64),
+                new ItemStack(Items.BIRCH_LOG, 64), new ItemStack(Items.BIRCH_LOG, 62),
+                new ItemStack(Items.OAK_PLANKS, 16), new ItemStack(Items.IRON_INGOT, 28),
+                new ItemStack(Items.REDSTONE, 28)
+        };
+        CraftInventory loose = new CraftInventory(index -> index < slots.length ? slots[index] : ItemStack.EMPTY);
+        List<Step> steps = CraftBatchActions.group(ordered, loose);
+        check(steps.size() == 3 && operationsFor(steps, Items.COBBLESTONE) == 16
+                        && operationsFor(steps, Items.BIRCH_PLANKS) == 3
+                        && steps.getLast() instanceof Craft last && last.item() == Items.PISTON && last.operations() == 4,
+                "把交错的切石、制板和活塞分成三个固定摆料批次");
         Map<Item, Balance> inventory = Map.of(Items.STONE, new Balance(256, 256, 240),
                 Items.BIRCH_LOG, new Balance(254, 254, 251), Items.OAK_PLANKS, new Balance(16, 16, 16),
                 Items.IRON_INGOT, new Balance(28, 28, 24), Items.REDSTONE, new Balance(28, 28, 24));
         check(CraftBatchActions.canExecute(steps, item -> inventory.getOrDefault(item, new Balance(0, 0, 0)),
                 Items.PISTON, 4), "按两种工作站的计划重放，保留原料和木板预留");
+
+        BlockPos chest = new BlockPos(3, 64, 12);
+        List<Step> cached = CraftBatchActions.translate(plan,
+                sources.stream().map(source -> new Stock(source, chest)).toList(), items);
+        List<Step> fetched = CraftBatchActions.group(cached, new CraftInventory(slot -> ItemStack.EMPTY));
+        Map<Item, Integer> amounts = Map.of(Items.STONE, 16, Items.BIRCH_LOG, 3, Items.IRON_INGOT, 4, Items.REDSTONE, 4);
+        check(fetched.size() == 4 && fetched.getFirst().equals(new Fetch(chest, amounts)),
+                "同一来源的四种原料在一次开箱中按各自额度取齐");
+        check(CraftBatchActions.canExecute(fetched, item -> new Balance(0, 0, 0), Items.PISTON, 4),
+                "集中取货、切石和制板以后才能一次摆齐四次活塞");
+    }
+
+    private void tightInventoryKeepsFetchOrder() {
+        ItemStack[] slots = fullInventory();
+        slots[0] = ItemStack.EMPTY;
+        slots[1] = new ItemStack(Items.BIRCH_PLANKS, 56);
+        CraftInventory inventory = new CraftInventory(index -> slots[index]);
+        BlockPos chest = new BlockPos(3, 64, 12);
+        List<Step> ordered = List.of(new Fetch(chest, Map.of(Items.BIRCH_LOG, 1)), boards(1),
+                new Fetch(chest, Map.of(Items.REDSTONE, 1)));
+        check(!inventory.canReceive(Map.of(Items.BIRCH_LOG, 1, Items.REDSTONE, 1)) && inventory.fits(ordered),
+                "仅一空槽时先取原木加工，合并木板后再用腾出的槽取红石");
+        check(CraftBatchActions.group(ordered, inventory).equals(ordered),
+                "集中取货放不下时保留可执行的分段顺序");
+    }
+
+    private void conversionKeepsItsSeedOrder() {
+        List<String> blockSlot = grid("block", "");
+        List<String> ingotSlots = Collections.nCopies(9, "ingot");
+        Craft unpack = new Craft(recipe("unpack", "ingot", 9, blockSlot), blockSlot, Items.IRON_INGOT,
+                Map.of(Items.IRON_BLOCK, 1), 1);
+        Craft pack = new Craft(recipe("pack", "block", 1, ingotSlots), ingotSlots, Items.IRON_BLOCK,
+                Map.of(Items.IRON_INGOT, 9), 1);
+        List<Step> ordered = List.of(unpack, pack, unpack);
+        CraftInventory inventory = new CraftInventory(slot -> slot == 0 ? new ItemStack(Items.IRON_BLOCK) : ItemStack.EMPTY);
+        check(CraftBatchActions.group(ordered, inventory).equals(ordered) && inventory.fits(ordered),
+                "前一轮产物是后一轮输入时保留依赖链，不能把两次拆块提到一起");
+    }
+
+    private void fitsResultsAndReturnedInputs() {
+        ItemStack[] slots = fullInventory();
+        slots[0] = new ItemStack(Items.BIRCH_LOG, 64);
+        slots[1] = new ItemStack(Items.BIRCH_PLANKS, 60);
+        check(new CraftInventory(index -> slots[index]).largestPlacement(boards(4)) == 1,
+                "空槽为零时仍可合并一份产物，不能按能装下一份放行整批");
+        slots[1].set(DataComponents.CUSTOM_NAME, Component.literal("keep"));
+        check(new CraftInventory(index -> slots[index]).largestPlacement(boards(1)) == 0,
+                "相同物品的带组件堆栈无法合并默认产物");
+        slots[0] = new ItemStack(Items.BIRCH_LOG);
+        check(new CraftInventory(index -> slots[index]).largestPlacement(boards(1)) == 1,
+                "摆空输入槽后可以用刚腾出的格子收产物");
+        slots[0] = new ItemStack(Items.BIRCH_LOG, 2);
+        check(new CraftInventory(index -> slots[index]).largestPlacement(boards(2)) == 0,
+                "只够放产物时拒绝可能无处归还未成交输入的批次");
+        slots[1] = ItemStack.EMPTY;
+        check(new CraftInventory(index -> slots[index]).largestPlacement(boards(2)) == 2,
+                "补一个空槽后可以批量制作并容纳中途的产物与退料");
+    }
+
+    private static ItemStack[] fullInventory() {
+        ItemStack[] slots = new ItemStack[Inventory.INVENTORY_SIZE];
+        Arrays.fill(slots, new ItemStack(Items.DIRT, 64));
+        return slots;
+    }
+
+    private static Craft boards(int operations) {
+        List<String> grid = grid("log", "");
+        return new Craft(recipe("boards", "birch", 4, grid), grid, Items.BIRCH_PLANKS,
+                Map.of(Items.BIRCH_LOG, 1), operations);
+    }
+
+    private static int operationsFor(List<Step> steps, Item item) {
+        return steps.stream().filter(Craft.class::isInstance).map(Craft.class::cast)
+                .filter(craft -> craft.item() == item).mapToInt(Craft::operations).sum();
     }
 
     private static SupplyModel.Recipe recipe(String id, String item, int yield, List<String> grid) {

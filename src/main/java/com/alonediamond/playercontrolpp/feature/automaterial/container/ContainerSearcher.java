@@ -16,9 +16,9 @@ public final class ContainerSearcher {
     public void search(GatherContext ctx, AutoMaterialGatherer task, ContainerOpener opener, BaritonePathingController pathing) {
         BlockPos bound = ctx.boundLooseSource();
         if (bound != null) {
-            if (ctx.countTargetHeld() >= ctx.targetTotal()) {
+            if (ctx.isTargetSatisfied()) {
                 task.onCurrentTargetSatisfied();
-            } else if (ctx.boundLooseGap() == 0 || ctx.exhaustedPositions.contains(bound)
+            } else if (ctx.boundLooseGaps().isEmpty() || ctx.exhaustedPositions.contains(bound)
                     || !isWithinCacheRange(ctx, bound)) {
                 task.onCurrentTargetUnavailable();
             } else {

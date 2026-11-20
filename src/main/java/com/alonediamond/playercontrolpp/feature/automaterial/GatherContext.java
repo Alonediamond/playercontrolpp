@@ -17,7 +17,9 @@ import net.minecraft.world.level.block.Block;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 单轮任务的协作数据；主状态由 AutoMaterialGatherer 私有持有，寻路及存取过程状态归各自执行器。 */
@@ -45,17 +47,18 @@ public final class GatherContext {
     private MaterialTarget target;
     private LooseAcquisition looseAcquisition;
 
+    private record LooseQuota(int target, int remaining) {}
+
     private static final class LooseAcquisition {
         final BlockPos source;
         final ClientLevel level;
-        int remaining;
+        final Map<Item, LooseQuota> quotas = new LinkedHashMap<>();
         Block block;
         AbstractContainerMenu menu;
 
-        LooseAcquisition(BlockPos source, ClientLevel level, int amount) {
+        LooseAcquisition(BlockPos source, ClientLevel level) {
             this.source = source.immutable();
             this.level = level;
-            this.remaining = amount;
         }
     }
 
@@ -132,10 +135,13 @@ public final class GatherContext {
         target = new MaterialTarget(item, neededTotal);
     }
 
-    /** 当前目标总量在固定来源模式表示目标散装数，绑定只准从该坐标补一次缺口。 */
-    public void bindLooseAcquisition(BlockPos source) {
-        int held = ItemUtil.countPlainLoose(client.player, targetItem());
-        looseAcquisition = new LooseAcquisition(source, client.level, Math.max(0, targetTotal() - held));
+    /** 固定来源各物品分别计算散装目标和点击额度，顶层备货目标无需切换。 */
+    public void bindLooseAcquisition(BlockPos source, Map<Item, Integer> amounts) {
+        looseAcquisition = new LooseAcquisition(source, client.level);
+        amounts.forEach((item, amount) -> {
+            int held = ItemUtil.countPlainLoose(client.player, item);
+            looseAcquisition.quotas.put(item, new LooseQuota(held + amount, amount));
+        });
     }
 
     public void clearLooseAcquisition() {
@@ -146,17 +152,28 @@ public final class GatherContext {
         return looseAcquisition == null ? null : looseAcquisition.source;
     }
 
-    public int countTargetHeld() {
-        return looseAcquisition == null ? countHeld(targetItem()) : ItemUtil.countPlainLoose(client.player, targetItem());
+    public boolean isTargetSatisfied() {
+        if (looseAcquisition == null) return target != null && countHeld(targetItem()) >= targetTotal();
+        for (Map.Entry<Item, LooseQuota> entry : looseAcquisition.quotas.entrySet()) {
+            if (ItemUtil.countPlainLoose(client.player, entry.getKey()) < entry.getValue().target()) return false;
+        }
+        return true;
     }
 
-    public int boundLooseGap() {
-        return Math.min(looseAcquisition.remaining, Math.max(0, targetTotal() - countTargetHeld()));
+    public Map<Item, Integer> boundLooseGaps() {
+        Map<Item, Integer> gaps = new LinkedHashMap<>();
+        looseAcquisition.quotas.forEach((item, quota) -> {
+            int gap = quota.target() - ItemUtil.countPlainLoose(client.player, item);
+            int allowed = Math.min(quota.remaining(), gap);
+            if (allowed > 0) gaps.put(item, allowed);
+        });
+        return gaps;
     }
 
     /** 先扣点击上限，预测未生效或玩家移走散装时也不会再从箱里拿超。 */
-    public void spendBoundLooseQuota(int amount) {
-        looseAcquisition.remaining -= amount;
+    public void spendBoundLooseQuota(Item item, int amount) {
+        looseAcquisition.quotas.computeIfPresent(item,
+                (key, quota) -> new LooseQuota(quota.target(), quota.remaining() - amount));
     }
 
     public boolean beginBoundLooseOpen(BlockPos position) {

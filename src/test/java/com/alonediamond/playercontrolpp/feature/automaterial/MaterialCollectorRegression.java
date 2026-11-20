@@ -100,17 +100,22 @@ public final class MaterialCollectorRegression {
     private static void checkBoundLooseSelection(Item stone, Slot loose, Slot fullBox, Slot dirtBox) {
         ItemStack renamed = new ItemStack(stone, 8);
         renamed.set(DataComponents.CUSTOM_NAME, Component.literal("keep"));
-        List<Slot> slots = List.of(slot(renamed), fullBox, dirtBox, slot(new ItemStack(Items.DIRT)), loose);
+        Slot dirt = slot(new ItemStack(Items.DIRT, 5));
+        Slot unrelated = slot(new ItemStack(Items.COBBLESTONE, 32));
+        List<Slot> slots = List.of(slot(renamed), fullBox, dirtBox, dirt, unrelated, loose);
 
-        ContainerMaterialCollector.Selection result = ContainerMaterialCollector.selectBoundLoose(stone, 3, slots, s -> true);
+        ContainerMaterialCollector.Selection result = ContainerMaterialCollector.selectBoundLoose(Map.of(stone, 3), slots, s -> true);
         check(result != null && result.slot() == loose && result.amount() == 3 && !result.unpack(),
                 "绑定货源只取本步所需的默认组件散装");
-        result = ContainerMaterialCollector.selectBoundLoose(stone, 70, slots, s -> true);
+        result = ContainerMaterialCollector.selectBoundLoose(Map.of(stone, 70), slots, s -> true);
         check(result != null && result.slot() == loose && result.amount() == 64, "绑定货源点击额度以来源堆叠封顶");
-        check(ContainerMaterialCollector.selectBoundLoose(stone, 3, slots, s -> s != loose) == null,
+        check(ContainerMaterialCollector.selectBoundLoose(Map.of(stone, 3), slots, s -> s != loose) == null,
                 "绑定货源无可取散装时不尝试命名堆、满盒或其他物品");
-        check(ContainerMaterialCollector.selectBoundLoose(stone, 0, slots, s -> true) == null,
+        check(ContainerMaterialCollector.selectBoundLoose(Map.of(), slots, s -> true) == null,
                 "绑定货源用光本步额度时不再点击");
+        result = ContainerMaterialCollector.selectBoundLoose(Map.of(stone, 0, Items.DIRT, 2), slots, s -> true);
+        check(result != null && result.slot() == dirt && result.amount() == 2 && !result.unpack(),
+                "同一箱补完石头后继续按额度拿泥土，不顺取其他物品或泥土盒");
     }
     private static ContainerMaterialCollector.Selection select(Item item, int total, int held, List<Slot> slots, int threshold, boolean mixed) {
         return ContainerMaterialCollector.select(List.of(new MaterialItemEntry(item, total, item.getDefaultMaxStackSize())), i -> held, slots, s -> true, threshold, mixed);

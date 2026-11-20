@@ -108,7 +108,6 @@ public final class RawMaterialTask {
     private boolean replanUsed;
     private boolean feasibleLimitShown;
     private int exactOperations;
-    private int exactOutputTarget;
     private int boundCloseWaitTicks;
     private boolean verifyClosedMenu;
 
@@ -247,7 +246,7 @@ public final class RawMaterialTask {
         // 否则会把正开着的合成界面丢在那里不管。
         if (this.stage != Stage.DISPATCHED && this.stage != Stage.MINING) return;
         if (optimized != null) {
-            restoreRootTarget(ctx);
+            ctx.clearLooseAcquisition();
             optimizedSteps.removeFirst();
             stage = Stage.EXECUTE_PLAN;
             return;
@@ -507,14 +506,16 @@ public final class RawMaterialTask {
 
         Step next = optimizedSteps.getFirst();
         if (next instanceof Fetch fetch) {
-            remember(ctx, fetch.item());
-            ctx.setTarget(fetch.item(), RecipeAllocation.target(
-                    ItemUtil.countPlainLoose(ctx.client.player, fetch.item()), fetch.amount()));
-            ctx.bindLooseAcquisition(fetch.container());
+            ctx.extraStorableItems.addAll(fetch.items().keySet());
+            if (!new CraftInventory(ctx.client.player.getInventory()::getItem).canReceive(fetch.items())) {
+                handleCraftInventoryFull(ctx, tsm);
+                return;
+            }
+            ctx.bindLooseAcquisition(fetch.container(), fetch.items());
             stage = Stage.DISPATCHED;
             startGatherSearch(ctx, tsm);
         } else if (next instanceof Craft craft) {
-            startExactCraft(ctx, craft);
+            startExactCraft(ctx, tsm, craft);
         }
     }
 
@@ -527,25 +528,28 @@ public final class RawMaterialTask {
         return true;
     }
 
-    private void startExactCraft(GatherContext ctx, Craft craft) {
+    private void startExactCraft(GatherContext ctx, AutoMaterialGatherer tsm, Craft craft) {
         CraftingRecipes.Plan layout = optimized.bind(ctx, craft);
         if (layout == null) {
             recoverOptimized(ctx, "changed");
             return;
         }
-        exactOperations = Math.min(craft.operations(), CraftingController.maxExactOperations(layout));
-        if (exactOperations <= 0 || !hasExactInputs(ctx, craft, exactOperations)) {
+        int available = availableOperations(ctx, craft);
+        if (available == 0) {
             recoverOptimized(ctx, "changed");
             return;
         }
         remember(ctx, craft.item());
-        for (Item input : craft.inputs().keySet()) remember(ctx, input);
-        int operations = exactOperations;
-        exactOutputTarget = RecipeAllocation.target(ItemUtil.countPlainLoose(ctx.client.player, craft.item()),
-                operations * craft.layout().recipe().yield());
-        if (!crafting.startExact(ctx.client, craft.item(), operations, layout,
-                () -> ItemUtil.countPlainLoose(ctx.client.player, craft.item()),
-                () -> hasExactInputs(ctx, craft, operations),
+        ctx.extraStorableItems.addAll(craft.inputs().keySet());
+        CraftInventory inventory = new CraftInventory(ctx.client.player.getInventory()::getItem);
+        exactOperations = inventory.largestPlacement(craft.withOperations(available));
+        if (exactOperations == 0) {
+            handleCraftInventoryFull(ctx, tsm);
+            return;
+        }
+        Craft placement = craft.withOperations(exactOperations);
+        if (!crafting.startExact(ctx.client, layout, placement,
+                () -> availableOperations(ctx, placement) == placement.operations(),
                 () -> optimized != null && optimized.isCurrent(ctx) && optimized.bind(ctx, craft) != null,
                 () -> keepsExactReserves(ctx, craft))) {
             fallbackOptimized(ctx, "unsupported");
@@ -554,12 +558,13 @@ public final class RawMaterialTask {
         stage = Stage.EXACT_CRAFT;
     }
 
-    private static boolean hasExactInputs(GatherContext ctx, Craft step, int operations) {
-        Function<Item, Balance> balance = OptimizedCraftBatch.balances(ctx);
+    private static int availableOperations(GatherContext ctx, Craft step) {
+        Function<Item, Balance> balances = OptimizedCraftBatch.balances(ctx);
+        int available = step.operations();
         for (Map.Entry<Item, Integer> input : step.inputs().entrySet()) {
-            if (balance.apply(input.getKey()).usable() < input.getValue() * operations) return false;
+            available = Math.min(available, balances.apply(input.getKey()).usable() / input.getValue());
         }
-        return true;
+        return available;
     }
 
     private static boolean keepsExactReserves(GatherContext ctx, Craft step) {
@@ -576,14 +581,9 @@ public final class RawMaterialTask {
         switch (crafting.tickExact(ctx.client, optimized.isCurrent(ctx))) {
             case ACTIVE -> { }
             case DONE -> {
-                if (ItemUtil.countPlainLoose(ctx.client.player, craft.item()) < exactOutputTarget) {
-                    recoverOptimized(ctx, "changed");
-                    return;
-                }
                 optimizedSteps.removeFirst();
                 if (craft.operations() > exactOperations) {
-                    optimizedSteps.addFirst(new Craft(craft.layout(), craft.item(), craft.inputs(),
-                            craft.operations() - exactOperations));
+                    optimizedSteps.addFirst(craft.withOperations(craft.operations() - exactOperations));
                 }
                 stage = Stage.EXECUTE_PLAN;
             }

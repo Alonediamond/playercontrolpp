@@ -194,7 +194,7 @@
   "playercontrolpp.config.baritone.pretty_name.rawMaterialMaxDepth": "Gather: Raw Material Trace Depth",
   "playercontrolpp.config.baritone.name.useSupplySolver": "Gather: Enable Batch Crafting Solver",
   "playercontrolpp.config.baritone.pretty_name.useSupplySolver": "Gather: Enable Batch Crafting Solver",
-  "playercontrolpp.config.baritone.comment.useSupplySolver": "Search for recipes and ingredient sources in the background for a small batch of the current target. Supports verifiable crafting table recipes and ordinary loose items in player inventory and cached containers.\nUses regular tracing when the budget yields no complete plan, the model has no solution, or the situation is unsupported. Off by default.",
+  "playercontrolpp.config.baritone.comment.useSupplySolver": "Find recipes and sources for the current target in the background. Collect and craft in batches when inventory space allows. Supports verifiable crafting table recipes, synced stonecutting recipes, and ordinary loose ingredients.\nUses regular tracing when the budget yields no complete plan, the model has no solution, or the situation is unsupported. Off by default.",
   "playercontrolpp.message.baritone.raw_material_solver_limit": "The batch solver reached its budget for %s. Continuing with regular tracing.",
   "playercontrolpp.message.baritone.raw_material_solver_feasible_limit": "The batch solver reached its budget for %s. Using the complete plan it found.",
   "playercontrolpp.message.baritone.raw_material_solver_no_plan": "The modeled recipes and stock could not supply %s. Continuing with regular tracing.",

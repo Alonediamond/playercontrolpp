@@ -93,7 +93,11 @@ public final class CraftingRecipesRegression {
     public static int runVanillaPistons() throws IOException {
         RegistryAccess registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
         try (MultiPackResourceManager packs = new MultiPackResourceManager(
+                //#if MC >= 260300
+                //$$ PackType.SERVER_DATA, List.of(ServerPacksSource.createVanillaPackSource().fullResources()))) {
+                //#else
                 PackType.SERVER_DATA, List.of(ServerPacksSource.createVanillaPackSource()))) {
+                //#endif
             //#if MC >= 12102
             TagLoader.loadTagsForExistingRegistries(packs, registries).stream()
                     .filter(tags -> tags.key() == Registries.ITEM)
@@ -154,7 +158,7 @@ public final class CraftingRecipesRegression {
     }
 
     //#if MC >= 12102
-    private static SolverEntry captureAndMatchStonecutting(RegistryAccess registries) {
+    private static SolverEntry captureAndMatchStonecutting(RegistryAccess registries) throws IOException {
         ItemStack output = new ItemStack(Items.COBBLESTONE);
         //#if MC >= 260000
         SlotDisplay result = new SlotDisplay.ItemStackSlotDisplay(ItemStackTemplate.fromNonEmptyStack(output));
@@ -162,6 +166,14 @@ public final class CraftingRecipesRegression {
         //$$ SlotDisplay result = new SlotDisplay.ItemStackSlotDisplay(output);
         //#endif
         Ingredient input = Ingredient.of(Items.STONE);
+        // 有原版石头转圆石配方的版本直接读取它，较早版本用同结构的同步选项测试兼容接口。
+        try (InputStream data = recipeResource("cobblestone_from_stone_stonecutting")) {
+            if (data != null) {
+                StonecutterRecipe vanilla = (StonecutterRecipe) decodeRecipe(data, registries);
+                input = vanilla.input();
+                result = vanilla.resultDisplay();
+            }
+        }
         SelectableRecipe<StonecutterRecipe> option = new SelectableRecipe<>(result, Optional.empty());
         SelectableRecipe.SingleInputEntry<StonecutterRecipe> entry = new SelectableRecipe.SingleInputEntry<>(input, option);
         ContextMap context = recipeContext(registries);
@@ -190,11 +202,9 @@ public final class CraftingRecipesRegression {
     //#endif
 
     private static SolverRecipe captureVanilla(String name, int displayId, RegistryAccess registries) throws IOException {
-        String resource = "/data/minecraft/recipe/" + name + ".json";
-        try (InputStream data = CraftingRecipesRegression.class.getResourceAsStream(resource)) {
-            if (data == null) throw new IOException("配方资源缺失 " + resource);
-            Recipe<?> recipe = Recipe.CODEC.parse(registries.createSerializationContext(JsonOps.INSTANCE),
-                    JsonParser.parseReader(new InputStreamReader(data, StandardCharsets.UTF_8))).getOrThrow();
+        try (InputStream data = recipeResource(name)) {
+            if (data == null) throw new IOException("配方资源缺失 " + name);
+            Recipe<?> recipe = decodeRecipe(data, registries);
             //#if MC >= 12102
             RecipeDisplayEntry entry = new RecipeDisplayEntry(new RecipeDisplayId(displayId), recipe.display().getFirst(),
                     OptionalInt.empty(), recipe.recipeBookCategory(), Optional.of(recipe.placementInfo().ingredients()));
@@ -206,6 +216,19 @@ public final class CraftingRecipesRegression {
             require(captured != null, "原版配方捕获失败 " + name);
             return captured.recipe();
         }
+    }
+
+    private static InputStream recipeResource(String name) {
+        return CraftingRecipesRegression.class.getResourceAsStream("/data/minecraft/recipe/" + name + ".json");
+    }
+
+    private static Recipe<?> decodeRecipe(InputStream data, RegistryAccess registries) {
+        //#if MC >= 260300
+        //$$ return Recipe.DIRECT_CODEC.parse(registries.createSerializationContext(JsonOps.INSTANCE),
+        //#else
+        return Recipe.CODEC.parse(registries.createSerializationContext(JsonOps.INSTANCE),
+        //#endif
+                JsonParser.parseReader(new InputStreamReader(data, StandardCharsets.UTF_8))).getOrThrow();
     }
 
     private static SupplyModel.Recipe model(SolverRecipe recipe) {

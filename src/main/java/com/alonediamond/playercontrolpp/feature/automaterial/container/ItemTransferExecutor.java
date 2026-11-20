@@ -54,7 +54,7 @@ public final class ItemTransferExecutor {
                 shulkerAccess.startContainerBoxTake(ctx, selection.slot().index, ctx.currentContainerTarget);
                 return;
             }
-            if (bound) ctx.spendBoundLooseQuota(selection.amount());
+            if (bound) ctx.spendBoundLooseQuota(selection.slot().getItem().getItem(), selection.amount());
             TransferSession.Result result = transfers.attempt(selection.slot(), slot -> bound
                     ? SlotTransfer.toPlayerExact(mc, slot, selection.amount())
                     : SlotTransfer.toPlayer(mc, slot, selection.amount()));

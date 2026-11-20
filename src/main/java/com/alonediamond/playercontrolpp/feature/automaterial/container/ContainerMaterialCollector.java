@@ -10,6 +10,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
@@ -21,7 +22,7 @@ public final class ContainerMaterialCollector {
         Predicate<Slot> usable = slot -> slot.container != ctx.client.player.getInventory()
                 && slot.mayPickup(ctx.client.player) && canAttempt.test(slot);
         if (ctx.boundLooseSource() != null) {
-            return selectBoundLoose(ctx.targetItem(), ctx.boundLooseGap(), slots, usable);
+            return selectBoundLoose(ctx.boundLooseGaps(), slots, usable);
         }
         InventoryCounts counts = InventoryCounts.capture(
                 ctx.client.player.getInventory()::getItem, ctx.extractionBoxSlots);
@@ -30,13 +31,16 @@ public final class ContainerMaterialCollector {
                 Configs.BaritoneSettings.RECOGNIZE_MIXED_SHULKER_BOX.getBooleanValue());
     }
 
-    /** 固定来源只取本步的默认堆栈，实际点击额度需同时受来源槽数量限制。 */
-    public static Selection selectBoundLoose(Item item, int gap, List<Slot> slots, Predicate<Slot> usable) {
-        if (gap <= 0) return null;
-        for (Slot slot : slots) {
-            ItemStack stack = slot.getItem();
-            if (ItemUtil.is(stack, item) && ItemUtil.isPlainLoose(stack) && usable.test(slot)) {
-                return new Selection(slot, Math.min(gap, stack.getCount()), false);
+    /** 同一次访问可补多种材料，各物品只按本批的额度消费来源槽。 */
+    public static Selection selectBoundLoose(Map<Item, Integer> gaps, List<Slot> slots, Predicate<Slot> usable) {
+        for (Map.Entry<Item, Integer> entry : gaps.entrySet()) {
+            int gap = entry.getValue();
+            if (gap <= 0) continue;
+            for (Slot slot : slots) {
+                ItemStack stack = slot.getItem();
+                if (ItemUtil.is(stack, entry.getKey()) && ItemUtil.isPlainLoose(stack) && usable.test(slot)) {
+                    return new Selection(slot, Math.min(gap, stack.getCount()), false);
+                }
             }
         }
         return null;

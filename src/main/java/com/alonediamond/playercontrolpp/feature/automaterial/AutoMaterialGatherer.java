@@ -267,11 +267,6 @@ public final class AutoMaterialGatherer implements ClientFeature {
         if (!startInitialStorage()) setState(State.NEXT_ITEM);
     }
 
-    private boolean isCurrentItemSatisfied() {
-        if (ctx.targetItem() == null) return false;
-        return ctx.countTargetHeld() >= ctx.targetTotal();
-    }
-
     /** 换到下一个缺失物品，或者结束。 */
     private void nextItem() {
         transferExecutor.reset();
@@ -342,7 +337,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
     /** 关闭容器后重新数一遍，然后决定推进还是换下一个位置。 */
     private void verifyTransfer() {
 
-        if (isCurrentItemSatisfied()) {
+        if (ctx.isTargetSatisfied()) {
             onCurrentTargetSatisfied();
             return;
         }
@@ -768,7 +763,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
             setState(State.NEXT_ITEM);
             return;
         }
-        if (isCurrentItemSatisfied()) {
+        if (ctx.isTargetSatisfied()) {
             onCurrentTargetSatisfied();
         } else {
             setState(State.SEARCHING);

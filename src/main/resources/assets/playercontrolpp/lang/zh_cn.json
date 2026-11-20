@@ -194,7 +194,7 @@
   "playercontrolpp.config.baritone.pretty_name.rawMaterialMaxDepth": "备货：原材料溯源层数",
   "playercontrolpp.config.baritone.name.useSupplySolver": "备货：启用批次合成求解器",
   "playercontrolpp.config.baritone.pretty_name.useSupplySolver": "备货：启用批次合成求解器",
-  "playercontrolpp.config.baritone.comment.useSupplySolver": "对当前追溯目标的小批次在后台搜索配方和取料方案。支持可核验的工作台配方、散装库存和缓存容器中的普通物品。\n超限且没有完整方案、模型无解或遇到不支持的场景时，使用原有追溯逻辑。默认关闭。",
+  "playercontrolpp.config.baritone.comment.useSupplySolver": "在后台搜索当前目标的配方和取料方案，背包空间允许时合并取料与制作。支持可核验的工作台配方、同步的切石配方及普通散装材料。\n超限且没有完整方案、模型无解或遇到不支持的场景时，使用原有追溯逻辑。默认关闭。",
   "playercontrolpp.message.baritone.raw_material_solver_limit": "%s 的批次求解达到预算，使用原有追溯逻辑。",
   "playercontrolpp.message.baritone.raw_material_solver_feasible_limit": "%s 的批次求解达到预算，执行已找到的完整方案。",
   "playercontrolpp.message.baritone.raw_material_solver_no_plan": "%s 在已建模的配方和库存中无解，使用原有追溯逻辑。",

@@ -139,7 +139,7 @@ final class OptimizedCraftBatch {
 
     CraftingRecipes.Plan bind(GatherContext ctx, CraftBatchActions.Craft action) {
         if (!traceStopsCurrent()) return null;
-        return recipes.bind(ctx.client, action.layout().recipe().id(), action.layout().grid());
+        return recipes.bind(ctx.client, action.recipe().id(), action.grid());
     }
 
     private boolean traceStopsCurrent() {
@@ -242,7 +242,7 @@ final class OptimizedCraftBatch {
         if (plan.actions().size() > MAX_MODEL_ACTIONS) return Progress.LIMIT;
         List<Step> translated = CraftBatchActions.translate(plan, stock, items);
         if (!CraftBatchActions.canExecute(translated, balances(ctx), root, target)) return Progress.STALE;
-        steps = translated;
+        steps = CraftBatchActions.group(translated, new CraftInventory(player.getInventory()::getItem));
         feasibleAtLimit = result.status() == SupplyModel.Status.FEASIBLE_LIMIT;
         return Progress.READY;
     }

@@ -6,10 +6,10 @@ import com.alonediamond.playercontrolpp.compat.CraftingRecipes;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.CraftStationSource;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Craft;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
-import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
 
@@ -85,12 +85,13 @@ final class CraftingController {
     /** 一轮摆料取空之后，最多再重新摆几次。 */
     private static final int MAX_REPLACE_ATTEMPTS = 6;
     private static final int MAX_CRAFTS_PER_PLACEMENT = 64;
-    private static final int MAX_EXACT_OPERATIONS = 16;
     private static final int RESULT_TAKE_COOLDOWN = 2;
 
     private final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
     private enum Stage { IDLE, TRAVEL, OPEN, PREPARE, TAKE, CLOSE }
+    private record ExactPlacement(Craft craft, BooleanSupplier inputsAvailable,
+                                  BooleanSupplier recipeCurrent, BooleanSupplier reservesKept) {}
 
     private static final int TRAVEL_TIMEOUT_TICKS = 400;
     /** 距工作站多近才算到达（略大于交互距离，抵达后还要能右键到）。 */
@@ -124,15 +125,10 @@ final class CraftingController {
     private int lastOutputCount;
     private boolean openSent;
     private int replaceAttempts;
-    private int exactOperations;
-    private BooleanSupplier exactInputsAvailable;
-    private BooleanSupplier exactRecipeCurrent;
-    private BooleanSupplier exactReservesAfterPlacement;
+    private ExactPlacement exact;
     private AbstractContainerMenu exactMenu;
     private int exactStonecutterOption;
-    private int exactSentOperations;
-    private boolean exactTakePending;
-    private boolean exactResultStored;
+    private boolean exactTakeSent;
 
     // ---- 摆料状态 ----
     private PlaceMode placeMode = PlaceMode.PACKET;
@@ -170,15 +166,10 @@ final class CraftingController {
         this.plannedRecipe = plannedRecipe;
         this.outputCount = outputCount;
         this.lastOutputCount = outputCount.getAsInt();
-        this.exactOperations = 0;
-        this.exactInputsAvailable = null;
-        this.exactRecipeCurrent = null;
-        this.exactReservesAfterPlacement = null;
+        this.exact = null;
         this.exactMenu = null;
         this.exactStonecutterOption = -1;
-        this.exactSentOperations = 0;
-        this.exactTakePending = false;
-        this.exactResultStored = false;
+        this.exactTakeSent = false;
         // 每次合成重新读一次配置：玩家可能在备货运行期间改了工作站来源。
         this.mode = (CraftStationSource) Configs.BaritoneSettings.CRAFT_STATION_SOURCE.getOptionListValue();
         this.source = StationSource.INVENTORY;
@@ -211,32 +202,21 @@ final class CraftingController {
         return true;
     }
 
-    /** 一次固定摆料的数量上限同时约束每格堆叠与所需点击数。 */
-    static int maxExactOperations(Plan plan) {
-        if (plan == null || plan.exactOutput() == null || plan.slotCount() != CRAFT_GRID_SLOTS) return 0;
-        int operations = MAX_EXACT_OPERATIONS;
-        for (List<ItemStack> slot : plan.ingredients()) {
-            if (!slot.isEmpty()) operations = Math.min(operations, slot.getFirst().getMaxStackSize());
-        }
-        return operations;
-    }
-
-    boolean startExact(Minecraft mc, Item output, int operations, Plan plan, IntSupplier outputCount,
+    boolean startExact(Minecraft mc, Plan plan, Craft craft,
                        BooleanSupplier inputsAvailable, BooleanSupplier recipeCurrent,
                        BooleanSupplier reservesAfterPlacement) {
-        if (operations <= 0 || operations > maxExactOperations(plan) || plan.exactOutput() != output
-                || !recipeCurrent.getAsBoolean()) return false;
-        int target = RecipeAllocation.target(outputCount.getAsInt(), operations * plan.outputCount());
+        Item output = craft.item();
+        if (plan.exactOutput() != output || plan.outputCount() != craft.recipe().yield()) return false;
+        IntSupplier outputCount = () -> ItemUtil.countPlainLoose(mc.player, output);
+        int outputChange = plan.outputCount() - craft.inputs().getOrDefault(output, 0);
+        int target = outputCount.getAsInt() + outputChange * craft.operations();
         boolean stonecutting = plan.isExactStonecutting();
         Item input = stonecutting ? plan.ingredientsAt(0).getFirst().getItem() : null;
         if (!start(mc, output, target, stonecutting ? "stonecutting" : null, input, 0, plan, outputCount)) {
             return false;
         }
         this.recipe = plan;
-        this.exactOperations = operations;
-        this.exactInputsAvailable = inputsAvailable;
-        this.exactRecipeCurrent = recipeCurrent;
-        this.exactReservesAfterPlacement = reservesAfterPlacement;
+        this.exact = new ExactPlacement(craft, inputsAvailable, recipeCurrent, reservesAfterPlacement);
         return true;
     }
 
@@ -254,7 +234,7 @@ final class CraftingController {
             BaritoneIntegration.getInstance().cancelPathing();
         }
         this.exactMenu = null;
-        clearExactValidation();
+        this.exact = null;
         this.active = false;
         this.stage = Stage.IDLE;
     }
@@ -282,8 +262,8 @@ final class CraftingController {
     }
 
     Result tickExact(Minecraft mc, boolean sessionCurrent) {
-        // 已发出的单次取产物仍须核账，其他阶段的旧计划不再发送交互。
-        if (this.active && !sessionCurrent && !this.exactTakePending && this.stage != Stage.CLOSE) {
+        // 已发出的批量取产物仍须核账，旧计划不再发送新的交互。
+        if (this.active && !sessionCurrent && !this.exactTakeSent) {
             finish(Result.FAILED);
             return Result.FAILED;
         }
@@ -330,11 +310,11 @@ final class CraftingController {
             if (menu != null) {
                 boolean expectedMenu = this.station == Station.STONECUTTER
                         ? menu instanceof StonecutterMenu : menu instanceof CraftingMenu;
-                if (this.exactOperations > 0 && !expectedMenu) {
+                if (this.exact != null && !expectedMenu) {
                     fail(mc, "unexpected menu for exact crafting");
                     return;
                 }
-                if (this.exactOperations > 0) this.exactMenu = menu;
+                if (this.exact != null) this.exactMenu = menu;
                 this.stage = Stage.PREPARE;
                 this.waitTicks = 0;
                 return;
@@ -353,7 +333,7 @@ final class CraftingController {
         // 解析槽位的，开着箱子时同一个索引指向完全不同的槽位。世界坐标路径同样要求先关界面，
         // 否则右键会落到已打开的容器上。
         if (mc.player.containerMenu != mc.player.inventoryMenu) {
-            if (this.exactOperations > 0) {
+            if (this.exact != null) {
                 fail(mc, "another menu was open before exact crafting");
                 return;
             }
@@ -420,7 +400,7 @@ final class CraftingController {
             fail(mc, "workstation menu closed during preparation");
             return;
         }
-        if (this.exactOperations > 0) {
+        if (this.exact != null) {
             prepareExact(mc, menu);
             return;
         }
@@ -468,7 +448,7 @@ final class CraftingController {
     }
 
     private void prepareExact(Minecraft mc, AbstractContainerMenu menu) {
-        if (menu != this.exactMenu || !menu.getCarried().isEmpty() || !this.exactRecipeCurrent.getAsBoolean()) {
+        if (menu != this.exactMenu || !menu.getCarried().isEmpty() || !exact.recipeCurrent().getAsBoolean()) {
             fail(mc, "workstation, cursor or recipe changed during exact crafting");
             return;
         }
@@ -476,25 +456,26 @@ final class CraftingController {
             prepareExactStonecutter(mc, (StonecutterMenu) menu);
             return;
         }
-        if (this.manualPlaced) {
-            this.stage = Stage.TAKE;
+        if (!emptyCraftGrid(menu) || outputCount.getAsInt() != lastOutputCount
+                || !exact.inputsAvailable().getAsBoolean()) {
+            fail(mc, "unexpected crafting grid or insufficient unreserved inputs");
             return;
         }
-        if (!emptyCraftGrid(menu) || outputCount.getAsInt() != lastOutputCount
-                || !this.exactInputsAvailable.getAsBoolean()) {
-            fail(mc, "unexpected crafting grid or insufficient unreserved inputs");
+        int operations = exact.craft().operations();
+        if (!new CraftInventory(mc.player.getInventory()::getItem).canPlace(exact.craft(), operations)) {
+            finish(Result.INVENTORY_FULL);
             return;
         }
         for (int index = 0; index < recipe.slotCount(); index++) {
             if (recipe.isEmptySlot(index)) continue;
             int slot = gridSlotFor(index);
-            if (!fillGridSlot(mc, menu, slot, recipe.ingredientsAt(index), this.exactOperations)) {
+            if (!fillGridSlot(mc, menu, slot, recipe.ingredientsAt(index), operations)) {
                 fail(mc, "exact input missing for grid slot " + slot);
                 return;
             }
         }
-        this.manualPlaced = true;
         this.placeTicks = 0;
+        this.stage = Stage.TAKE;
         this.cooldown = ACTION_COOLDOWN;
     }
 
@@ -502,10 +483,15 @@ final class CraftingController {
         ItemStack input = menu.getSlot(STONECUTTER_INPUT_SLOT).getItem();
         ItemStack result = menu.getSlot(STONECUTTER_RESULT_SLOT).getItem();
         List<ItemStack> ingredient = recipe.ingredientsAt(0);
+        int operations = exact.craft().operations();
         if (!this.manualPlaced) {
             if (!input.isEmpty() || !result.isEmpty() || outputCount.getAsInt() != lastOutputCount
-                    || !this.exactInputsAvailable.getAsBoolean()) {
+                    || !exact.inputsAvailable().getAsBoolean()) {
                 fail(mc, "unexpected stonecutter input or insufficient unreserved stock");
+                return;
+            }
+            if (!new CraftInventory(mc.player.getInventory()::getItem).canPlace(exact.craft(), operations)) {
+                finish(Result.INVENTORY_FULL);
                 return;
             }
             // 先用一个输入确认服务端给出的选项和产量，确认前不放入该批余下的材料。
@@ -518,7 +504,8 @@ final class CraftingController {
             this.cooldown = ACTION_COOLDOWN;
             return;
         }
-        if (!matchesExactInput(input, this.stonecutterInput, 1) || outputCount.getAsInt() != lastOutputCount) {
+        int expectedAfterProbe = lastOutputCount - (this.stonecutterInput == item ? 1 : 0);
+        if (!matchesExactInput(input, this.stonecutterInput, 1) || outputCount.getAsInt() != expectedAfterProbe) {
             fail(mc, "stonecutter probe input or inventory changed");
             return;
         }
@@ -538,12 +525,12 @@ final class CraftingController {
             }
         } else if (!result.isEmpty() && menu.getSelectedRecipeIndex() >= 0) {
             if (!hasExactStonecutterSelection(menu) || !matchesExactInput(result, item, recipe.outputCount())
-                    || !this.exactReservesAfterPlacement.getAsBoolean()) {
+                    || !exact.reservesKept().getAsBoolean()) {
                 fail(mc, "stonecutter selection, yield or inventory reservations changed");
                 return;
             }
-            if (!fillGridSlot(mc, menu, STONECUTTER_INPUT_SLOT, ingredient, this.exactOperations - 1)
-                    || !this.exactReservesAfterPlacement.getAsBoolean()) {
+            if (!fillGridSlot(mc, menu, STONECUTTER_INPUT_SLOT, ingredient, operations - 1)
+                    || !exact.reservesKept().getAsBoolean()) {
                 fail(mc, "exact stonecutter inputs missing or reserved after probe");
                 return;
             }
@@ -718,7 +705,7 @@ final class CraftingController {
             fail(mc, "workstation menu closed before taking the result");
             return;
         }
-        if (this.exactOperations > 0) {
+        if (this.exact != null) {
             takeExact(mc, menu);
             return;
         }
@@ -761,19 +748,25 @@ final class CraftingController {
     }
 
     private void takeExact(Minecraft mc, AbstractContainerMenu menu) {
-        if (menu != this.exactMenu) {
-            fail(mc, "workstation changed during exact crafting");
+        if (menu != this.exactMenu || !menu.getCarried().isEmpty()) {
+            fail(mc, "workstation or cursor changed during exact crafting");
             return;
         }
-        int produced = outputCount.getAsInt();
-        int expected = RecipeAllocation.target(this.lastOutputCount, this.exactSentOperations * recipe.outputCount());
-        int remaining = this.exactOperations - this.exactSentOperations;
-        if (this.exactTakePending) {
-            settleExactTake(mc, menu, produced, expected, remaining);
+        if (this.exactTakeSent) {
+            if (exactResultReceived(menu)) {
+                this.stage = Stage.CLOSE;
+                this.cooldown = ACTION_COOLDOWN;
+            } else if (++this.placeTicks > RESULT_WAIT_TICKS) {
+                fail(mc, "exact batch did not produce the planned quantity");
+            }
             return;
         }
-        if (!menu.getCarried().isEmpty() || produced != expected || !matchesExactGrid(menu, remaining)) {
-            fail(mc, "inventory, cursor or fixed grid changed before taking exact output");
+
+        Craft craft = exact.craft();
+        int operations = craft.operations();
+        int expectedAfterPlacement = lastOutputCount - craft.inputs().getOrDefault(item, 0) * operations;
+        if (outputCount.getAsInt() != expectedAfterPlacement || !matchesExactGrid(menu, operations)) {
+            fail(mc, "inventory or fixed grid changed before taking exact output");
             return;
         }
         int resultSlot = this.station == Station.STONECUTTER ? STONECUTTER_RESULT_SLOT : CRAFT_RESULT_SLOT;
@@ -787,90 +780,24 @@ final class CraftingController {
             fail(mc, "unexpected item, components or yield in exact crafting result");
             return;
         }
-        if (!this.exactRecipeCurrent.getAsBoolean() || !this.exactReservesAfterPlacement.getAsBoolean()) {
+        if (!exact.recipeCurrent().getAsBoolean() || !exact.reservesKept().getAsBoolean()) {
             fail(mc, "recipe or inventory reservations changed before taking exact output");
             return;
         }
-        if (!canStoreResultAndReturnGrid(mc, result, remaining - 1)) {
+        if (!new CraftInventory(mc.player.getInventory()::getItem).canTake(craft, operations)) {
             finish(Result.INVENTORY_FULL);
             return;
         }
-        // 快移会重复合成。一次仅点击一份产物，并在再次点击前核对库存及各格。
-        this.exactSentOperations++;
-        this.exactTakePending = true;
-        this.exactResultStored = false;
+        // 原版快移会反复制作，由已核对的输入格数量限制次数。等待整批对账期间不重发。
+        this.exactTakeSent = true;
         this.placeTicks = 0;
-        SlotActionCompat.pickup(mc, menu.containerId, resultSlot);
-        if (!menu.getCarried().isEmpty()) storeExactResult(mc, menu);
+        SlotActionCompat.quickMove(mc, menu.containerId, resultSlot);
         this.cooldown = RESULT_TAKE_COOLDOWN;
     }
 
-    private void settleExactTake(Minecraft mc, AbstractContainerMenu menu, int produced, int expected, int remaining) {
-        if (produced > expected || ++this.placeTicks > RESULT_WAIT_TICKS) {
-            fail(mc, "exact crafting result did not match the planned quantity");
-            return;
-        }
-        if (!menu.getCarried().isEmpty()) {
-            if (!this.exactResultStored) storeExactResult(mc, menu);
-            return;
-        }
-        if (produced != expected || !matchesExactGrid(menu, remaining)) return;
-        this.exactTakePending = false;
-        this.placeTicks = 0;
-        if (remaining == 0) {
-            this.stage = Stage.CLOSE;
-            this.cooldown = ACTION_COOLDOWN;
-        }
-    }
-
-    private void storeExactResult(Minecraft mc, AbstractContainerMenu menu) {
-        ItemStack carried = menu.getCarried().copy();
-        if (!ItemUtil.isPlainLoose(carried) || !ItemUtil.is(carried, item) || carried.getCount() != recipe.outputCount()) {
-            fail(mc, "unexpected exact crafting result on cursor");
-            return;
-        }
-        this.exactResultStored = true;
-        storeExactResultInSlots(mc, menu, carried, false);
-        storeExactResultInSlots(mc, menu, carried, true);
-    }
-
-    private static void storeExactResultInSlots(Minecraft mc, AbstractContainerMenu menu,
-                                                ItemStack carried, boolean emptySlots) {
-        for (Slot slot : menu.slots) {
-            if (menu.getCarried().isEmpty()) return;
-            if (!SlotTransfer.isPlayerSlot(mc, slot) || !slot.mayPlace(carried)) continue;
-            ItemStack existing = slot.getItem();
-            if (existing.isEmpty() != emptySlots) continue;
-            if (!existing.isEmpty() && (!ItemStack.isSameItemSameComponents(existing, carried)
-                    || existing.getCount() >= slot.getMaxStackSize(carried))) continue;
-            SlotActionCompat.pickup(mc, menu.containerId, slot.index);
-        }
-    }
-
-    /** 停止或满包会关闭菜单，剩余的固定格位材料需要能放回背包。 */
-    private boolean canStoreResultAndReturnGrid(Minecraft mc, ItemStack result, int gridCount) {
-        Map<Item, Integer> toStore = new LinkedHashMap<>();
-        toStore.put(result.getItem(), result.getCount());
-        if (gridCount > 0) {
-            for (List<ItemStack> slot : recipe.ingredients()) {
-                if (!slot.isEmpty()) toStore.merge(slot.getFirst().getItem(), gridCount, Integer::sum);
-            }
-        }
-        Inventory inventory = mc.player.getInventory();
-        int emptySlots = 0;
-        for (int index = 0; index < Inventory.INVENTORY_SIZE; index++) {
-            ItemStack stack = inventory.getItem(index);
-            if (stack.isEmpty()) {
-                emptySlots++;
-            } else if (ItemUtil.isPlainLoose(stack)) {
-                int space = Math.max(0, stack.getMaxStackSize() - stack.getCount());
-                toStore.computeIfPresent(stack.getItem(), (item, count) -> Math.max(0, count - space));
-            }
-        }
-        for (Map.Entry<Item, Integer> entry : toStore.entrySet()) {
-            emptySlots -= RecipeAllocation.craftsFor(entry.getValue(), entry.getKey().getDefaultMaxStackSize());
-        }
-        return emptySlots >= 0;
+    private boolean exactResultReceived(AbstractContainerMenu menu) {
+        int resultSlot = this.station == Station.STONECUTTER ? STONECUTTER_RESULT_SLOT : CRAFT_RESULT_SLOT;
+        return outputCount.getAsInt() == this.targetCount && matchesExactGrid(menu, 0) && !menu.getSlot(resultSlot).hasItem();
     }
 
     private boolean matchesExactGrid(AbstractContainerMenu menu, int remaining) {
@@ -905,15 +832,21 @@ final class CraftingController {
     }
 
     private void doClose(Minecraft mc) {
+        if (this.exact != null && (!ownsOpenMenu(mc) || !this.exactMenu.getCarried().isEmpty()
+                || !exactResultReceived(this.exactMenu))) {
+            fail(mc, "exact batch changed before closing the workstation");
+            return;
+        }
         if (ownsOpenMenu(mc)) {
             mc.player.closeContainer();
         }
         this.exactMenu = null;
+        this.exact = null;
         finish(Result.DONE);
     }
 
     private boolean ownsOpenMenu(Minecraft mc) {
-        if (this.exactOperations > 0) return mc.player.containerMenu == this.exactMenu;
+        if (this.exact != null) return mc.player.containerMenu == this.exactMenu;
         return mc.player.containerMenu != mc.player.inventoryMenu;
     }
 
@@ -921,13 +854,6 @@ final class CraftingController {
         this.terminal = result;
         this.active = false;
         this.stage = Stage.IDLE;
-        clearExactValidation();
-    }
-
-    private void clearExactValidation() {
-        this.exactInputsAvailable = null;
-        this.exactRecipeCurrent = null;
-        this.exactReservesAfterPlacement = null;
     }
 
     private void fail(Minecraft mc, String reason) {
@@ -1079,7 +1005,7 @@ final class CraftingController {
         for (int i = 0; i < Inventory.INVENTORY_SIZE && remaining > 0; i++) {
             ItemStack stack = mc.player.getInventory().getItem(i);
             if (stack.isEmpty() || !matchesAny(stack, candidates)) continue;
-            if (this.exactOperations > 0 && !ItemUtil.isPlainLoose(stack)) continue;
+            if (this.exact != null && !ItemUtil.isPlainLoose(stack)) continue;
             int menuSlot = PlayerUtil.menuSlotOf(menu, mc.player.getInventory(), i);
             if (menuSlot < 0) continue;
             int take = Math.min(remaining, stack.getCount());
