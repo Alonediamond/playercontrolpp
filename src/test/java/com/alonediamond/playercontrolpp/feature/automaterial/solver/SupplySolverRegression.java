@@ -16,9 +16,13 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.Sup
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Status;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Take;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySolver;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.WholeOrderSolver;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySchedule;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Score;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -71,6 +75,10 @@ public final class SupplySolverRegression {
         cyclesAndLimits();
         cancelledBeforeIndexing();
         smallOracle();
+        wholeOrderWoodwork();
+        wholeOrderSticks();
+        wholeOrderSourcesAndDepth();
+        wholeOrderOracle();
         return checks;
     }
 
@@ -245,6 +253,8 @@ public final class SupplySolverRegression {
                             .filter(item -> !item.isEmpty()).toList().equals(List.of(sparePlanks, sparePlanks))),
                     "通用木棍用富余木料，保留橡木和白桦给各自的固定格");
             replay(request, plan);
+            Plan whole = exact(request);
+            check(whole.shoppingList().equals(plan.shoppingList()), "整单证明与两种栅栏的完整取料相符");
         }
     }
 
@@ -333,12 +343,148 @@ public final class SupplySolverRegression {
                     Request sample = new Request(new Catalog(List.of(bulk)), List.of(stock("part", parts), stock("raw", raw)),
                             List.of(goal("part", needed)), Map.of(), Set.of("part"), Set.of(), 1, Policy.SAVE_STOCK, Mode.PREPARE);
                     Result result = SupplySolver.solve(sample, BUDGET);
+                    Result whole = WholeOrderSolver.solve(sample);
+                    check(leastParts == Integer.MAX_VALUE ? whole.status() == Status.NO_PLAN_IN_MODEL
+                                    : whole.status() == Status.BEST_IN_MODEL && whole.plan().score().protectedUnits() == leastParts,
+                            "整单精确搜索与独立穷举一致");
                     if (leastParts == Integer.MAX_VALUE) check(result.status() == Status.NO_PLAN_IN_MODEL, "穷举对照：不可行");
                     else check(result.status() == Status.BEST_IN_MODEL && result.plan().score().protectedUnits() == leastParts,
                             "穷举对照：最小期初部件消耗");
                 }
             }
         }
+    }
+
+    private void wholeOrderWoodwork() {
+        String door = "minecraft:oak_door";
+        String chest = "minecraft:chest";
+        String button = "minecraft:birch_button";
+        List<Recipe> recipes = List.of(RecipeFixtures.read(door), RecipeFixtures.read(chest), RecipeFixtures.read(button));
+        List<Goal> targets = List.of(goal(door, 18), goal(chest, 2), goal(button, 1));
+        List<Source> stock = List.of(stock(OAK, 36), stock(BIRCH, 17));
+        for (List<Goal> order : List.of(targets, targets.reversed())) {
+            Plan plan = exact(request(recipes, stock, order, 1));
+            check(plan.surplus().isEmpty() && plan.shoppingList().equals(Map.of(OAK, 36L, BIRCH, 17L)), "21 件木作整单交付");
+            Make chests = plan.actions().stream().filter(Make.class::isInstance).map(Make.class::cast)
+                    .filter(make -> make.recipe().output().equals(chest)).findFirst().orElseThrow();
+            check(chests.operations() == 2 && chests.grid().stream().filter(id -> !id.isEmpty()).allMatch(BIRCH::equals),
+                    "两次箱子一批，用白桦板，将 36 块橡木板全部留给门");
+        }
+        check(WholeOrderSolver.solve(request(recipes, List.of(stock(OAK, 35), stock(BIRCH, 18)), targets, 1))
+                .status() == Status.NO_PLAN_IN_MODEL, "总板数够，橡木专用格少一块仍无解");
+        Plan cached = exact(request(recipes, List.of(stock(OAK, 36), stock(BIRCH, 9), stock(chest, 1)), targets, 1));
+        check(cached.shoppingList().get(chest) == 1, "缓存成品和制作共同满足同一个清单条目");
+    }
+
+    private void wholeOrderSticks() {
+        String sticks = "minecraft:stick";
+        String torch = "minecraft:torch";
+        String rail = "minecraft:rail";
+        String ladder = "minecraft:ladder";
+        List<Recipe> recipes = List.of(RecipeFixtures.read(sticks), RecipeFixtures.read(rail),
+                RecipeFixtures.read(torch), RecipeFixtures.read(ladder));
+        List<Source> stock = List.of(stock(OAK, 10), stock("minecraft:coal", 2), stock(IRON, 6));
+        List<Goal> targets = List.of(goal(rail, 16), goal(torch, 8), goal(ladder, 6));
+        Plan plan = exact(request(recipes, stock, targets, 2));
+        check(plan.surplus().equals(Map.of(sticks, 3L)) && plan.shoppingList().get(OAK) == 10,
+                "铁轨、火把、梯子共需 17 根木棍，只制作五次并共享三根余棍");
+        check(plan.actions().stream().anyMatch(action -> action instanceof Make make
+                && make.recipe().output().equals(sticks) && make.operations() == 5), "同一格位的制棍次数随交付计划保留");
+    }
+
+    private void wholeOrderSourcesAndDepth() {
+        List<Source> boxes = List.of(new Source("near", IRON, 4, 2), new Source("shared", IRON, 4, 3),
+                new Source("shared", DUST, 4, 3));
+        Plan shared = exact(request(List.of(), boxes, List.of(goal(IRON, 4), goal(DUST, 4)), 0));
+        check(shared.score().operations() == 3 && shared.actions().stream().noneMatch(action ->
+                action instanceof Take take && take.source() == 0), "两个无配方成品共享一次较远箱访问");
+        Request bulk = request(List.of(RecipeFixtures.read(OAK)), List.of(stock(LOG, 256)), List.of(goal(OAK, 1024)), 5);
+        Plan large = exact(bulk);
+        check(large.actions().size() == 2 && ((Make) large.actions().getLast()).operations() == 256,
+                "1024 块板只需一项取货和一项制作，超出旧动作数和活动帧上限");
+        SupplySchedule schedule = new SupplySchedule(large);
+        List<Action> batches = new ArrayList<>();
+        check(schedule.preview(64).actions().size() == 2, "先试排整组，未提交的试排不占用原木或余料");
+        while (!schedule.isEmpty()) {
+            SupplySchedule.Slice slice = schedule.preview(31);
+            batches.addAll(slice.actions());
+            slice.commit();
+        }
+        replay(bulk, new Plan(batches, large.surplus(), large.score(), large.mode()));
+        check(batches.stream().filter(Take.class::isInstance).map(Take.class::cast).mapToInt(Take::count).max().orElseThrow() == 8,
+                "分段以 7 或 8 根原木备料，复用前一批余板，累计仍只用 256 根");
+        Recipe a = simple("a", "A", 2, List.of(new Slot(List.of("B"))));
+        Recipe b = simple("b", "B", 1, List.of(new Slot(List.of("A"))));
+        List<Goal> goals = List.of(goal("A", 3), goal("B", 1));
+        check(WholeOrderSolver.solve(request(List.of(a, b), List.of(), goals, 8)).status() == Status.NO_PLAN_IN_MODEL,
+                "无种子的循环不能凭空产生全单库存");
+        exact(request(List.of(a, b), List.of(stock("A", 2)), goals, 4));
+        check(WholeOrderSolver.solve(request(List.of(a, b), List.of(stock("A", 2)), goals, 2)).status() == Status.NO_PLAN_IN_MODEL,
+                "有种子的固定转换仍受实际制作层数约束");
+        Thread.currentThread().interrupt();
+        try {
+            check(WholeOrderSolver.solve(bulk).status() == Status.UNKNOWN_LIMIT, "取消整单搜索不会提交候选");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    /** 正向枚举两箱采购量和每种实际制作次数，不使用求解器的倒推、上界或布局分配。 */
+    private void wholeOrderOracle() {
+        List<Recipe> recipes = List.of(simple("mill", "board", 2, List.of(new Slot(List.of("log")))),
+                simple("light", "light", 2, List.of(new Slot(List.of("board", "coal")))));
+        for (int logs = 0; logs <= 2; logs++) {
+            for (int boards = 1; boards <= 3; boards++) {
+                for (int coal = 0; coal <= 2; coal++) {
+                    List<Source> stock = List.of(new Source("near", "board", boards, 2),
+                            new Source("far", "log", logs, 5), new Source("far", "coal", coal, 5));
+                    for (Policy policy : Policy.values()) {
+                        Request sample = new Request(new Catalog(recipes), stock, List.of(goal("board", 2), goal("light", 3)),
+                                Map.of("board", 1), Set.of("board"), Set.of(), 2, policy, Mode.PREPARE);
+                        List<Long> best = null;
+                        for (int log = 0; log <= logs; log++) {
+                            for (int board = 0; board < boards; board++) {
+                                for (int fuel = 0; fuel <= coal; fuel++) {
+                                    for (int mill = 0; mill <= log; mill++) {
+                                        for (int burn = 0; burn <= 2; burn++) {
+                                            if (board + 2 * mill - burn < 2 || 2 - burn > fuel) continue;
+                                            long cost = mill + 2 + (board > 0 ? 2 : 0) + (log + fuel > 0 ? 5 : 0);
+                                            long pressure = price(board, boards - 1) + price(fuel, coal) + price(log, logs);
+                                            List<Long> score = objective(new Score(board, pressure, cost), policy);
+                                            if (best == null || Arrays.compare(
+                                                    score.toArray(Long[]::new), best.toArray(Long[]::new)) < 0) best = score;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Result solved = WholeOrderSolver.solve(sample);
+                        if (best == null) check(solved.status() == Status.NO_PLAN_IN_MODEL, "正向全枚举判定不可行");
+                        else {
+                            check(solved.status() == Status.BEST_IN_MODEL && objective(solved.plan().score(), policy).equals(best),
+                                    "正向全枚举对照整单的完整三项成本、硬保留及两箱共享访问");
+                            replay(sample, solved.plan());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static long price(int used, int available) {
+        return used == 0 ? 0 : (long) used * Math.ceilDiv(1_000_000, available);
+    }
+
+    private static List<Long> objective(Score score, Policy policy) {
+        return policy == Policy.FEWEST_OPERATIONS ? List.of(score.operations(), score.protectedUnits(), score.pressure())
+                : List.of(score.protectedUnits(), score.pressure(), score.operations());
+    }
+
+    private Plan exact(Request request) {
+        Result result = WholeOrderSolver.solve(request);
+        check(result.status() == Status.BEST_IN_MODEL, "整单应证优: " + request.goals());
+        replay(request, result.plan());
+        return result.plan();
     }
 
     private Plan solved(Request request) {
@@ -353,16 +499,16 @@ public final class SupplySolverRegression {
         int[] capacity = request.stock().stream().mapToInt(Source::count).toArray();
         for (Action action : plan.actions()) {
             if (action instanceof Take take) {
-                check(--capacity[take.source()] >= 0 && request.stock().get(take.source()).item().equals(take.item()), "不重复兑现货源");
-                inventory.merge(take.item(), 1L, Long::sum);
+                check((capacity[take.source()] -= take.count()) >= 0 && request.stock().get(take.source()).item().equals(take.item()), "不重复兑现货源");
+                inventory.merge(take.item(), (long) take.count(), Long::sum);
             } else if (action instanceof Make make) {
                 for (int index = 0; index < 9; index++) {
                     String item = make.grid().get(index);
                     Slot slot = make.recipe().slots().get(index);
                     if (item.isEmpty()) check(slot.choices().isEmpty(), "保留图案空格");
-                    else check(slot.choices().contains(item) && inventory.merge(item, -1L, Long::sum) >= 0, "合法变种且先有料再制作");
+                    else check(slot.choices().contains(item) && inventory.merge(item, -(long) make.operations(), Long::sum) >= 0, "合法变种且先有料再制作");
                 }
-                inventory.merge(make.recipe().output(), (long) make.recipe().yield(), Long::sum);
+                inventory.merge(make.recipe().output(), (long) make.recipe().yield() * make.operations(), Long::sum);
             }
         }
         for (Goal goal : request.goals()) check(inventory.merge(goal.item(), -(long) goal.units(), Long::sum) >= 0, "满足每项交付");

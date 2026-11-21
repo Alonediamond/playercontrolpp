@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -47,7 +48,18 @@ final class CachedLooseStockRegression {
         check(stale.tick() == null, "大缓存的扫描跨 tick 推进");
         current.set(false);
         check(stale.tick().isEmpty() && !stale.valid(), "缓存世代变化丢弃已采集的库存");
-        return 3;
+        List<Storage> warehouse = new ArrayList<>();
+        for (int i = 0; i < 520; i++) {
+            warehouse.add(new Storage(new BlockPos(i, 64, 0), Blocks.BARREL, List.of(), Collections.nCopies(17, ordinary)));
+        }
+        CachedLooseStockScan<Storage> large = new CachedLooseStockScan<>(primary, 600, Set.of(Items.OAK_PLANKS),
+                warehouse.iterator(), Function.identity(), () -> true);
+        do {
+            stock = large.tick();
+        } while (stock == null);
+        check(stock.size() == 520 && stock.stream().mapToInt(Stock::count).sum() == 520 * 17 * 5,
+                "超过旧 8192 个扫描步骤和 512 条货源后仍完整交付库存");
+        return 4;
     }
 
     private static void check(boolean condition, String message) {

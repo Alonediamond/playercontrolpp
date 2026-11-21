@@ -37,6 +37,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.Sup
  */
 public final class SupplySolver {
     private static final long PRESSURE_SCALE = 1_000_000L;
+    static long unitPressure(long available) { return Math.ceilDiv(PRESSURE_SCALE, available); }
     private static final int MAX_BLOCKED_EXAMPLES = 8;
     private static final int MAX_ACTIVE_FRAMES = 768;
     private static final int MAX_DELIVERY_STATES = 4096;
@@ -334,7 +335,7 @@ public final class SupplySolver {
     private StockEstimate directEstimate(String item, long available) {
         if (available <= 0) return UNKNOWN;
         return new StockEstimate(request.preferKeeping().contains(item) ? 1 : 0,
-                Math.ceilDiv(PRESSURE_SCALE, initial.get(item)));
+                unitPressure(initial.get(item)));
     }
 
     /** 按期初散装估算一次制作，并按产量摊销。这个数只决定探索顺序，深层和暂不可估分支仍可参与搜索。 */
@@ -404,7 +405,7 @@ public final class SupplySolver {
         branch.actions.add(new Take(index, source.item()));
         // 断点看 source.item() 和 stockPressure：同取一根，消耗 1/24 白桦比 1/8 橡木便宜。
         // 分母是期初可动用总量，不是取走一个后重新计算；稀有只代表分高，不是禁用。
-        long stockPressure = Math.ceilDiv(PRESSURE_SCALE, initial.get(source.item()));
+        long stockPressure = unitPressure(initial.get(source.item()));
         branch.score = new Score(branch.score.protectedUnits() + (request.preferKeeping().contains(source.item()) ? 1 : 0),
                 Math.addExact(branch.score.pressure(), stockPressure),
                 branch.score.operations() + (branch.visited.add(source.box()) ? source.visitCost() : 0));

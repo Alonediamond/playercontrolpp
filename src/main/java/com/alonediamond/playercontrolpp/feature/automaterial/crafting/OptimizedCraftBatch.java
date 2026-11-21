@@ -14,11 +14,14 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatch
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Step;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Stock;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySchedule;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySolver;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.WholeOrderSolver;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration;
 import com.alonediamond.playercontrolpp.integration.LitematListIntegration.RawNode;
+import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.inventory.InventoryCounts;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -56,8 +59,6 @@ final class OptimizedCraftBatch {
 
     private static final int CAPTURE_TICK_LIMIT = 120;
     private static final long GRAPH_NANOS_PER_TICK = 1_000_000L;
-    private static final long SOLVE_NANOS_LIMIT = 150_000_000L;
-    private static final long SOLVE_NODE_LIMIT = 60_000;
     private static final int MAX_GRAPH_ITEMS = 192;
     private static final int MAX_GRAPH_RECIPES = 192;
     private static final int MAX_STOCK_SOURCES = 128;
@@ -71,7 +72,7 @@ final class OptimizedCraftBatch {
                 return thread;
             });
 
-    enum Progress { PENDING, READY, NO_PLAN, LIMIT, STALE, UNAVAILABLE }
+    enum Progress { PENDING, READY, NO_PLAN, LIMIT, STALE, UNAVAILABLE, INVALID_FLOORS }
     private record Output(String id, int depth) {}
 
     private final ClientLevel level;
@@ -86,6 +87,16 @@ final class OptimizedCraftBatch {
     private final Item root;
     private final String rootId;
     private final RawNode tree;
+    private final boolean wholeOrder;
+    private final Map<Item, Integer> protectedStock;
+    private final Set<String> preferKeeping;
+    private final List<String> floorSettings;
+    private final SupplyModel.Policy policy;
+    private final int nodeLimit;
+    private final int timeMillis;
+    private final boolean tableAvailable;
+    private final boolean cutterAvailable;
+    private final Map<Item, Balance> initialBalances = new HashMap<>();
     private final int target;
     private final Set<BlockPos> excluded;
     private final BlockPos origin;
@@ -100,15 +111,31 @@ final class OptimizedCraftBatch {
     private int ticks;
     private boolean feasibleAtLimit;
     private List<Step> steps = List.of();
+    private SupplySchedule schedule;
+    private WholeCapture wholeCapture;
     private Map<Item, Integer> targets;
 
     OptimizedCraftBatch(GatherContext ctx, Item root, RawNode tree, int target, Set<BlockPos> excluded) {
+        this(ctx, root, tree, target, excluded, null);
+    }
+
+    OptimizedCraftBatch(GatherContext ctx, Item root, RawNode tree, int target, Set<BlockPos> excluded,
+                        Map<Item, Integer> protectedStock) {
         this.level = ctx.client.level;
         this.player = ctx.client.player;
         this.requirementsRevision = ctx.requirements.revision();
         this.depth = configuredDepth();
         this.traceMode = (RawMaterialMode) BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue();
         this.stationMode = (CraftStationSource) BaritoneSettings.CRAFT_STATION_SOURCE.getOptionListValue();
+        this.wholeOrder = protectedStock != null;
+        this.protectedStock = wholeOrder ? new HashMap<>(protectedStock) : Map.of();
+        this.policy = selectedPolicy();
+        this.preferKeeping = Set.copyOf(BaritoneSettings.SOLVER_PREFER_KEEPING.getStrings());
+        this.floorSettings = List.copyOf(BaritoneSettings.SOLVER_STOCK_FLOORS.getStrings());
+        this.nodeLimit = BaritoneSettings.SOLVER_WINDOW_NODES.getIntegerValue();
+        this.timeMillis = BaritoneSettings.SOLVER_WINDOW_MILLIS.getIntegerValue();
+        this.tableAvailable = stationAvailable(CraftStationManager.Kind.CRAFTING_TABLE);
+        this.cutterAvailable = stationAvailable(CraftStationManager.Kind.STONECUTTER);
         this.craftingTables = List.copyOf(BaritoneSettings.CRAFTING_TABLE_POSITIONS.getStrings());
         this.stonecutters = List.copyOf(BaritoneSettings.STONECUTTER_POSITIONS.getStrings());
         this.traceStops = LitematListIntegration.getInstance().rawTraceStops();
@@ -119,6 +146,21 @@ final class OptimizedCraftBatch {
         this.excluded = Set.copyOf(excluded);
         this.origin = this.player.blockPosition();
         this.recipes = CraftingRecipes.captureForSolver(ctx.client);
+        if (wholeOrder) {
+            targets = WholeOrderStock.targets(ctx.requirements.entries());
+            for (Item item : targets.keySet()) enqueue(id(item), 0);
+        }
+    }
+
+    private boolean stationAvailable(CraftStationManager.Kind kind) {
+        return stationMode != CraftStationSource.INVENTORY && CraftStationManager.getInstance().anyInDimension(level, kind)
+                || stationMode != CraftStationSource.WORLD && QuickShulkerIntegration.getInstance().isLoaded()
+                && ItemUtil.countLoose(player, kind.item) > 0;
+    }
+
+    private static SupplyModel.Policy selectedPolicy() {
+        return BaritoneSettings.SOLVER_FEWEST_OPERATIONS.getBooleanValue()
+                ? SupplyModel.Policy.FEWEST_OPERATIONS : SupplyModel.Policy.SAVE_STOCK;
     }
 
     private static int configuredDepth() {
@@ -130,11 +172,17 @@ final class OptimizedCraftBatch {
                 && !player.isCreative() && !player.isSpectator()
                 && ctx.requirements.revision() == requirementsRevision
                 && BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()
+                && BaritoneSettings.SOLVE_WHOLE_LIST.getBooleanValue() == wholeOrder
+                && selectedPolicy() == policy && preferKeeping.equals(Set.copyOf(BaritoneSettings.SOLVER_PREFER_KEEPING.getStrings()))
+                && (!wholeOrder || floorSettings.equals(BaritoneSettings.SOLVER_STOCK_FLOORS.getStrings()))
+                && (wholeOrder || nodeLimit == BaritoneSettings.SOLVER_WINDOW_NODES.getIntegerValue()
+                && timeMillis == BaritoneSettings.SOLVER_WINDOW_MILLIS.getIntegerValue())
                 && BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue() == traceMode
                 && BaritoneSettings.CRAFT_STATION_SOURCE.getOptionListValue() == stationMode
                 && BaritoneSettings.CRAFTING_TABLE_POSITIONS.getStrings().equals(craftingTables)
                 && BaritoneSettings.STONECUTTER_POSITIONS.getStrings().equals(stonecutters)
-                && configuredDepth() == depth && (recipes == null || recipes.isCurrent(ctx.client));
+                && configuredDepth() == depth && (recipes == null || recipes.isCurrent(ctx.client))
+                && (!wholeOrder || traceStops == null || traceStopsCurrent());
     }
 
     List<Step> steps() { return steps; }
@@ -160,9 +208,9 @@ final class OptimizedCraftBatch {
 
     Progress advance(GatherContext ctx) {
         if (!isCurrent(ctx)) return Progress.STALE;
-        if (++ticks > CAPTURE_TICK_LIMIT) return Progress.LIMIT;
         if (future != null) return poll(ctx);
-        if (recipes == null || traceStops == null || depth <= 0) return Progress.UNAVAILABLE;
+        if (!wholeOrder && ++ticks > CAPTURE_TICK_LIMIT) return Progress.LIMIT;
+        if (recipes == null || traceStops == null || depth < 0 || depth == 0 && !wholeOrder) return Progress.UNAVAILABLE;
         if (!recipes.tick(ctx.client)) return Progress.PENDING;
         if (targets == null) {
             List<MaterialItemEntry> candidates = ctx.requirements.entries().stream()
@@ -175,11 +223,12 @@ final class OptimizedCraftBatch {
             Progress progress = captureGraph();
             if (progress != Progress.READY) return progress;
             scan = new CachedContainerSource().scanLoose(ctx.client, origin, Set.copyOf(items.values()));
+            if (scan == ChestTrackerIntegration.UNAVAILABLE_LOOSE_SCAN) return Progress.UNAVAILABLE;
         }
         List<ChestTrackerIntegration.Stock> cached = scan.tick();
         if (!scan.valid()) return Progress.STALE;
         if (cached == null) return Progress.PENDING;
-        return submit(ctx, cached);
+        return wholeOrder ? submitWholeOrder(ctx, cached) : submit(ctx, cached);
     }
 
     /** 共用固定原料的小目标放入同一窗口，保持当前目标优先并限制窗口的总缺口。 */
@@ -225,20 +274,21 @@ final class OptimizedCraftBatch {
             items.put(output.id(), item);
             if (output.depth() >= depth || traceStops.contains(item)) continue;
             for (SolverRecipe recipe : recipes.recipesFor(output.id())) {
-                if (modelRecipes.size() >= MAX_GRAPH_RECIPES) return Progress.LIMIT;
+                if (wholeOrder && !("stonecutting".equals(recipe.type()) ? cutterAvailable : tableAvailable)) continue;
+                if (!wholeOrder && modelRecipes.size() >= MAX_GRAPH_RECIPES) return Progress.LIMIT;
                 List<SupplyModel.Slot> slots = new ArrayList<>(recipe.grid().size());
                 for (List<String> choices : recipe.grid()) {
                     slots.add(new SupplyModel.Slot(choices));
                     for (String choice : choices) {
                         enqueue(choice, output.depth() + 1);
-                        if (queued.size() > MAX_GRAPH_ITEMS) return Progress.LIMIT;
+                        if (!wholeOrder && queued.size() > MAX_GRAPH_ITEMS) return Progress.LIMIT;
                     }
                 }
                 modelRecipes.add(new SupplyModel.Recipe(recipe.id(), recipe.type(), recipe.output(), recipe.yield(), slots));
             }
         }
         if (!graph.isEmpty()) return Progress.PENDING;
-        return recipes.recipesFor(rootId).isEmpty() ? Progress.UNAVAILABLE : Progress.READY;
+        return !wholeOrder && recipes.recipesFor(rootId).isEmpty() ? Progress.UNAVAILABLE : Progress.READY;
     }
 
     private void enqueue(String item, int depth) {
@@ -246,7 +296,7 @@ final class OptimizedCraftBatch {
     }
 
     private Progress submit(GatherContext ctx, List<ChestTrackerIntegration.Stock> cached) {
-        Function<Item, Balance> current = balances(ctx);
+        Function<Item, Balance> current = currentBalances(ctx);
         int gap = target - current.apply(root).owned();
         if (gap <= 0 || gap > MAX_OUTPUT_PER_WINDOW) return Progress.STALE;
         int[] hintNodes = { MAX_HINT_NODES };
@@ -283,19 +333,100 @@ final class OptimizedCraftBatch {
             if (targets.containsKey(source.item()) || excluded.contains(source.position())) continue;
             Balance balance = current.apply(source.item());
             if (balance.owned() < balance.reserve()) continue;
-            if (stock.size() >= MAX_STOCK_SOURCES) break;
-            int distance = (int) Math.sqrt(source.position().distSqr(origin));
-            int cost = 1 + Math.min(distance, 1000);
-            stock.add(new Stock(new SupplyModel.Source(source.position().toShortString(), id(source.item()),
-                    source.count(), cost), source.position()));
+            if (stock.size() >= MAX_STOCK_SOURCES) return Progress.LIMIT;
+            stock.add(cachedStock(source));
         }
+        return dispatch(goals, Map.of());
+    }
+
+    private Progress submitWholeOrder(GatherContext ctx, List<ChestTrackerIntegration.Stock> cached) {
+        if (wholeCapture == null) {
+            try {
+                wholeCapture = new WholeCapture(ctx, cached, WholeOrderStock.parseFloors(floorSettings));
+            } catch (IllegalArgumentException invalid) {
+                return Progress.INVALID_FLOORS;
+            }
+        }
+        return wholeCapture.advance();
+    }
+
+    /** 背包在同一 tick 冻结；大仓库的逐行转换延续到后续 tick。求解结束时再与玩家实际持有量对账。 */
+    private final class WholeCapture {
+        private final Function<Item, Balance> inventory;
+        private final Iterator<Map.Entry<String, Item>> catalogItems = items.entrySet().iterator();
+        private final Iterator<ChestTrackerIntegration.Stock> rows;
+        private final List<SupplyModel.Goal> goals = new ArrayList<>();
+        private final Map<String, Long> totals = new HashMap<>();
+        private final Map<String, Integer> floors;
+
+        WholeCapture(GatherContext ctx, List<ChestTrackerIntegration.Stock> cached, Map<String, Integer> floors) {
+            this.inventory = balances(ctx, item -> 0);
+            this.rows = cached.iterator();
+            this.floors = floors;
+            // 唯一的随身工作站需留在背包里才能继续开站。带名字的站也可以打开，此时无需另留普通的一件。
+            for (CraftStationManager.Kind kind : CraftStationManager.Kind.values()) {
+                Balance balance = inventory.apply(kind.item);
+                boolean portableOnly = stationMode != CraftStationSource.WORLD && QuickShulkerIntegration.getInstance().isLoaded()
+                        && (stationMode == CraftStationSource.INVENTORY || !CraftStationManager.getInstance().anyInDimension(level, kind));
+                if (portableOnly && balance.plain() > 0 && ItemUtil.countLoose(player, kind.item) == balance.plain()) {
+                    protectedStock.merge(kind.item, balance.owned() - balance.plain() + 1, Math::max);
+                }
+            }
+        }
+
+        Progress advance() {
+            long started = System.nanoTime();
+            do {
+                if (catalogItems.hasNext()) {
+                    Map.Entry<String, Item> entry = catalogItems.next();
+                    capturePlayerItem(entry.getKey(), entry.getValue());
+                } else if (rows.hasNext()) {
+                    ChestTrackerIntegration.Stock row = rows.next();
+                    if (!excluded.contains(row.position())) addStock(cachedStock(row));
+                } else {
+                    Map<String, Integer> effective = new HashMap<>();
+                    floors.forEach((id, floor) -> {
+                        Balance balance = initialBalances.get(items.get(id));
+                        if (balance != null) effective.put(id, WholeOrderStock.additionalFloor(balance, floor, totals.getOrDefault(id, 0L)));
+                    });
+                    return dispatch(goals, effective);
+                }
+            } while (System.nanoTime() - started < GRAPH_NANOS_PER_TICK);
+            return Progress.PENDING;
+        }
+
+        private void capturePlayerItem(String id, Item item) {
+            WholeOrderStock allocation = WholeOrderStock.allocate(inventory.apply(item), targets.getOrDefault(item, 0),
+                    protectedStock.getOrDefault(item, 0));
+            Balance balance = allocation.balance();
+            if (balance.reserve() > 0) protectedStock.put(item, balance.reserve());
+            initialBalances.put(item, balance);
+            if (allocation.missing() > 0) goals.add(new SupplyModel.Goal(id, allocation.missing(), null));
+            if (balance.usable() > 0) addStock(new Stock(new SupplyModel.Source(PLAYER_STOCK, id, balance.usable(), 0), null));
+        }
+
+        private void addStock(Stock entry) {
+            stock.add(entry);
+            totals.merge(entry.model().item(), (long) entry.model().count(), Math::addExact);
+        }
+    }
+
+    private Stock cachedStock(ChestTrackerIntegration.Stock row) {
+        int distance = (int) Math.sqrt(row.position().distSqr(origin));
+        int cost = 1 + Math.min(distance, 1000);
+        return new Stock(new SupplyModel.Source(row.position().toShortString(), id(row.item()), row.count(), cost), row.position());
+    }
+
+    private Progress dispatch(List<SupplyModel.Goal> goals, Map<String, Integer> floors) {
         Set<String> stopIds = new HashSet<>();
         for (Item item : traceStops) stopIds.add(id(item));
         SupplyModel.Request request = new SupplyModel.Request(
                 new SupplyModel.Catalog(modelRecipes), stock.stream().map(Stock::model).toList(),
-                goals, Map.of(), Set.of(), stopIds, depth,
-                SupplyModel.Policy.SAVE_STOCK, SupplyModel.Mode.PREPARE);
-        future = new FutureTask<>(() -> SupplySolver.solve(request, SOLVE_NODE_LIMIT, SOLVE_NANOS_LIMIT));
+                goals, floors, preferKeeping, stopIds, depth, policy, SupplyModel.Mode.PREPARE);
+        int nodes = nodeLimit;
+        long nanos = TimeUnit.MILLISECONDS.toNanos(timeMillis);
+        future = wholeOrder ? new FutureTask<>(() -> WholeOrderSolver.solve(request))
+                : new FutureTask<>(() -> SupplySolver.solve(request, nodes, nanos));
         WORKER.execute(future);
         return Progress.PENDING;
     }
@@ -303,22 +434,41 @@ final class OptimizedCraftBatch {
     private Progress poll(GatherContext ctx) {
         if (!future.isDone()) return Progress.PENDING;
         if (!traceStopsCurrent()) return Progress.STALE;
+        Function<Item, Balance> current = currentBalances(ctx);
+        if (wholeOrder && (initialBalances.entrySet().stream().anyMatch(entry -> !entry.getValue().equals(current.apply(entry.getKey())))
+                || tableAvailable != stationAvailable(CraftStationManager.Kind.CRAFTING_TABLE)
+                || cutterAvailable != stationAvailable(CraftStationManager.Kind.STONECUTTER))) return Progress.STALE;
         if (future.state() == Future.State.FAILED) {
             Playercontrolpp.LOGGER.warn("Raw material solver failed", future.exceptionNow());
             return Progress.UNAVAILABLE;
         }
         if (future.state() != Future.State.SUCCESS) return Progress.STALE;
         SupplyModel.Result result = future.resultNow();
+        if (wholeOrder && result.status() == SupplyModel.Status.FEASIBLE_LIMIT) return Progress.LIMIT;
         SupplyModel.Plan plan = CraftBatchActions.executable(result);
         if (plan == null) {
             return result.status() == SupplyModel.Status.UNKNOWN_LIMIT ? Progress.LIMIT : Progress.NO_PLAN;
         }
-        if (plan.actions().size() > MAX_MODEL_ACTIONS) return Progress.LIMIT;
+        if (!wholeOrder && plan.actions().size() > MAX_MODEL_ACTIONS) return Progress.LIMIT;
         List<Step> translated = CraftBatchActions.translate(plan, stock, items);
-        if (!CraftBatchActions.canExecute(translated, balances(ctx), targets)) return Progress.STALE;
-        steps = CraftBatchActions.group(translated, new CraftInventory(player.getInventory()::getItem));
+        if (!CraftBatchActions.canExecute(translated, current, targets)) return Progress.STALE;
+        CraftInventory inventory = new CraftInventory(player.getInventory()::getItem,
+                BaritoneSettings.SOLVER_PLACEMENT_LIMIT.getIntegerValue());
+        if (wholeOrder && !inventory.fits(translated)) {
+            schedule = new SupplySchedule(plan);
+        } else {
+            steps = CraftBatchActions.group(translated, inventory);
+        }
         feasibleAtLimit = result.status() == SupplyModel.Status.FEASIBLE_LIMIT;
         return Progress.READY;
+    }
+
+    boolean hasSegments() { return schedule != null && !schedule.isEmpty(); }
+
+    List<Step> nextSegment() {
+        CraftInventory inventory = new CraftInventory(player.getInventory()::getItem,
+                BaritoneSettings.SOLVER_PLACEMENT_LIMIT.getIntegerValue());
+        return CraftBatchActions.nextSegment(schedule, stock, items, inventory);
     }
 
     void cancel() {
@@ -329,7 +479,11 @@ final class OptimizedCraftBatch {
         }
     }
 
-    static Function<Item, Balance> balances(GatherContext ctx) {
+    Function<Item, Balance> currentBalances(GatherContext ctx) {
+        return balances(ctx, wholeOrder ? item -> protectedStock.getOrDefault(item, 0) : ctx::targetFor);
+    }
+
+    static Function<Item, Balance> balances(GatherContext ctx, ToIntFunction<Item> reserve) {
         Inventory inventory = ctx.client.player.getInventory();
         InventoryCounts owned = InventoryCounts.capture(inventory::getItem, ctx.extractionBoxSlots);
         Map<Item, Integer> plain = new HashMap<>();
@@ -339,7 +493,7 @@ final class OptimizedCraftBatch {
         }
         Map<Item, Balance> current = new HashMap<>();
         return item -> current.computeIfAbsent(item, key -> new Balance(
-                owned.owned(key), plain.getOrDefault(key, 0), ctx.targetFor(key)));
+                owned.owned(key), plain.getOrDefault(key, 0), reserve.applyAsInt(key)));
     }
 
     private static SupplyModel.Hint hint(RawNode node, int depth, int[] remainingNodes) {

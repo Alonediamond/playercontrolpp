@@ -25,8 +25,6 @@ import java.util.function.Function;
 public final class CachedLooseStockScan<E> implements LooseStockScan {
     private static final long TICK_BUDGET_NANOS = 1_000_000L;
     private static final int MAX_STEPS_PER_TICK = 128;
-    private static final int MAX_SCAN_STEPS = 8_192;
-    private static final int MAX_STOCK_ROWS = 512;
 
     public record Storage(BlockPos position, Block block, List<BlockPos> connected, Iterable<ItemStack> items) {}
 
@@ -41,7 +39,6 @@ public final class CachedLooseStockScan<E> implements LooseStockScan {
     private final List<Stock> stock = new ArrayList<>();
     private Iterator<ItemStack> stacks = List.<ItemStack>of().iterator();
     private BlockPos source;
-    private int steps;
     private boolean valid = true;
     private List<Stock> finished;
 
@@ -62,8 +59,6 @@ public final class CachedLooseStockScan<E> implements LooseStockScan {
             if (!isCurrent.getAsBoolean()) return invalidate();
             long start = System.nanoTime();
             for (int tickSteps = 0; tickSteps < MAX_STEPS_PER_TICK; tickSteps++) {
-                if (steps >= MAX_SCAN_STEPS || stock.size() >= MAX_STOCK_ROWS) return finish();
-                steps++;
                 if (stacks.hasNext()) {
                     ItemStack stack = stacks.next();
                     if (items.contains(stack.getItem()) && ItemUtil.isPlainLoose(stack)) {
@@ -71,7 +66,7 @@ public final class CachedLooseStockScan<E> implements LooseStockScan {
                     }
                 } else {
                     appendStock();
-                    if (!memories.hasNext() || stock.size() >= MAX_STOCK_ROWS) return finish();
+                    if (!memories.hasNext()) return finish();
                     beginStorage(readStorage.apply(memories.next()));
                 }
                 if (System.nanoTime() - start >= TICK_BUDGET_NANOS) break;
@@ -103,7 +98,6 @@ public final class CachedLooseStockScan<E> implements LooseStockScan {
 
     private void appendStock() {
         for (Map.Entry<Item, Integer> entry : currentStock.entrySet()) {
-            if (stock.size() == MAX_STOCK_ROWS) break;
             stock.add(new Stock(entry.getKey(), entry.getValue(), source));
         }
         currentStock.clear();

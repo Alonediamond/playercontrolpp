@@ -7,6 +7,7 @@ import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.CraftStationSource;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Craft;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.WorkstationOrder.ExactPlacement;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
 import com.alonediamond.playercontrolpp.interaction.BlockInteraction;
@@ -30,7 +31,6 @@ import net.minecraft.world.phys.Vec3;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 
 /**
@@ -90,8 +90,6 @@ final class CraftingController {
     private final QuickShulkerIntegration quickShulker = QuickShulkerIntegration.getInstance();
 
     private enum Stage { IDLE, TRAVEL, OPEN, PREPARE, TAKE, CLOSE }
-    private record ExactPlacement(Craft craft, BooleanSupplier inputsAvailable,
-                                  BooleanSupplier recipeCurrent, BooleanSupplier reservesKept) {}
 
     private static final int TRAVEL_TIMEOUT_TICKS = 400;
     /** 距工作站多近才算到达（略大于交互距离，抵达后还要能右键到）。 */
@@ -144,29 +142,20 @@ final class CraftingController {
 
     public boolean isActive() { return this.active; }
 
-    /**
-     * 开始一次合成。
-     *
-     * @param item             要合成的物品
-     * @param targetCount      要持有到多少个（绝对量，含缺失清单给它的预留量）
-     * @param recipeType      原材料树上这一层的配方类型
-     * @param stonecutterInput 切石机要用的输入物品（树上唯一的那个子材料）；没有就传 {@code null}
-     * @param stonecutterInputBudget 本批可消耗的切石输入数量，不包含清单与祖先帧预留
-     * @return false = 这次合成做不了（没有工作站 / 没有可用配方 / 配方类型不支持 / 背包容不下），
-     *         调用方按"只收集原材料"处理
-     */
-    public boolean start(Minecraft mc, Item item, int targetCount, String recipeType, Item stonecutterInput,
-                         int stonecutterInputBudget, Plan plannedRecipe, IntSupplier outputCount) {
-        if (mc.player == null || mc.level == null || item == null) return false;
+    boolean start(Minecraft mc, WorkstationOrder order) {
+        if (mc.player == null || mc.level == null || order.output() == null) return false;
+        ExactPlacement placement = order.exact();
+        if (placement != null && (order.layout().exactOutput() != order.output()
+                || order.layout().outputCount() != placement.craft().recipe().yield())) return false;
 
-        this.item = item;
-        this.targetCount = targetCount;
-        this.stonecutterInput = stonecutterInput;
-        this.stonecutterInputBudget = Math.max(0, stonecutterInputBudget);
-        this.plannedRecipe = plannedRecipe;
-        this.outputCount = outputCount;
+        this.item = order.output();
+        this.targetCount = order.target();
+        this.stonecutterInput = order.stoneInput();
+        this.stonecutterInputBudget = Math.max(0, order.inputBudget());
+        this.plannedRecipe = order.layout();
+        this.outputCount = order.outputCount();
         this.lastOutputCount = outputCount.getAsInt();
-        this.exact = null;
+        this.exact = placement;
         this.exactMenu = null;
         this.exactStonecutterOption = -1;
         this.exactTakeSent = false;
@@ -176,9 +165,10 @@ final class CraftingController {
         this.stationPos = null;
 
         // 配方类型不支持的（熔炼 / 锻造）直接说做不了：调用方会保留已收集的子材料。
-        if (recipeType != null && !CraftingRecipes.isSupportedType(recipeType)) return false;
+        if (order.recipeType() != null && !CraftingRecipes.isSupportedType(order.recipeType())) return false;
 
-        if (!pickStation(mc, recipeType)) return false;
+        if (!pickStation(mc, order.recipeType())) return false;
+        if (placement != null) this.recipe = order.layout();
 
         this.stage = this.source == StationSource.WORLD && !canReachStation(mc)
                 ? Stage.TRAVEL
@@ -199,24 +189,6 @@ final class CraftingController {
             // 但合成本来就是独占流程，取消挖矿/建造由调用方负责。
             BaritoneIntegration.getInstance().pathTo(this.stationPos);
         }
-        return true;
-    }
-
-    boolean startExact(Minecraft mc, Plan plan, Craft craft,
-                       BooleanSupplier inputsAvailable, BooleanSupplier recipeCurrent,
-                       BooleanSupplier reservesAfterPlacement) {
-        Item output = craft.item();
-        if (plan.exactOutput() != output || plan.outputCount() != craft.recipe().yield()) return false;
-        IntSupplier outputCount = () -> ItemUtil.countPlainLoose(mc.player, output);
-        int outputChange = plan.outputCount() - craft.inputs().getOrDefault(output, 0);
-        int target = outputCount.getAsInt() + outputChange * craft.operations();
-        boolean stonecutting = plan.isExactStonecutting();
-        Item input = stonecutting ? plan.ingredientsAt(0).getFirst().getItem() : null;
-        if (!start(mc, output, target, stonecutting ? "stonecutting" : null, input, 0, plan, outputCount)) {
-            return false;
-        }
-        this.recipe = plan;
-        this.exact = new ExactPlacement(craft, inputsAvailable, recipeCurrent, reservesAfterPlacement);
         return true;
     }
 

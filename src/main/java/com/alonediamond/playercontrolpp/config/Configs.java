@@ -334,6 +334,21 @@ public class Configs implements IConfigHandler {
                 "Try the asynchronous supply solver for raw-material crafting batches.")
                 .apply(KEY_BARITONE);
 
+        public static final ConfigBoolean SOLVE_WHOLE_LIST = new ConfigBoolean(
+                "solveWholeList", false, "Wait for a proven optimum for the whole current order.").apply(KEY_BARITONE);
+        public static final ConfigBoolean SOLVER_FEWEST_OPERATIONS = new ConfigBoolean(
+                "solverFewestOperations", false, "Minimize box visit and crafting costs first.").apply(KEY_BARITONE);
+        public static final ConfigStringList SOLVER_PREFER_KEEPING = new ConfigStringList(
+                "solverPreferKeeping", ImmutableList.of(), "Item IDs to conserve when comparing plans.").apply(KEY_BARITONE);
+        public static final ConfigInteger SOLVER_WINDOW_NODES = new ConfigInteger(
+                "solverWindowNodes", 60_000, 1, Integer.MAX_VALUE, "Search node budget for a quick window.").apply(KEY_BARITONE);
+        public static final ConfigInteger SOLVER_WINDOW_MILLIS = new ConfigInteger(
+                "solverWindowMillis", 150, 1, 600_000, "Search time per quick window, in milliseconds.").apply(KEY_BARITONE);
+        public static final ConfigInteger SOLVER_PLACEMENT_LIMIT = new ConfigInteger(
+                "solverPlacementLimit", 16, 1, 64, "Maximum operations in one fixed workstation placement.").apply(KEY_BARITONE);
+        public static final ConfigStringList SOLVER_STOCK_FLOORS = new ConfigStringList(
+                "solverStockFloors", ImmutableList.of(), "Whole-order minimum starting loose stock, one item ID and count per line.").apply(KEY_BARITONE);
+
         /** 磁盘键集合；GUI 按备货与追溯合成分开展示。新增项只追加，避免改动既有存储。 */
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 MATERIAL_LIST_SOURCE, CLICK_COOLDOWN, INTRA_CONTAINER_CLICK_DELAY, CONTAINER_CLOSE_DELAY,
@@ -344,7 +359,9 @@ public class Configs implements IConfigHandler {
                 CRAFT_STATION_SOURCE, CRAFTING_TABLE_POSITIONS, STONECUTTER_POSITIONS,
                 ENABLE_GLOBAL_IGNORE, GLOBAL_IGNORE_LIST,
                 GATHER_TARGET_HIGHLIGHT, GATHER_TARGET_COLOR, GATHER_TARGET_OPACITY,
-                MINING_SEARCH_RADIUS, MINING_ATTEMPT_TICKS, USE_SUPPLY_SOLVER);
+                MINING_SEARCH_RADIUS, MINING_ATTEMPT_TICKS, USE_SUPPLY_SOLVER, SOLVE_WHOLE_LIST,
+                SOLVER_FEWEST_OPERATIONS, SOLVER_PREFER_KEEPING, SOLVER_WINDOW_NODES, SOLVER_WINDOW_MILLIS, SOLVER_PLACEMENT_LIMIT,
+                SOLVER_STOCK_FLOORS);
     }
 
     public static class CacheNearbySettings {

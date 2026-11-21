@@ -71,11 +71,12 @@ public abstract class ChestTrackerIntegrationImpl {
                             () -> loadedMemoryBank() == bank && dimension.equals(ProviderUtils.getPlayersCurrentKey().orElse(null))
                                     && bank.getKey(dimension).orElse(null) == key);
                 }
+                return ChestTrackerIntegration.EMPTY_LOOSE_SCAN;
             }
         } catch (Throwable error) {
             Playercontrolpp.LOGGER.debug("Unable to start a loose stock scan", error);
         }
-        return ChestTrackerIntegration.EMPTY_LOOSE_SCAN;
+        return ChestTrackerIntegration.UNAVAILABLE_LOOSE_SCAN;
     }
 
     @Overwrite(remap = false)

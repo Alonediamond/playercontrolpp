@@ -67,7 +67,12 @@ public class ChestTrackerIntegration {
         public boolean valid() { return true; }
     };
 
-    public LooseStockScan scanLoose(BlockPos origin, int range, Set<Item> items) { return EMPTY_LOOSE_SCAN; }
+    public static final LooseStockScan UNAVAILABLE_LOOSE_SCAN = new LooseStockScan() {
+        @Override public List<Stock> tick() { return List.of(); }
+        @Override public boolean valid() { return false; }
+    };
+
+    public LooseStockScan scanLoose(BlockPos origin, int range, Set<Item> items) { return UNAVAILABLE_LOOSE_SCAN; }
 
     /** 把一个已同步的容器菜单直接写进箱子追踪当前加载的缓存库，不另建缓存库。 */
     public boolean cacheContainer(

@@ -243,7 +243,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
             setState(State.STOPPED);
             return;
         }
-        if (manualPreparationMode != ManualPreparationMode.DIRECT && rawPreparation == null) {
+        if (manualPreparationMode != ManualPreparationMode.DIRECT && rawPreparation == null && !wantsWholeOrder()) {
             ManualMaterialBatch definition = manualQueue.batches().get(batch.index());
             ManualRawMaterialPlan analyzed = ManualRawMaterialPlan.analyze(definition);
             if (manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT && analyzed.unsupportedRecipe()) {
@@ -297,9 +297,29 @@ public final class AutoMaterialGatherer implements ClientFeature {
             return;
         }
 
+        if (wantsWholeOrder()) {
+            if (ctx.client.player.isCreative() || ctx.client.player.isSpectator() || !checkRawMaterialPrerequisites()) {
+                setState(State.STOPPED, "playercontrolpp.message.baritone.raw_material_solver_whole_unsupported");
+                return;
+            }
+            rawMaterialTask.startWholeOrder(ctx, manualRun ? manualQueue.completedTargets() : Map.of());
+            return;
+        }
         if (manualRun && manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT
                 && !preparingRaw && tryStartRawMaterialTask()) return;
         setState(State.SEARCHING);
+    }
+
+    private boolean wantsWholeOrder() {
+        return Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()
+                && Configs.BaritoneSettings.SOLVE_WHOLE_LIST.getBooleanValue()
+                && (manualRun ? manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT
+                : Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue() != RawMaterialMode.DISABLED);
+    }
+
+    public void onWholeOrderFinished() {
+        currentItemIndex = 0;
+        setState(State.NEXT_ITEM);
     }
 
     /** 只有整批满足才推进；失败批次保留原目标，供玩家补充缓存后恢复。 */
@@ -759,7 +779,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
             onInventoryFull();
             return;
         }
-        if (ctx.targetItem() == null) {
+        if (ctx.targetItem() == null || wantsWholeOrder() && !rawMaterialTask.isActive()) {
             setState(State.NEXT_ITEM);
             return;
         }

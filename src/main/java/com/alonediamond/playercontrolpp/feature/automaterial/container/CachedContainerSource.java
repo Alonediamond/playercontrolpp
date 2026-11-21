@@ -29,9 +29,8 @@ public final class CachedContainerSource {
 
     public ChestTrackerIntegration.LooseStockScan scanLoose(Minecraft mc, BlockPos origin, Set<Item> items) {
         Scope scope = scope(0);
-        if (mc.level == null || scope.error() != null || items.isEmpty()) {
-            return ChestTrackerIntegration.EMPTY_LOOSE_SCAN;
-        }
+        if (mc.level == null || scope.error() != null) return ChestTrackerIntegration.UNAVAILABLE_LOOSE_SCAN;
+        if (items.isEmpty()) return ChestTrackerIntegration.EMPTY_LOOSE_SCAN;
         return tracker.scanLoose(origin, scope.range(), items);
     }
 

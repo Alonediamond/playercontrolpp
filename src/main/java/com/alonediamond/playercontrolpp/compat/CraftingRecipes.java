@@ -44,8 +44,6 @@ public final class CraftingRecipes {
     private static final int CRAFT_GRID_SLOTS = CRAFT_GRID_WIDTH * CRAFT_GRID_WIDTH;
     private static final int RECIPE_CACHE_LIFETIME_TICKS = 100;
     private static final int SOLVER_RECIPE_ENTRIES_PER_TICK = 128;
-    private static final int MAX_SOLVER_RECIPE_ENTRIES = 8192;
-    private static final int MAX_SOLVER_SLOT_CHOICES = 128;
     private static final long SOLVER_CAPTURE_BUDGET_NANOS = 1_000_000L;
     private CraftingRecipes() {}
 
@@ -153,7 +151,6 @@ public final class CraftingRecipes {
         private final Map<String, List<SolverRecipe>> byOutput = new HashMap<>();
         private int collectionIndex;
         private int entryIndex;
-        private int scannedEntries;
         private boolean complete;
 
         private SolverSnapshot(Minecraft mc) {
@@ -181,15 +178,10 @@ public final class CraftingRecipes {
             //#endif
             long started = System.nanoTime();
             for (int step = 0; step < SOLVER_RECIPE_ENTRIES_PER_TICK; step++) {
-                if (scannedEntries >= MAX_SOLVER_RECIPE_ENTRIES) {
-                    complete = true;
-                    return true;
-                }
                 if (collectionIndex >= collections.size()) {
                     //#if MC >= 12102
                     if (stonecuttingIndex < stonecutting.entries().size()) {
                         int index = stonecuttingIndex++;
-                        scannedEntries++;
                         add(captureStonecuttingEntry(index, stonecutting.entries().get(index), context));
                         if (System.nanoTime() - started >= SOLVER_CAPTURE_BUDGET_NANOS) break;
                         continue;
@@ -204,7 +196,6 @@ public final class CraftingRecipes {
                     entryIndex = 0;
                 } else {
                     int index = entryIndex++;
-                    scannedEntries++;
                     //#if MC >= 12102
                     add(captureEntry(collection.getRecipes().get(index), context));
                     //#else
@@ -279,7 +270,7 @@ public final class CraftingRecipes {
     }
 
     private static List<String> solverChoices(List<ItemStack> stacks) {
-        if (stacks.isEmpty() || stacks.size() > MAX_SOLVER_SLOT_CHOICES) return List.of();
+        if (stacks.isEmpty()) return List.of();
         List<String> choices = new ArrayList<>(stacks.size());
         for (ItemStack stack : stacks) {
             if (stack.getCount() != 1 || !ItemUtil.isPlainLoose(stack) || hasRemainder(stack.getItem())) return List.of();
@@ -376,7 +367,6 @@ public final class CraftingRecipes {
     private static List<String> verifiedChoices(SlotDisplay slot, Ingredient requirement, ContextMap context) {
         if (!ordinaryDisplay(slot)) return List.of();
         List<ItemStack> stacks = slot.resolve(context, SlotDisplay.ItemStackContentsFactory.INSTANCE)
-                .limit(MAX_SOLVER_SLOT_CHOICES + 1L)
                 .toList();
         if (stacks.stream().anyMatch(stack -> !requirement.test(stack))) return List.of();
         return solverChoices(stacks);
@@ -385,7 +375,7 @@ public final class CraftingRecipes {
     private static boolean ordinaryDisplay(SlotDisplay slot) {
         if (itemDisplay(slot)) return true;
         return slot instanceof SlotDisplay.Composite composite
-                && !composite.contents().isEmpty() && composite.contents().size() <= MAX_SOLVER_SLOT_CHOICES
+                && !composite.contents().isEmpty()
                 && composite.contents().stream().allMatch(CraftingRecipes::itemDisplay);
     }
 
@@ -394,7 +384,6 @@ public final class CraftingRecipes {
     }
     //#else
     //$$ static SolverEntry captureEntry(RecipeHolder<?> holder, HolderLookup.Provider registries) {
-    //$$     if (!"minecraft".equals(holder.id().getNamespace())) return null;
     //$$     String type;
     //$$     int width;
     //$$     if (holder.value() instanceof ShapedRecipe shaped && shaped.getClass() == ShapedRecipe.class) {
@@ -415,7 +404,9 @@ public final class CraftingRecipes {
     //$$             pattern.add(List.of());
     //$$             continue;
     //$$         }
-    //$$         List<String> choices = solverChoices(List.of(ingredient.getItems()));
+    //$$         List<ItemStack> display = List.of(ingredient.getItems());
+    //$$         if (display.stream().anyMatch(stack -> !ingredient.test(stack))) return null;
+    //$$         List<String> choices = solverChoices(display);
     //$$         if (choices.isEmpty()) return null;
     //$$         pattern.add(choices);
     //$$     }

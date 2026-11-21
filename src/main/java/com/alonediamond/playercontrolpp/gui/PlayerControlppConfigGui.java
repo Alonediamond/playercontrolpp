@@ -171,6 +171,13 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 return ConfigOptionWrapper.createFor(List.of(
                         Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE,
                         Configs.BaritoneSettings.USE_SUPPLY_SOLVER,
+                        Configs.BaritoneSettings.SOLVE_WHOLE_LIST,
+                        Configs.BaritoneSettings.SOLVER_FEWEST_OPERATIONS,
+                        Configs.BaritoneSettings.SOLVER_PREFER_KEEPING,
+                        Configs.BaritoneSettings.SOLVER_STOCK_FLOORS,
+                        Configs.BaritoneSettings.SOLVER_WINDOW_NODES,
+                        Configs.BaritoneSettings.SOLVER_WINDOW_MILLIS,
+                        Configs.BaritoneSettings.SOLVER_PLACEMENT_LIMIT,
                         Configs.BaritoneSettings.RAW_MATERIAL_MAX_DEPTH,
                         Configs.BaritoneSettings.MINING_STALL_SECONDS,
                         Configs.BaritoneSettings.MINING_SEARCH_RADIUS,

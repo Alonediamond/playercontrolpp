@@ -7,6 +7,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.Sup
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Result;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Source;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Take;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySchedule;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 
@@ -41,9 +42,6 @@ final class CraftBatchActions {
             return Math.max(0, Math.min(plain, owned - reserve));
         }
 
-        Balance add(int change) {
-            return new Balance(owned + change, plain + change, reserve);
-        }
     }
 
     private CraftBatchActions() {}
@@ -56,18 +54,22 @@ final class CraftBatchActions {
     }
 
     static List<Step> translate(Plan plan, List<Stock> stock, Map<String, Item> items) {
+        return translate(plan.actions(), stock, items);
+    }
+
+    static List<Step> translate(List<Action> actions, List<Stock> stock, Map<String, Item> items) {
         List<Step> steps = new ArrayList<>();
-        for (Action action : plan.actions()) {
+        for (Action action : actions) {
             if (action instanceof Take take) {
                 Stock source = stock.get(take.source());
                 if (source.container() == null) continue;
-                steps.add(new Fetch(source.container(), Map.of(items.get(take.item()), 1)));
+                steps.add(new Fetch(source.container(), Map.of(items.get(take.item()), take.count())));
             } else if (action instanceof Make make) {
                 Map<Item, Integer> inputs = new LinkedHashMap<>();
                 for (String id : make.grid()) {
                     if (!id.isEmpty()) inputs.merge(items.get(id), 1, Integer::sum);
                 }
-                steps.add(new Craft(make.recipe(), make.grid(), items.get(make.recipe().output()), Map.copyOf(inputs), 1));
+                steps.add(new Craft(make.recipe(), make.grid(), items.get(make.recipe().output()), Map.copyOf(inputs), make.operations()));
             }
         }
         return List.copyOf(steps);
@@ -104,6 +106,19 @@ final class CraftBatchActions {
         return inventory.fits(grouped) ? List.copyOf(grouped) : groupAdjacent(ordered);
     }
 
+    /** 先试一组交付物。空间紧张时缩小本段，成功后才推进各生产批次的用量。 */
+    static List<Step> nextSegment(SupplySchedule schedule, List<Stock> stock, Map<String, Item> items,
+                                  CraftInventory inventory) {
+        for (int units = 64; units >= 1; units /= 2) {
+            SupplySchedule.Slice slice = schedule.preview(units);
+            List<Step> part = group(translate(slice.actions(), stock, items), inventory);
+            if (!inventory.fits(part)) continue;
+            slice.commit();
+            return part;
+        }
+        return null;
+    }
+
     private static List<Step> groupAdjacent(List<Step> ordered) {
         List<Step> steps = new ArrayList<>();
         for (Step step : ordered) {
@@ -124,22 +139,26 @@ final class CraftBatchActions {
     }
 
     static boolean canExecute(List<Step> steps, Function<Item, Balance> current, Map<Item, Integer> targets) {
-        Map<Item, Balance> ledger = new HashMap<>();
-        Function<Item, Balance> remaining = item -> ledger.computeIfAbsent(item, current);
+        Map<Item, Long> changes = new HashMap<>();
         for (Step step : steps) {
             if (step instanceof Fetch fetch) {
-                fetch.items().forEach((item, count) -> ledger.put(item, remaining.apply(item).add(count)));
+                fetch.items().forEach((item, count) -> changes.merge(item, (long) count, Math::addExact));
             } else if (step instanceof Craft craft) {
-                for (int operation = 0; operation < craft.operations(); operation++) {
-                    for (Map.Entry<Item, Integer> input : craft.inputs().entrySet()) {
-                        Balance balance = remaining.apply(input.getKey());
-                        if (balance.usable() < input.getValue()) return false;
-                        ledger.put(input.getKey(), balance.add(-input.getValue()));
-                    }
-                    ledger.put(craft.item(), remaining.apply(craft.item()).add(craft.recipe().yield()));
+                for (Map.Entry<Item, Integer> input : craft.inputs().entrySet()) {
+                    Item item = input.getKey();
+                    Balance initial = current.apply(item);
+                    long available = Math.min(initial.plain(), initial.owned() - initial.reserve()) + changes.getOrDefault(item, 0L);
+                    int perCraft = input.getValue();
+                    int returned = item == craft.item() ? craft.recipe().yield() : 0;
+                    // 若输入与产物同种，第一份制作仍需要种子。净消耗为正时最后一次的余额最低。
+                    long required = perCraft + (long) Math.max(0, perCraft - returned) * (craft.operations() - 1);
+                    if (available < required) return false;
+                    changes.merge(item, -(long) perCraft * craft.operations(), Math::addExact);
                 }
+                changes.merge(craft.item(), (long) craft.recipe().yield() * craft.operations(), Math::addExact);
             }
         }
-        return targets.entrySet().stream().allMatch(target -> remaining.apply(target.getKey()).owned() >= target.getValue());
+        return targets.entrySet().stream().allMatch(target ->
+                current.apply(target.getKey()).owned() + changes.getOrDefault(target.getKey(), 0L) >= target.getValue());
     }
 }

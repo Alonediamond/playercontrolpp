@@ -8,6 +8,8 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatch
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Stock;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySolver;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.WholeOrderSolver;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySchedule;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialRequirements;
 import net.minecraft.core.BlockPos;
@@ -21,6 +23,7 @@ import net.minecraft.world.item.Items;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -34,6 +37,8 @@ public final class CraftBatchActionsRegression {
         regression.fixedVariantsAndReserves();
         regression.stonecuttingFeedsPistons();
         regression.relatedTargetsShareAWindow();
+        regression.wholeOrderReservesAndLimits();
+        regression.wholeOrderFitsFourSlots();
         regression.conversionKeepsItsSeedOrder();
         regression.tightInventoryKeepsFetchOrder();
         regression.fitsResultsAndReturnedInputs();
@@ -219,6 +224,86 @@ public final class CraftBatchActionsRegression {
     private static SolverRecipe snapshot(SupplyModel.Recipe recipe) {
         return new SolverRecipe(recipe.id(), recipe.type(), recipe.output(), recipe.yield(),
                 recipe.slots().stream().map(SupplyModel.Slot::choices).toList());
+    }
+
+    private void wholeOrderReservesAndLimits() {
+        List<MaterialItemEntry> list = List.of(new MaterialItemEntry(Items.OAK_DOOR, 18), new MaterialItemEntry(Items.CHEST, 2),
+                new MaterialItemEntry(Items.BIRCH_BUTTON, 1), new MaterialItemEntry(Items.REDSTONE, 64));
+        check(WholeOrderStock.targets(list).equals(Map.of(Items.OAK_DOOR, 18, Items.CHEST, 2, Items.BIRCH_BUTTON, 1,
+                Items.REDSTONE, 64)), "运行时整表入口保留大小目标、成品和无共同配方的条目");
+        WholeOrderStock owed = WholeOrderStock.allocate(new Balance(9, 5, 0), 16, 4);
+        check(owed.missing() == 7 && owed.balance().reserve() == 9 && owed.balance().usable() == 0,
+                "盒内和散装共同抵已有交付，不能再用于合成");
+        WholeOrderStock extra = WholeOrderStock.allocate(new Balance(14, 10, 0), 8, 9);
+        check(extra.missing() == 0 && extra.balance().usable() == 5, "已完成前批的硬预留与当前目标取较高者");
+        check(WholeOrderStock.additionalFloor(extra.balance(), 12, 20) == 7
+                        && WholeOrderStock.additionalFloor(extra.balance(), 500, 20) == 20,
+                "期初下限扣除已锁定散装，不足下限则只保护实际存在的库存");
+        check(WholeOrderStock.parseFloors(List.of("minecraft:oak_planks 15", "oak_planks 32", " ")).equals(
+                Map.of("minecraft:oak_planks", 32)), "物品 ID 规范化且重复下限取较大值");
+        boolean invalid = false;
+        try {
+            WholeOrderStock.parseFloors(List.of("minecraft:oak_planks -2"));
+        } catch (IllegalArgumentException expected) {
+            invalid = true;
+        }
+        check(invalid, "非法硬下限不能被忽略后继续取货");
+        ItemStack[] slots = new ItemStack[Inventory.INVENTORY_SIZE];
+        Arrays.fill(slots, ItemStack.EMPTY);
+        slots[0] = new ItemStack(Items.BIRCH_LOG, 64);
+        check(new CraftInventory(index -> slots[index], 32).largestPlacement(boards(64)) == 32
+                        && new CraftInventory(index -> slots[index], 1).largestPlacement(boards(64)) == 1,
+                "玩家的摆料上限同时约束空间预演和实际摆料次数");
+    }
+
+    private void wholeOrderFitsFourSlots() {
+        List<String> chestGrid = List.of("board", "board", "board", "board", "", "board", "board", "board", "board");
+        SupplyModel.Recipe boards = recipe("saw", "board", 4, grid("log", ""));
+        SupplyModel.Recipe chest = recipe("chest", "chest", 1, chestGrid);
+        SupplyModel.Source logs = new SupplyModel.Source("storage", "log", 128, 3);
+        SupplyModel.Request order = new SupplyModel.Request(new SupplyModel.Catalog(List.of(boards, chest)), List.of(logs),
+                List.of(new SupplyModel.Goal("chest", 64, null)), Map.of(), Set.of(), Set.of(), 3,
+                SupplyModel.Policy.SAVE_STOCK, SupplyModel.Mode.PREPARE);
+        SupplyModel.Plan plan = WholeOrderSolver.solve(order).plan();
+        List<Stock> sources = List.of(new Stock(logs, new BlockPos(3, 64, 12)));
+        Map<String, Item> items = Map.of("board", Items.OAK_PLANKS, "log", Items.OAK_LOG, "chest", Items.CHEST);
+        Map<Item, Integer> held = new LinkedHashMap<>();
+        check(!fourSlots(held).fits(CraftBatchActions.translate(plan, sources, items)), "四格同时放不下 512 块中间木板");
+        SupplySchedule schedule = new SupplySchedule(plan);
+        int visits = 0;
+        int withdrawn = 0;
+        while (!schedule.isEmpty()) {
+            List<Step> part = CraftBatchActions.nextSegment(schedule, sources, items, fourSlots(held));
+            check(part != null && fourSlots(held).fits(part), "实际背包可容纳当前子批的产物和退料");
+            for (Step step : part) {
+                if (step instanceof Fetch fetch) {
+                    visits++;
+                    withdrawn += fetch.items().get(Items.OAK_LOG);
+                    fetch.items().forEach((item, count) -> held.merge(item, count, Math::addExact));
+                } else if (step instanceof Craft craft) {
+                    craft.inputs().forEach((item, count) -> {
+                        if (held.merge(item, -count * craft.operations(), Integer::sum) < 0) throw new AssertionError("先用后取");
+                    });
+                    held.merge(craft.item(), craft.operations() * craft.recipe().yield(), Math::addExact);
+                }
+            }
+            held.values().removeIf(count -> count == 0);
+        }
+        check(held.equals(Map.of(Items.CHEST, 64)) && withdrawn == 128 && visits > 1 && visits < 10,
+                "同一份最优解分段执行完 64 个箱子，始终只取 128 根原木，每趟可制作多个");
+    }
+
+    private static CraftInventory fourSlots(Map<Item, Integer> held) {
+        ItemStack[] slots = fullInventory();
+        Arrays.fill(slots, 0, 4, ItemStack.EMPTY);
+        int index = 0;
+        for (Map.Entry<Item, Integer> entry : held.entrySet()) {
+            for (int remaining = entry.getValue(); remaining > 0; remaining -= 64) {
+                if (index == 4) throw new AssertionError("分段超出四格");
+                slots[index++] = new ItemStack(entry.getKey(), Math.min(remaining, 64));
+            }
+        }
+        return new CraftInventory(slot -> slots[slot]);
     }
 
     private void tightInventoryKeepsFetchOrder() {

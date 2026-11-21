@@ -89,13 +89,20 @@ public final class SupplyModel {
 
     public sealed interface Action permits Take, Make {}
 
-    /** 使用来源中的一个单位，source 为 Request.stock 的索引。 */
-    public record Take(int source, String item) implements Action {}
+    /** source 是本次快照中的货源索引。数量随方案传递，执行器可以按背包容量分段。 */
+    public record Take(int source, String item, int count) implements Action {
+        public Take(int source, String item) { this(source, item, 1); }
+        public Take {
+            if (count <= 0) throw new IllegalArgumentException("无效取料数量");
+        }
+    }
 
-    /** 以固定的九格布局制作一次，空格用空字符串表示。 */
-    public record Make(Recipe recipe, List<String> grid, boolean followsHint) implements Action {
+    /** 固定九格布局及制作次数。空格用空字符串表示。 */
+    public record Make(Recipe recipe, List<String> grid, boolean followsHint, int operations) implements Action {
+        public Make(Recipe recipe, List<String> grid, boolean followsHint) { this(recipe, grid, followsHint, 1); }
         public Make {
             grid = List.copyOf(grid);
+            if (operations <= 0) throw new IllegalArgumentException("无效制作次数");
         }
     }
 
@@ -125,7 +132,7 @@ public final class SupplyModel {
         public Map<String, Long> shoppingList() {
             Map<String, Long> list = new LinkedHashMap<>();
             for (Action action : actions) {
-                if (action instanceof Take take) list.merge(take.item, 1L, Long::sum);
+                if (action instanceof Take take) list.merge(take.item, (long) take.count, Math::addExact);
             }
             return Collections.unmodifiableMap(list);
         }

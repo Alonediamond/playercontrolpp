@@ -15,12 +15,17 @@ import java.util.function.IntFunction;
 
 /** 只模拟背包 36 格。盒子和带组件的堆栈占用空间，不能与普通合成材料合并。 */
 final class CraftInventory {
-    private static final int MAX_OPERATIONS_PER_PLACEMENT = 16;
     private static final int OCCUPIED = -1;
+    private final int placementLimit;
     private final Item[] items;
     private final int[] counts;
 
     CraftInventory(IntFunction<ItemStack> slotAt) {
+        this(slotAt, 16);
+    }
+
+    CraftInventory(IntFunction<ItemStack> slotAt, int placementLimit) {
+        this.placementLimit = placementLimit;
         this.items = new Item[Inventory.INVENTORY_SIZE];
         this.counts = new int[Inventory.INVENTORY_SIZE];
         for (int slot = 0; slot < counts.length; slot++) {
@@ -35,6 +40,7 @@ final class CraftInventory {
     }
 
     private CraftInventory(CraftInventory original) {
+        this.placementLimit = original.placementLimit;
         this.items = original.items.clone();
         this.counts = original.counts.clone();
     }
@@ -63,12 +69,13 @@ final class CraftInventory {
         int empty = emptySlots();
         for (Map.Entry<Item, Integer> entry : amounts.entrySet()) {
             empty -= newSlotsNeeded(entry.getKey(), entry.getValue());
+            if (empty < 0) return false;
         }
-        return empty >= 0;
+        return true;
     }
 
     int largestPlacement(Craft craft) {
-        int limit = Math.min(craft.operations(), MAX_OPERATIONS_PER_PLACEMENT);
+        int limit = Math.min(craft.operations(), placementLimit);
         for (Item input : craft.inputs().keySet()) {
             limit = Math.min(limit, input.getDefaultMaxStackSize());
         }
