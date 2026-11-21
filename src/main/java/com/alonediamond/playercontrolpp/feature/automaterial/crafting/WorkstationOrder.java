@@ -9,7 +9,7 @@ import java.util.function.IntSupplier;
 
 /** 主线程的工作站指令。两种求解器传入已绑定格位和次数，逐层追溯传入本帧的配方、绝对目标及试投额度。 */
 record WorkstationOrder(Item output, int target, String recipeType, Item stoneInput, int inputBudget,
-                        Plan layout, IntSupplier outputCount, ExactPlacement exact) {
+                        Plan layout, IntSupplier outputCount, ExactPlacement exact, RemainderStock remainderStock) {
     record ExactPlacement(Craft craft, BooleanSupplier inputsAvailable, BooleanSupplier recipeCurrent,
                           BooleanSupplier reservesKept) {}
 
@@ -20,6 +20,6 @@ record WorkstationOrder(Item output, int target, String recipeType, Item stoneIn
         boolean cutting = layout.isExactStonecutting();
         Item input = cutting ? layout.ingredientsAt(0).getFirst().getItem() : null;
         return new WorkstationOrder(craft.item(), target, cutting ? "stonecutting" : null, input, craft.operations(),
-                layout, held, placement);
+                layout, held, placement, null);
     }
 }

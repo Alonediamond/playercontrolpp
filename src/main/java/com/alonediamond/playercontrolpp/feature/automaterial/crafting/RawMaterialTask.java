@@ -183,6 +183,9 @@ public final class RawMaterialTask {
 
         int need = Math.max(1, gap);
         RawNode root = preparedTree != null ? preparedTree : this.litematlist.getRawMaterialTree(item, need, resolveDepth());
+        if (root == null && ctx.remainderStock != null && canMineHere() && MiningSources.isNaturallyObtainable(item)) {
+            root = new RawNode(name(item), need, "base", List.of());
+        }
         if (root == null) {
             // 建不出树（LitematList 里没有这个物品的配方）时说一声，别让玩家只看到"跳过了"。
             MessageUtil.sendActionBar(ctx.client,
@@ -217,6 +220,7 @@ public final class RawMaterialTask {
         // 更不会因为背包放不下而卡死在"取不出来"上。
         plan.pushBatches(item, root, need, total, null);
         optimizeBatches = Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()
+                && ctx.remainderStock == null
                 && !Configs.BaritoneSettings.SOLVE_WHOLE_LIST.getBooleanValue()
                 && !ctx.client.player.isCreative() && !ctx.client.player.isSpectator()
                 && CraftingRecipes.isSupportedType(root.recipeType());
@@ -451,7 +455,9 @@ public final class RawMaterialTask {
     }
 
     private static int reservedFor(GatherContext ctx, Frame frame, Item item) {
-        return RawMaterialPlan.reservedFor(frame, item, ctx.targetFor(item));
+        int reserve = ctx.targetFor(item);
+        if (ctx.remainderStock != null) reserve = Math.max(reserve, ctx.remainderStock.carriedFloor(item));
+        return RawMaterialPlan.reservedFor(frame, item, reserve);
     }
 
     private void dispatchGather(GatherContext ctx, AutoMaterialGatherer tsm, Item item,
@@ -498,6 +504,7 @@ public final class RawMaterialTask {
         switch (optimized.advance(ctx)) {
             case PENDING -> { }
             case READY -> {
+                if (optimized.partialDelivery()) MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + "partial_ready");
                 if (optimized.feasibleAtLimit() && !feasibleLimitShown) {
                     feasibleLimitShown = true;
                     MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + "feasible_limit", name(rootItem));
@@ -549,6 +556,10 @@ public final class RawMaterialTask {
     private boolean windowComplete(GatherContext ctx, AutoMaterialGatherer tsm) {
         if (!optimized.isComplete(ctx)) return false;
         if (wholeOrderReserves != null) {
+            if (optimized.partialDelivery()) {
+                continueWithRemainder(ctx, tsm, "remainder", true);
+                return true;
+            }
             reset();
             tsm.onWholeOrderFinished();
             return true;
@@ -652,7 +663,7 @@ public final class RawMaterialTask {
 
     private void fallbackOptimized(GatherContext ctx, AutoMaterialGatherer tsm, String reason) {
         if (wholeOrderReserves != null) {
-            tsm.setState(State.STOPPED, SOLVER_MESSAGE + "whole_" + reason);
+            continueWithRemainder(ctx, tsm, reason, "no_plan".equals(reason));
             return;
         }
         if (optimized.targetItems().size() > 1 && Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()) {
@@ -666,6 +677,23 @@ public final class RawMaterialTask {
         optimizeBatches = false;
         stage = Stage.GATHER;
         MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + reason, name(rootItem));
+    }
+
+    private void continueWithRemainder(GatherContext ctx, AutoMaterialGatherer tsm, String reason, boolean trustStock) {
+        if (ctx.client.player.containerMenu != ctx.client.player.inventoryMenu
+                || !ctx.client.player.inventoryMenu.getCarried().isEmpty()) {
+            tsm.setState(State.STOPPED, "playercontrolpp.message.baritone.transfer_interrupted");
+            return;
+        }
+        try {
+            RemainderStock protection = optimized.remainderStock(ctx, trustStock);
+            ctx.transferCooldown = Math.max(ctx.transferCooldown, boundCloseWaitTicks);
+            restoreRootTarget(ctx);
+            reset();
+            tsm.continueWithRemainder(protection, reason);
+        } catch (IllegalArgumentException invalid) {
+            tsm.setState(State.STOPPED, SOLVER_MESSAGE + "whole_floors");
+        }
     }
 
     private void restoreRootTarget(GatherContext ctx) {
@@ -704,7 +732,7 @@ public final class RawMaterialTask {
                 .mapToInt(Map.Entry::getValue)
                 .sum();
         WorkstationOrder order = new WorkstationOrder(frame.item, target, frame.node.recipeType(), input, inputBudget,
-                frame.allocation == null ? null : frame.allocation.recipe(), () -> ctx.countHeld(frame.item), null);
+                frame.allocation == null ? null : frame.allocation.recipe(), () -> ctx.countHeld(frame.item), null, ctx.remainderStock);
         if (crafting.start(ctx.client, order)) {
             this.stage = Stage.CRAFT;
             MessageUtil.sendActionBar(ctx.client,
@@ -765,6 +793,10 @@ public final class RawMaterialTask {
             int need = child.getValue();
             if (need <= 0) continue;
             int loose = ItemUtil.countLoose(ctx.client.player, item);
+            if (ctx.remainderStock != null) {
+                int locked = Math.min(ctx.remainderStock.carriedFloor(item), ItemUtil.countPlainLoose(ctx.client.player, item));
+                need = RecipeAllocation.target(need, locked);
+            }
             if (loose < need && ctx.countHeld(item) >= need) {
                 return new BoxedIngredient(item, need);
             }

@@ -142,4 +142,9 @@ public final class SupplyModel {
             blockedExamples = blockedExamples.stream().map(List::copyOf).toList();
         }
     }
+
+    /** units 是本方案实际承诺的新交付量。部分交付的最优证明只针对这些数量。 */
+    public record Delivery(Result result, Map<String, Long> units, boolean partial) {
+        public Delivery { units = Map.copyOf(units); }
+    }
 }

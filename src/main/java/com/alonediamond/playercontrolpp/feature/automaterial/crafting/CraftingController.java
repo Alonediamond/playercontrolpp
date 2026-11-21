@@ -124,6 +124,7 @@ final class CraftingController {
     private boolean openSent;
     private int replaceAttempts;
     private ExactPlacement exact;
+    private RemainderStock remainderStock;
     private AbstractContainerMenu exactMenu;
     private int exactStonecutterOption;
     private boolean exactTakeSent;
@@ -145,7 +146,8 @@ final class CraftingController {
     boolean start(Minecraft mc, WorkstationOrder order) {
         if (mc.player == null || mc.level == null || order.output() == null) return false;
         ExactPlacement placement = order.exact();
-        if (placement != null && (order.layout().exactOutput() != order.output()
+        if (placement != null && (order.layout() == null || !order.layout().matchesFixedGrid(placement.craft().grid())
+                || order.layout().exactOutput() != order.output()
                 || order.layout().outputCount() != placement.craft().recipe().yield())) return false;
 
         this.item = order.output();
@@ -156,6 +158,7 @@ final class CraftingController {
         this.outputCount = order.outputCount();
         this.lastOutputCount = outputCount.getAsInt();
         this.exact = placement;
+        this.remainderStock = order.remainderStock();
         this.exactMenu = null;
         this.exactStonecutterOption = -1;
         this.exactTakeSent = false;
@@ -181,7 +184,7 @@ final class CraftingController {
         this.openSent = false;
         this.replaceAttempts = 0;
         // 已固定变种及批次数量时由手动摆料精确执行；原版摆料包会擅自取用清单预留量。
-        this.packetUsable = plannedRecipe == null;
+        this.packetUsable = plannedRecipe == null && (remainderStock == null || !remainderStock.hasFloors());
         resetPlacement();
 
         if (this.stage == Stage.TRAVEL) {
@@ -644,7 +647,14 @@ final class CraftingController {
     }
 
     private void supplyStonecutterInput(Minecraft mc, AbstractContainerMenu menu, int requested) {
-        int inventorySlot = findInInventory(mc, this.stonecutterInput);
+        int inventorySlot = -1;
+        for (int i = 0; i < Inventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
+            if (ItemUtil.is(stack, this.stonecutterInput) && spendableInStack(mc, stack) > 0) {
+                inventorySlot = i;
+                break;
+            }
+        }
         int sourceSlot = inventorySlot < 0
                 ? -1
                 : PlayerUtil.menuSlotOf(menu, mc.player.getInventory(), inventorySlot);
@@ -655,7 +665,7 @@ final class CraftingController {
         Slot input = menu.getSlot(STONECUTTER_INPUT_SLOT);
         ItemStack source = menu.getSlot(sourceSlot).getItem();
         int space = input.getMaxStackSize(source) - input.getItem().getCount();
-        int amount = Math.min(Math.min(requested, this.stonecutterInputBudget), Math.min(space, source.getCount()));
+        int amount = Math.min(Math.min(requested, this.stonecutterInputBudget), Math.min(space, spendableInStack(mc, source)));
         if (amount <= 0) {
             this.stage = Stage.TAKE;
             return;
@@ -951,7 +961,7 @@ final class CraftingController {
             if (candidates.isEmpty()) continue;   // 图案空位
             Item chosen = null;
             for (ItemStack candidate : candidates) {
-                if (ItemUtil.countLoose(mc.player, candidate.getItem()) > 0) {
+                if (spendableLoose(mc, candidate.getItem()) > 0) {
                     chosen = candidate.getItem();
                     break;
                 }
@@ -964,7 +974,7 @@ final class CraftingController {
         int crafts = MAX_CRAFTS_PER_PLACEMENT;
         for (Map.Entry<Item, Integer> entry : perCraft.entrySet()) {
             crafts = Math.min(crafts, entry.getKey().getDefaultMaxStackSize());
-            crafts = Math.min(crafts, ItemUtil.countLoose(mc.player, entry.getKey()) / entry.getValue());
+            crafts = Math.min(crafts, spendableLoose(mc, entry.getKey()) / entry.getValue());
         }
         int remaining = this.targetCount - outputCount.getAsInt();
         return Math.max(0, Math.min(crafts, RecipeAllocation.craftsFor(remaining, recipe.outputCount())));
@@ -980,7 +990,8 @@ final class CraftingController {
             if (this.exact != null && !ItemUtil.isPlainLoose(stack)) continue;
             int menuSlot = PlayerUtil.menuSlotOf(menu, mc.player.getInventory(), i);
             if (menuSlot < 0) continue;
-            int take = Math.min(remaining, stack.getCount());
+            int take = Math.min(remaining, spendableInStack(mc, stack));
+            if (take == 0) continue;
             transfer(mc, menu, menuSlot, gridSlot, take);
             remaining -= take;
         }
@@ -993,6 +1004,18 @@ final class CraftingController {
             if (ItemUtil.is(stack, candidate.getItem())) return true;
         }
         return false;
+    }
+
+    private int spendableLoose(Minecraft mc, Item item) {
+        int loose = ItemUtil.countLoose(mc.player, item);
+        int floor = remainderStock == null ? 0 : remainderStock.carriedFloor(item);
+        return floor == 0 ? loose : loose - Math.min(floor, ItemUtil.countPlainLoose(mc.player, item));
+    }
+
+    private int spendableInStack(Minecraft mc, ItemStack stack) {
+        int floor = remainderStock == null ? 0 : remainderStock.carriedFloor(stack.getItem());
+        if (floor == 0 || !ItemUtil.isPlainLoose(stack)) return stack.getCount();
+        return Math.min(stack.getCount(), Math.max(0, ItemUtil.countPlainLoose(mc.player, stack.getItem()) - floor));
     }
 
     /**

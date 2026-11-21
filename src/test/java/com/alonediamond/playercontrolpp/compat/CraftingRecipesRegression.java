@@ -5,6 +5,7 @@ import com.alonediamond.playercontrolpp.compat.CraftingRecipes.SolverEntry;
 import com.alonediamond.playercontrolpp.compat.CraftingRecipes.SolverRecipe;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplySolver;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.WholeOrderSolver;
 import com.google.gson.JsonParser;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.core.RegistryAccess;
@@ -154,7 +155,23 @@ public final class CraftingRecipesRegression {
         Plan bound = CraftingRecipes.bindExact(piston, craft.grid());
         require(bound != null && bound.ingredientsAt(0).getFirst().is(Items.BIRCH_PLANKS),
                 "活塞计划的白桦木板可以绑定到实际九格配方");
-        return checks;
+        SupplyModel.Delivery whole = WholeOrderSolver.planForGathering(request, true);
+        require(!whole.partial() && whole.result().plan().shoppingList().get("minecraft:birch_log") == 3
+                && !whole.result().plan().shoppingList().containsKey("minecraft:oak_planks"), "整单取三根白桦，500 块橡木板保留");
+        List<SupplyModel.Make> pistons = whole.result().plan().actions().stream().filter(SupplyModel.Make.class::isInstance)
+                .map(SupplyModel.Make.class::cast).filter(action -> action.recipe().output().equals(piston.output())).toList();
+        require(pistons.stream().mapToInt(SupplyModel.Make::operations).sum() == 4, "四次活塞制作均进入固定工作站指令");
+        for (SupplyModel.Make make : pistons) {
+            Plan fixed = CraftingRecipes.bindExact(piston, make.grid());
+            require(fixed != null && fixed.matchesFixedGrid(make.grid()) && List.of(0, 1, 2).stream().allMatch(i ->
+                    fixed.ingredientsAt(i).size() == 1 && fixed.ingredientsAt(i).getFirst().is(Items.BIRCH_PLANKS)),
+                    "实际工作台的三个木板格均只接受白桦");
+            List<String> swapped = new ArrayList<>(make.grid());
+            swapped.set(1, "minecraft:oak_planks");
+            require(!fixed.matchesFixedGrid(swapped), "即使橡木属于合法标签，中途改一个格也拒绝绑定");
+            checks += 2;
+        }
+        return checks + 2;
     }
 
     //#if MC >= 12102

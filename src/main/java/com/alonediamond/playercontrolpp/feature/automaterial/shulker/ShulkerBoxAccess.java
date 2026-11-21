@@ -430,6 +430,10 @@ public final class ShulkerBoxAccess {
     }
 
     private boolean storable(GatherContext ctx, ItemStack stack) {
+        if (ctx.remainderStock != null && ItemUtil.isPlainLoose(stack)) {
+            int floor = ctx.remainderStock.carriedFloor(stack.getItem());
+            if (floor > 0 && ItemUtil.countPlainLoose(ctx.client.player, stack.getItem()) - stack.getCount() < floor) return false;
+        }
         return !stack.isEmpty() && stack.getItem().canFitInsideContainerItems()
                 && !ItemUtil.isShulkerBox(stack)
                 && (ctx.isWantedNow(stack.getItem()) || ctx.extraStorableItems.contains(stack.getItem()));

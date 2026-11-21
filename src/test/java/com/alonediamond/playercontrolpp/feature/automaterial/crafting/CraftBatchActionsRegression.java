@@ -1,6 +1,7 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import com.alonediamond.playercontrolpp.compat.CraftingRecipes.SolverRecipe;
+import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Balance;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Craft;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Fetch;
@@ -38,6 +39,7 @@ public final class CraftBatchActionsRegression {
         regression.stonecuttingFeedsPistons();
         regression.relatedTargetsShareAWindow();
         regression.wholeOrderReservesAndLimits();
+        regression.remainderFloors();
         regression.wholeOrderFitsFourSlots();
         regression.conversionKeepsItsSeedOrder();
         regression.tightInventoryKeepsFetchOrder();
@@ -224,6 +226,38 @@ public final class CraftBatchActionsRegression {
     private static SolverRecipe snapshot(SupplyModel.Recipe recipe) {
         return new SolverRecipe(recipe.id(), recipe.type(), recipe.output(), recipe.yield(),
                 recipe.slots().stream().map(SupplyModel.Slot::choices).toList());
+    }
+
+    private void remainderFloors() {
+        Item oak = Items.OAK_PLANKS;
+        Item piston = Items.PISTON;
+        RemainderStock stock = new RemainderStock(Map.of(oak, 500), item -> 20, item -> 510L);
+        GatherContext run = new GatherContext();
+        run.remainderStock = stock;
+        run.setTarget(oak, 7);
+        run.setTarget(piston, 4);
+        check(run.remainderStock == stock, "更换目标保留本批回退与保护状态，不重新进入整单求解");
+        run.reset();
+        check(run.remainderStock == null, "新批次和重新启动可以再次尝试整单");
+        check(stock.carriedFloor(oak) == 20 && stock.canWithdraw(oak, 140) == 30,
+                "回退可动用分散在箱里的 30 块富余，同时锁住随身 20 块和仓库 480 块");
+        stock.spend(oak, 25);
+        check(stock.canWithdraw(oak, 140) == 5, "不同箱共享同一剩余额度");
+        stock.spend(oak, 5);
+        check(stock.canWithdraw(oak, 480) == 0 && stock.canWithdraw(oak, 488) == 8,
+                "额度用完时，仅当前箱就可证实的额外富余可取");
+        check(stock.canWithdraw(piston, 1) == Integer.MAX_VALUE && stock.carriedFloor(piston) == 0,
+                "无关材料可继续正常备货");
+        RemainderStock unknown = new RemainderStock(Map.of(oak, 500), item -> 2, item -> 0L);
+        check(unknown.canWithdraw(oak, 498) == 0 && unknown.canWithdraw(oak, 500) == 2,
+                "仓库快照失效后用现场核实的富余，不能凭旧缓存穿透下限");
+        check(WholeOrderStock.partialTargets(Map.of("piston", 4L), Map.of("piston", piston, "oak", oak),
+                Map.of(piston, new Balance(7, 5, 7), oak, new Balance(500, 500, 500))).equals(Map.of(piston, 11)),
+                "部分交付确认绝对量，原有七个再做四个，未承诺的缺项留给后续阶段");
+        check(WholeOrderStock.finishedCover(List.of(new SupplyModel.Goal("chest", 64, null)), Map.of("chest", 70L),
+                Map.of("chest", 6)), "扣除保留量后恰能由成品覆盖，跳过配方采集");
+        check(!WholeOrderStock.finishedCover(List.of(new SupplyModel.Goal("chest", 65, null)), Map.of("chest", 70L),
+                Map.of("chest", 6)), "保留下限导致现货差一件，必须继续统一比较制作和现货");
     }
 
     private void wholeOrderReservesAndLimits() {

@@ -336,16 +336,19 @@ public class Configs implements IConfigHandler {
 
         public static final ConfigBoolean SOLVE_WHOLE_LIST = new ConfigBoolean(
                 "solveWholeList", false, "Wait for a proven optimum for the whole current order.").apply(KEY_BARITONE);
+        public static final ConfigBoolean SOLVER_PREFER_FINISHED = new ConfigBoolean(
+                "solverPreferFinished", true, "Use finished stock when it can cover the entire order without crafting.").apply(KEY_BARITONE);
         public static final ConfigBoolean SOLVER_FEWEST_OPERATIONS = new ConfigBoolean(
                 "solverFewestOperations", false, "Minimize box visit and crafting costs first.").apply(KEY_BARITONE);
         public static final ConfigStringList SOLVER_PREFER_KEEPING = new ConfigStringList(
                 "solverPreferKeeping", ImmutableList.of(), "Item IDs to conserve when comparing plans.").apply(KEY_BARITONE);
         public static final ConfigInteger SOLVER_WINDOW_NODES = new ConfigInteger(
-                "solverWindowNodes", 60_000, 1, Integer.MAX_VALUE, "Search node budget for a quick window.").apply(KEY_BARITONE);
+                "solverWindowNodes", 120_000, 1_000, 2_000_000, "Search node budget for a quick window.").apply(KEY_BARITONE);
         public static final ConfigInteger SOLVER_WINDOW_MILLIS = new ConfigInteger(
-                "solverWindowMillis", 150, 1, 600_000, "Search time per quick window, in milliseconds.").apply(KEY_BARITONE);
+                "solverWindowMillis", 500, 25, 10_000, "Search time per quick window, in milliseconds.").apply(KEY_BARITONE);
+        public static final int DEFAULT_SOLVER_PLACEMENT = 32;
         public static final ConfigInteger SOLVER_PLACEMENT_LIMIT = new ConfigInteger(
-                "solverPlacementLimit", 16, 1, 64, "Maximum operations in one fixed workstation placement.").apply(KEY_BARITONE);
+                "solverPlacementLimit", DEFAULT_SOLVER_PLACEMENT, 1, 64, "Maximum operations in one fixed workstation placement.").apply(KEY_BARITONE);
         public static final ConfigStringList SOLVER_STOCK_FLOORS = new ConfigStringList(
                 "solverStockFloors", ImmutableList.of(), "Whole-order minimum starting loose stock, one item ID and count per line.").apply(KEY_BARITONE);
 
@@ -361,7 +364,7 @@ public class Configs implements IConfigHandler {
                 GATHER_TARGET_HIGHLIGHT, GATHER_TARGET_COLOR, GATHER_TARGET_OPACITY,
                 MINING_SEARCH_RADIUS, MINING_ATTEMPT_TICKS, USE_SUPPLY_SOLVER, SOLVE_WHOLE_LIST,
                 SOLVER_FEWEST_OPERATIONS, SOLVER_PREFER_KEEPING, SOLVER_WINDOW_NODES, SOLVER_WINDOW_MILLIS, SOLVER_PLACEMENT_LIMIT,
-                SOLVER_STOCK_FLOORS);
+                SOLVER_STOCK_FLOORS, SOLVER_PREFER_FINISHED);
     }
 
     public static class CacheNearbySettings {

@@ -4,6 +4,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.Bat
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.BatchLayout.Share;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Action;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Goal;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Delivery;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Make;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Mode;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Plan;
@@ -21,6 +22,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -36,13 +38,17 @@ public final class WholeOrderSolver {
     private record Stage(int level, Map<String, Long> due, Map<String, Long> earlier, int recipeIndex) {}
     private record History(List<? extends Action> actions, History later) {}
     private record Path(long crafts, History history) {}
+    private record BoxBound(long largest, int cheapest, boolean exclusive) {}
     private final Request request;
     private final Map<String, List<Integer>> sources = new HashMap<>();
+    private final Map<String, BoxBound> boxBounds = new HashMap<>();
     private final Map<String, List<BatchLayout>> recipes = new HashMap<>();
     private final List<Map<String, Long>> capacities = new ArrayList<>();
     private final List<Set<BatchLayout>> byHeight = new ArrayList<>();
     private final Map<Stage, Long> cheapestPrefix = new HashMap<>();
     private final Deque<Runnable> pending = new ArrayDeque<>();
+    private Map<String, Long> delivery;
+    private long[] laterSourceUnits;
     private Plan best;
     private long explored;
 
@@ -50,20 +56,88 @@ public final class WholeOrderSolver {
 
     public static Result solve(Request request) {
         if (request.mode() != Mode.PREPARE) throw new IllegalArgumentException("整单精确求解需要成品目标");
-        return new WholeOrderSolver(request).search();
+        WholeOrderSolver solver = new WholeOrderSolver(request);
+        if (solver.index()) solver.search(solver.goals(), request.depth(), false);
+        return solver.result();
     }
 
-    private Result search() {
-        Map<String, Long> goals = new TreeMap<>();
-        for (Goal goal : request.goals()) goals.merge(goal.item(), (long) goal.units(), Math::addExact);
-        if (index()) {
-            Stage initial = new Stage(request.depth(), goals, Map.of(), 0);
-            pending.push(() -> expand(initial, new Path(0, null)));
+    /** 只在全单已证不可行后缩小交付量。每次可行性试算都重新联合分配所有已选目标，直到最后才选成本最低的方案。 */
+    public static Delivery planForGathering(Request request, boolean preferFinished) {
+        if (request.mode() != Mode.PREPARE) throw new IllegalArgumentException("整单精确求解需要成品目标");
+        WholeOrderSolver solver = new WholeOrderSolver(request);
+        Map<String, Long> wanted = solver.goals();
+        if (!solver.index()) return new Delivery(solver.result(), Map.of(), false);
+        if (solver.search(wanted, solver.deliveryDepth(wanted, preferFinished), false) || cancelled()) {
+            return new Delivery(solver.result(), wanted, false);
         }
-        while (!pending.isEmpty() && !cancelled()) {
+        Map<String, Long> partial = solver.attainable(wanted);
+        if (!partial.isEmpty() && !cancelled()) solver.search(partial, solver.deliveryDepth(partial, preferFinished), false);
+        return new Delivery(solver.result(), partial, true);
+    }
+
+    private int deliveryDepth(Map<String, Long> goals, boolean preferFinished) {
+        return preferFinished && covered(goals, 0) ? 0 : request.depth();
+    }
+
+    private boolean covered(Map<String, Long> goals, int level) {
+        return goals.entrySet().stream().allMatch(entry ->
+                entry.getValue() <= capacities.get(level).getOrDefault(entry.getKey(), 0L));
+    }
+
+    private Map<String, Long> goals() {
+        Map<String, Long> goals = new LinkedHashMap<>();
+        for (Goal goal : request.goals()) goals.merge(goal.item(), (long) goal.units(), Math::addExact);
+        return goals;
+    }
+
+    private Map<String, Long> attainable(Map<String, Long> wanted) {
+        Map<String, Long> clipped = new LinkedHashMap<>();
+        wanted.forEach((item, units) -> {
+            long maximum = Math.min(units, capacities.getLast().getOrDefault(item, 0L));
+            if (maximum > 0) clipped.put(item, maximum);
+        });
+        if (clipped.isEmpty() || cancelled()) return Map.of();
+        if (!clipped.equals(wanted) && (covered(clipped, 0) || search(clipped, request.depth(), true))) return clipped;
+
+        // 共享原料时，沿清单顺序依次最大化可交付数量。能交付 N 件就能交付更少，可用二分探测。
+        Map<String, Long> kept = new LinkedHashMap<>();
+        for (Map.Entry<String, Long> entry : clipped.entrySet()) {
+            if (cancelled()) break;
+            String item = entry.getKey();
+            long high = entry.getValue();
+            kept.put(item, high);
+            if (search(kept, request.depth(), true)) continue;
+            long low = 0;
+            high--;
+            while (low < high && !cancelled()) {
+                long probe = low + (high - low + 1) / 2;
+                kept.put(item, probe);
+                if (search(kept, request.depth(), true)) low = probe;
+                else high = probe - 1;
+            }
+            if (low == 0) kept.remove(item);
+            else kept.put(item, low);
+        }
+        return kept;
+    }
+
+    private boolean search(Map<String, Long> goals, int level, boolean firstFeasible) {
+        best = null;
+        pending.clear();
+        cheapestPrefix.clear();
+        delivery = new TreeMap<>(goals);
+        // 一项连乐观上界都达不到就能判整单无解，避免先枚举清单前面的大标签配方。
+        if (!covered(delivery, level)) return false;
+        Stage initial = new Stage(level, delivery, Map.of(), 0);
+        pending.push(() -> expand(initial, new Path(0, null)));
+        while (!pending.isEmpty() && !cancelled() && !(firstFeasible && best != null)) {
             explored++;
             pending.pop().run();
         }
+        return best != null && !cancelled();
+    }
+
+    private Result result() {
         if (cancelled()) return new Result(Status.UNKNOWN_LIMIT, null, explored, List.of());
         return new Result(best == null ? Status.NO_PLAN_IN_MODEL : Status.BEST_IN_MODEL, best, explored, List.of());
     }
@@ -75,11 +149,38 @@ public final class WholeOrderSolver {
         for (int i = 0; i < request.stock().size(); i++) {
             if (cancelled()) return false;
             Source source = request.stock().get(i);
+            if (source.count() == 0) continue;
             stock.merge(source.item(), (long) source.count(), Math::addExact);
             sources.computeIfAbsent(source.item(), key -> new ArrayList<>()).add(i);
         }
         for (Map.Entry<String, Integer> floor : request.floors().entrySet()) {
             if (stock.merge(floor.getKey(), -(long) floor.getValue(), Math::addExact) < 0) return false;
+        }
+        laterSourceUnits = new long[request.stock().size()];
+        Map<String, String> firstItem = new HashMap<>();
+        Set<String> sharedBoxes = new HashSet<>();
+        for (Source row : request.stock()) {
+            if (row.visitCost() == 0 || row.count() == 0) continue;
+            String previous = firstItem.putIfAbsent(row.box(), row.item());
+            if (previous != null && !previous.equals(row.item())) sharedBoxes.add(row.box());
+        }
+        for (Map.Entry<String, List<Integer>> source : sources.entrySet()) {
+            Map<String, Long> perBox = new HashMap<>();
+            long later = 0;
+            int cheapest = Integer.MAX_VALUE;
+            long largest = 0;
+            boolean exclusive = true;
+            for (int row : source.getValue().reversed()) {
+                if (cancelled()) return false;
+                Source location = request.stock().get(row);
+                laterSourceUnits[row] = later;
+                later += location.count();
+                if (location.visitCost() == 0) continue;
+                largest = Math.max(largest, perBox.merge(location.box(), (long) location.count(), Long::sum));
+                cheapest = Math.min(cheapest, location.visitCost());
+                exclusive &= !sharedBoxes.contains(location.box());
+            }
+            boxBounds.put(source.getKey(), new BoxBound(largest, cheapest, exclusive));
         }
         capacities.add(stock);
         Set<String> previousHeight = new HashSet<>();
@@ -247,7 +348,11 @@ public final class WholeOrderSolver {
     }
 
     private void withdraw(Map<String, Long> needs, int index, Set<String> visited, Score score, History history) {
-        if (best != null && score.compare(best.score(), request.policy()) >= 0) return;
+        if (best != null) {
+            if (score.compare(best.score(), request.policy()) >= 0) return;
+            long operations = saturatedAdd(score.operations(), minimumVisitCost(needs, index, visited));
+            if (new Score(score.protectedUnits(), score.pressure(), operations).compare(best.score(), request.policy()) >= 0) return;
+        }
         if (needs.isEmpty()) {
             List<Action> actions = new ArrayList<>();
             for (History node = history; node != null; node = node.later) actions.addAll(node.actions);
@@ -261,7 +366,10 @@ public final class WholeOrderSolver {
         int sourceIndex = supply.get(index);
         Source source = request.stock().get(sourceIndex);
         // 每箱只在首次访问计费。在任一最优的已访问箱集合内，同物品在较早货源尽量取足只会减少访问。
-        pending.push(() -> withdraw(needs, index + 1, visited, score, history));
+        if (units > laterSourceUnits[sourceIndex] + source.count()) return;
+        if (units <= laterSourceUnits[sourceIndex] && source.visitCost() > 0 && !visited.contains(source.box())) {
+            pending.push(() -> withdraw(needs, index + 1, visited, score, history));
+        }
         int count = (int) Math.min(units, source.count());
         if (count == 0) return;
         Set<String> opened = visited;
@@ -277,6 +385,31 @@ public final class WholeOrderSolver {
         pending.push(() -> withdraw(change(needs, item, -count), count == units ? 0 : index + 1, nextVisited, nextScore, taken));
     }
 
+    /** 每种材料先用满已访问箱和免费来源。余量至少需要若干个最大箱，按最低访问费计价只会低估。 */
+    private long minimumVisitCost(Map<String, Long> needs, int firstIndex, Set<String> visited) {
+        long separate = 0;
+        long shared = 0;
+        int start = firstIndex;
+        for (Map.Entry<String, Long> need : needs.entrySet()) {
+            long left = need.getValue();
+            List<Integer> rows = sources.get(need.getKey());
+            for (int i = start; i < rows.size() && left > 0; i++) {
+                Source row = request.stock().get(rows.get(i));
+                if (row.visitCost() == 0 || visited.contains(row.box())) left -= row.count();
+            }
+            start = 0;
+            if (left <= 0) continue;
+            BoxBound bound = boxBounds.get(need.getKey());
+            if (bound.largest == 0) return Long.MAX_VALUE;
+            long visits = Math.ceilDiv(left, bound.largest);
+            long cost = visits > Long.MAX_VALUE / bound.cheapest ? Long.MAX_VALUE : visits * bound.cheapest;
+            // 专用箱之间可以相加；混合箱可能一次满足多种材料，取最大值才能避免重复收费。
+            if (bound.exclusive) separate = saturatedAdd(separate, cost);
+            else shared = Math.max(shared, cost);
+        }
+        return saturatedAdd(separate, shared);
+    }
+
     private Map<String, Long> surplus(List<Action> actions) {
         Map<String, Long> ledger = new HashMap<>();
         for (Action action : actions) {
@@ -289,8 +422,8 @@ public final class WholeOrderSolver {
                 ledger.merge(make.recipe().output(), (long) make.operations() * make.recipe().yield(), Math::addExact);
             }
         }
-        for (Goal goal : request.goals()) {
-            if (ledger.merge(goal.item(), -(long) goal.units(), Math::addExact) < 0) throw new IllegalStateException("未交付整单");
+        for (Map.Entry<String, Long> goal : delivery.entrySet()) {
+            if (ledger.merge(goal.getKey(), -goal.getValue(), Math::addExact) < 0) throw new IllegalStateException("未完成承诺的交付量");
         }
         ledger.values().removeIf(count -> count == 0);
         return ledger;

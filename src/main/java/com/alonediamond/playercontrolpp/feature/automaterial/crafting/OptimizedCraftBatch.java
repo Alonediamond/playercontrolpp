@@ -88,7 +88,13 @@ final class OptimizedCraftBatch {
     private final String rootId;
     private final RawNode tree;
     private final boolean wholeOrder;
+    private final boolean preferFinished;
+    private boolean checkingFinished;
+    private boolean partialDelivery;
+    private Map<Item, Integer> promised;
+    private SupplyModel.Plan acceptedPlan;
     private final Map<Item, Integer> protectedStock;
+    private final Map<Item, Integer> completedReserves;
     private final Set<String> preferKeeping;
     private final List<String> floorSettings;
     private final SupplyModel.Policy policy;
@@ -107,7 +113,7 @@ final class OptimizedCraftBatch {
     private final List<SupplyModel.Recipe> modelRecipes = new ArrayList<>();
     private final List<Stock> stock = new ArrayList<>();
     private ChestTrackerIntegration.LooseStockScan scan;
-    private FutureTask<SupplyModel.Result> future;
+    private FutureTask<SupplyModel.Delivery> future;
     private int ticks;
     private boolean feasibleAtLimit;
     private List<Step> steps = List.of();
@@ -128,7 +134,10 @@ final class OptimizedCraftBatch {
         this.traceMode = (RawMaterialMode) BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue();
         this.stationMode = (CraftStationSource) BaritoneSettings.CRAFT_STATION_SOURCE.getOptionListValue();
         this.wholeOrder = protectedStock != null;
+        this.preferFinished = BaritoneSettings.SOLVER_PREFER_FINISHED.getBooleanValue();
+        this.checkingFinished = wholeOrder && preferFinished;
         this.protectedStock = wholeOrder ? new HashMap<>(protectedStock) : Map.of();
+        this.completedReserves = wholeOrder ? Map.copyOf(protectedStock) : Map.of();
         this.policy = selectedPolicy();
         this.preferKeeping = Set.copyOf(BaritoneSettings.SOLVER_PREFER_KEEPING.getStrings());
         this.floorSettings = List.copyOf(BaritoneSettings.SOLVER_STOCK_FLOORS.getStrings());
@@ -148,7 +157,10 @@ final class OptimizedCraftBatch {
         this.recipes = CraftingRecipes.captureForSolver(ctx.client);
         if (wholeOrder) {
             targets = WholeOrderStock.targets(ctx.requirements.entries());
-            for (Item item : targets.keySet()) enqueue(id(item), 0);
+            for (Item item : targets.keySet()) {
+                enqueue(id(item), 0);
+                if (checkingFinished) items.put(id(item), item);
+            }
         }
     }
 
@@ -174,7 +186,8 @@ final class OptimizedCraftBatch {
                 && BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()
                 && BaritoneSettings.SOLVE_WHOLE_LIST.getBooleanValue() == wholeOrder
                 && selectedPolicy() == policy && preferKeeping.equals(Set.copyOf(BaritoneSettings.SOLVER_PREFER_KEEPING.getStrings()))
-                && (!wholeOrder || floorSettings.equals(BaritoneSettings.SOLVER_STOCK_FLOORS.getStrings()))
+                && (!wholeOrder || floorSettings.equals(BaritoneSettings.SOLVER_STOCK_FLOORS.getStrings())
+                && preferFinished == BaritoneSettings.SOLVER_PREFER_FINISHED.getBooleanValue())
                 && (wholeOrder || nodeLimit == BaritoneSettings.SOLVER_WINDOW_NODES.getIntegerValue()
                 && timeMillis == BaritoneSettings.SOLVER_WINDOW_MILLIS.getIntegerValue())
                 && BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue() == traceMode
@@ -187,10 +200,12 @@ final class OptimizedCraftBatch {
 
     List<Step> steps() { return steps; }
     boolean feasibleAtLimit() { return feasibleAtLimit; }
+    boolean partialDelivery() { return partialDelivery; }
 
     boolean isComplete(GatherContext ctx) {
         if (targets == null) return ctx.countHeld(root) >= target;
-        return targets.entrySet().stream().allMatch(entry -> ctx.countHeld(entry.getKey()) >= entry.getValue());
+        Map<Item, Integer> delivery = partialDelivery ? promised : targets;
+        return delivery.entrySet().stream().allMatch(entry -> ctx.countHeld(entry.getKey()) >= entry.getValue());
     }
 
     Set<Item> targetItems() {
@@ -211,7 +226,7 @@ final class OptimizedCraftBatch {
         if (future != null) return poll(ctx);
         if (!wholeOrder && ++ticks > CAPTURE_TICK_LIMIT) return Progress.LIMIT;
         if (recipes == null || traceStops == null || depth < 0 || depth == 0 && !wholeOrder) return Progress.UNAVAILABLE;
-        if (!recipes.tick(ctx.client)) return Progress.PENDING;
+        if (!checkingFinished && !recipes.tick(ctx.client)) return Progress.PENDING;
         if (targets == null) {
             List<MaterialItemEntry> candidates = ctx.requirements.entries().stream()
                     .filter(entry -> !traceStops.contains(entry.item) && !ctx.tracedItems.contains(entry.item))
@@ -220,8 +235,10 @@ final class OptimizedCraftBatch {
             for (Item item : targets.keySet()) enqueue(id(item), 0);
         }
         if (scan == null) {
-            Progress progress = captureGraph();
-            if (progress != Progress.READY) return progress;
+            if (!checkingFinished) {
+                Progress progress = captureGraph();
+                if (progress != Progress.READY) return progress;
+            }
             scan = new CachedContainerSource().scanLoose(ctx.client, origin, Set.copyOf(items.values()));
             if (scan == ChestTrackerIntegration.UNAVAILABLE_LOOSE_SCAN) return Progress.UNAVAILABLE;
         }
@@ -389,6 +406,17 @@ final class OptimizedCraftBatch {
                         Balance balance = initialBalances.get(items.get(id));
                         if (balance != null) effective.put(id, WholeOrderStock.additionalFloor(balance, floor, totals.getOrDefault(id, 0L)));
                     });
+                    if (checkingFinished && !WholeOrderStock.finishedCover(goals, totals, effective)) {
+                        // 只扫描成品的结果不能用于原料分配。重新冻结完整快照，期间没有交互或库存扣账。
+                        checkingFinished = false;
+                        initialBalances.clear();
+                        protectedStock.clear();
+                        protectedStock.putAll(completedReserves);
+                        stock.clear();
+                        scan = null;
+                        wholeCapture = null;
+                        return Progress.PENDING;
+                    }
                     return dispatch(goals, effective);
                 }
             } while (System.nanoTime() - started < GRAPH_NANOS_PER_TICK);
@@ -422,11 +450,12 @@ final class OptimizedCraftBatch {
         for (Item item : traceStops) stopIds.add(id(item));
         SupplyModel.Request request = new SupplyModel.Request(
                 new SupplyModel.Catalog(modelRecipes), stock.stream().map(Stock::model).toList(),
-                goals, floors, preferKeeping, stopIds, depth, policy, SupplyModel.Mode.PREPARE);
+                goals, floors, preferKeeping, stopIds, checkingFinished ? 0 : depth, policy, SupplyModel.Mode.PREPARE);
         int nodes = nodeLimit;
         long nanos = TimeUnit.MILLISECONDS.toNanos(timeMillis);
-        future = wholeOrder ? new FutureTask<>(() -> WholeOrderSolver.solve(request))
-                : new FutureTask<>(() -> SupplySolver.solve(request, nodes, nanos));
+        boolean useFinished = preferFinished;
+        future = wholeOrder ? new FutureTask<>(() -> WholeOrderSolver.planForGathering(request, useFinished))
+                : new FutureTask<>(() -> new SupplyModel.Delivery(SupplySolver.solve(request, nodes, nanos), Map.of(), false));
         WORKER.execute(future);
         return Progress.PENDING;
     }
@@ -443,7 +472,8 @@ final class OptimizedCraftBatch {
             return Progress.UNAVAILABLE;
         }
         if (future.state() != Future.State.SUCCESS) return Progress.STALE;
-        SupplyModel.Result result = future.resultNow();
+        SupplyModel.Delivery delivery = future.resultNow();
+        SupplyModel.Result result = delivery.result();
         if (wholeOrder && result.status() == SupplyModel.Status.FEASIBLE_LIMIT) return Progress.LIMIT;
         SupplyModel.Plan plan = CraftBatchActions.executable(result);
         if (plan == null) {
@@ -451,7 +481,10 @@ final class OptimizedCraftBatch {
         }
         if (!wholeOrder && plan.actions().size() > MAX_MODEL_ACTIONS) return Progress.LIMIT;
         List<Step> translated = CraftBatchActions.translate(plan, stock, items);
-        if (!CraftBatchActions.canExecute(translated, current, targets)) return Progress.STALE;
+        partialDelivery = wholeOrder && delivery.partial();
+        promised = partialDelivery ? WholeOrderStock.partialTargets(delivery.units(), items, initialBalances) : targets;
+        if (!CraftBatchActions.canExecute(translated, current, promised)) return Progress.STALE;
+        acceptedPlan = plan;
         CraftInventory inventory = new CraftInventory(player.getInventory()::getItem,
                 BaritoneSettings.SOLVER_PLACEMENT_LIMIT.getIntegerValue());
         if (wholeOrder && !inventory.fits(translated)) {
@@ -464,6 +497,28 @@ final class OptimizedCraftBatch {
     }
 
     boolean hasSegments() { return schedule != null && !schedule.isEmpty(); }
+
+    RemainderStock remainderStock(GatherContext ctx, boolean currentSnapshot) {
+        if (floorSettings.isEmpty() || !currentSnapshot || !isCurrent(ctx)) return RemainderStock.withoutSnapshot(ctx);
+        Map<Item, Long> warehouse = new HashMap<>();
+        Map<Item, Integer> usedFromPlayer = new HashMap<>();
+        for (Stock row : stock) {
+            if (row.container() != null) warehouse.merge(items.get(row.model().item()), (long) row.model().count(), Long::sum);
+        }
+        if (acceptedPlan != null) {
+            for (SupplyModel.Action action : acceptedPlan.actions()) {
+                if (!(action instanceof SupplyModel.Take take)) continue;
+                Item item = items.get(take.item());
+                if (stock.get(take.source()).container() == null) usedFromPlayer.merge(item, take.count(), Math::addExact);
+                else warehouse.merge(item, -(long) take.count(), Long::sum);
+            }
+        }
+        return RemainderStock.capture(item -> {
+            int live = ItemUtil.countPlainLoose(player, item);
+            Balance before = initialBalances.get(item);
+            return before == null ? live : Math.min(live, before.plain() - usedFromPlayer.getOrDefault(item, 0));
+        }, item -> warehouse.getOrDefault(item, 0L));
+    }
 
     List<Step> nextSegment() {
         CraftInventory inventory = new CraftInventory(player.getInventory()::getItem,

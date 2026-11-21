@@ -87,6 +87,18 @@ public final class CraftingRecipes {
         public int outputCount() { return outputCount; }
         public Item exactOutput() { return exactOutput; }
         public boolean isExactStonecutting() { return exactStonecutting; }
+
+        /** 已绑定的每个非空格必须只接受计划中的单一物品，执行阶段不能重新展开标签。 */
+        public boolean matchesFixedGrid(List<String> bound) {
+            if (exactOutput == null || grid.size() != CRAFT_GRID_SLOTS || bound.size() != grid.size()) return false;
+            for (int i = 0; i < grid.size(); i++) {
+                List<ItemStack> slot = grid.get(i);
+                if (bound.get(i).isEmpty()) {
+                    if (!slot.isEmpty()) return false;
+                } else if (slot.size() != 1 || !itemId(slot.getFirst()).equals(bound.get(i))) return false;
+            }
+            return true;
+        }
         /** 固定本批每格的变种；摆料和采集必须使用同一份选择。 */
         public Plan select(List<List<ItemStack>> selected) {
             return new Plan(handle, List.copyOf(selected), width, outputCount);

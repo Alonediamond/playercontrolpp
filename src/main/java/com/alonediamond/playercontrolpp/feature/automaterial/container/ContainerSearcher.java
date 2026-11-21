@@ -28,12 +28,16 @@ public final class ContainerSearcher {
             }
             return;
         }
-        if (PlayerUtil.isInventoryFull(ctx.client.player)) {
+        if (ctx.remainderStock == null && PlayerUtil.isInventoryFull(ctx.client.player)) {
             task.onInventoryFull();
             return;
         }
         CachedContainerSource.Scope scope = source.scope(0);
         if (scope.error() != null) {
+            if (ctx.remainderStock != null) {
+                task.onCurrentTargetUnavailable();
+                return;
+            }
             task.setState(State.STOPPED, scope.error());
             return;
         }

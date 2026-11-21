@@ -85,8 +85,15 @@ final class RecipePlanner {
         int missing = Math.max(0, target - held.computeIfAbsent(item, ctx::countHeld));
         if (missing == 0) return amount * OWNED_ITEM_COST;
         double cacheCost = 0;
+        RemainderStock protection = ctx.remainderStock;
+        long knownSurplus = protection == null ? Integer.MAX_VALUE : protection.canWithdraw(item, 0);
         for (ChestTrackerIntegration.Stock stock : stocks.getOrDefault(item, List.of())) {
             int take = Math.min(missing, stock.count());
+            if (protection != null && protection.protects(item)) {
+                long available = Math.max(knownSurplus, protection.visibleSurplus(item, stock.count()));
+                take = (int) Math.min(take, available);
+                knownSurplus = Math.max(0, knownSurplus - take);
+            }
             if (take <= 0) continue;
             double distance = Math.sqrt(stock.position().distSqr(ctx.client.player.blockPosition()));
             cacheCost += CONTAINER_VISIT_COST + distance + take * CACHED_ITEM_COST;

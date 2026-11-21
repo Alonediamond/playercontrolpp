@@ -1,5 +1,6 @@
 package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
+import com.alonediamond.playercontrolpp.config.Configs.BaritoneSettings;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Craft;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Fetch;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Step;
@@ -21,7 +22,7 @@ final class CraftInventory {
     private final int[] counts;
 
     CraftInventory(IntFunction<ItemStack> slotAt) {
-        this(slotAt, 16);
+        this(slotAt, BaritoneSettings.DEFAULT_SOLVER_PLACEMENT);
     }
 
     CraftInventory(IntFunction<ItemStack> slotAt, int placementLimit) {

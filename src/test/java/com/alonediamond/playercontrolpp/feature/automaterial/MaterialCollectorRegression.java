@@ -44,6 +44,7 @@ public final class MaterialCollectorRegression {
         //#endif
         BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(registries).forEach(p -> p.apply());
         //#endif
+        checkRemainderSlots();
         Item stone = Items.STONE;
         ItemStack full = box(stone, 27, 64);
         check(ContainerMaterialCollector.isFullBox(full, stone), "满盒石头");
@@ -120,6 +121,18 @@ public final class MaterialCollectorRegression {
     private static ContainerMaterialCollector.Selection select(Item item, int total, int held, List<Slot> slots, int threshold, boolean mixed) {
         return ContainerMaterialCollector.select(List.of(new MaterialItemEntry(item, total, item.getDefaultMaxStackSize())), i -> held, slots, s -> true, threshold, mixed);
     }
+    private static void checkRemainderSlots() {
+        Slot oak = slot(new ItemStack(Items.OAK_PLANKS, 64));
+        Slot birch = slot(new ItemStack(Items.BIRCH_PLANKS, 64));
+        List<MaterialItemEntry> goals = List.of(new MaterialItemEntry(Items.OAK_PLANKS, 50), new MaterialItemEntry(Items.BIRCH_PLANKS, 20));
+        ContainerMaterialCollector.Selection first = ContainerMaterialCollector.select(goals, i -> 0, List.of(oak, birch),
+                s -> true, 1000, false, item -> item == Items.OAK_PLANKS ? 3 : Integer.MAX_VALUE);
+        check(first != null && first.slot() == oak && first.amount() == 3, "普通查箱回退也只能拿三块橡木余量");
+        ContainerMaterialCollector.Selection next = ContainerMaterialCollector.select(goals, i -> 0, List.of(oak, birch),
+                s -> true, 1000, false, item -> item == Items.OAK_PLANKS ? 0 : Integer.MAX_VALUE);
+        check(next != null && next.slot() == birch && next.amount() == 20, "橡木额度耗尽仍能取同箱的白桦");
+    }
+
     private static Slot slot(ItemStack stack) { return new Slot(new SimpleContainer(stack), 0, 0, 0); }
     private static ItemStack box(Item item, int slots, int count) {
         ItemStack box = new ItemStack(Items.SHULKER_BOX);

@@ -8,6 +8,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.shulker.ShulkerBoxA
 import com.alonediamond.playercontrolpp.inventory.SlotTransfer;
 import com.alonediamond.playercontrolpp.inventory.TransferSession;
 import com.alonediamond.playercontrolpp.util.PlayerUtil;
+import com.alonediamond.playercontrolpp.util.ItemUtil;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -55,7 +56,12 @@ public final class ItemTransferExecutor {
                 return;
             }
             if (bound) ctx.spendBoundLooseQuota(selection.slot().getItem().getItem(), selection.amount());
-            TransferSession.Result result = transfers.attempt(selection.slot(), slot -> bound
+            boolean protectedStock = ctx.remainderStock != null && ItemUtil.isPlainLoose(selection.slot().getItem())
+                    && ctx.remainderStock.protects(selection.slot().getItem().getItem());
+            if (protectedStock) {
+                ctx.remainderStock.spend(selection.slot().getItem().getItem(), Math.min(selection.amount(), selection.slot().getItem().getCount()));
+            }
+            TransferSession.Result result = transfers.attempt(selection.slot(), slot -> bound || protectedStock
                     ? SlotTransfer.toPlayerExact(mc, slot, selection.amount())
                     : SlotTransfer.toPlayer(mc, slot, selection.amount()));
             // 同一个容器内的两次点击之间用单独的间隔：它不受寻路影响，可以比跨容器更短。

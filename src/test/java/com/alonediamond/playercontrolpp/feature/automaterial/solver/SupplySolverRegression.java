@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial.solver;
 
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Action;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Catalog;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Delivery;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Goal;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Hint;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Make;
@@ -79,6 +80,10 @@ public final class SupplySolverRegression {
         wholeOrderSticks();
         wholeOrderSourcesAndDepth();
         wholeOrderOracle();
+        constructionOrderWithShortages();
+        concreteWarehouse();
+        distributedWarehouse();
+        partialOrdersShareStock();
         return checks;
     }
 
@@ -352,6 +357,115 @@ public final class SupplySolverRegression {
                             "穷举对照：最小期初部件消耗");
                 }
             }
+        }
+    }
+
+    /** 13 种、1152 件。既有建筑成品、须制板的半成品，也有当前完全没有来源的黑曜石。 */
+    private void constructionOrderWithShortages() {
+        List<Goal> goals = new ArrayList<>();
+        List<Source> stock = new ArrayList<>();
+        for (String item : List.of("stone", "bricks", "glass", "sand", "gravel", "dirt", "granite", "andesite", "diorite", "tuff")) {
+            String id = "minecraft:" + item;
+            goals.add(goal(id, 96));
+            stock.add(stock(id, 96));
+        }
+        String torch = "minecraft:torch";
+        String obsidian = "minecraft:obsidian";
+        goals.addAll(List.of(goal(BIRCH, 64), goal(torch, 64), goal(obsidian, 64)));
+        stock.addAll(List.of(stock(BIRCH, 32), stock("minecraft:birch_log", 8),
+                stock("minecraft:coal", 4), stock("minecraft:stick", 4)));
+        List<Recipe> recipes = List.of(RecipeFixtures.read(BIRCH), RecipeFixtures.read(torch));
+        Request mixed = request(recipes, stock, goals, 5);
+        Delivery partial = WholeOrderSolver.planForGathering(mixed, true);
+        check(partial.partial() && partial.result().status() == Status.BEST_IN_MODEL
+                && partial.units().values().stream().mapToLong(Long::longValue).sum() == 1040, "已证实整单不可行，实际可交付 1040 件");
+        check(partial.units().get(BIRCH) == 64 && partial.units().get(torch) == 16 && !partial.units().containsKey(obsidian),
+                "已有 32 块板与 8 根原木合并；煤只够 16 个火把；不把缺失的黑曜石算作交付");
+        List<Goal> delivered = partial.units().entrySet().stream().map(row -> goal(row.getKey(), Math.toIntExact(row.getValue()))).toList();
+        replay(request(recipes, stock, delivered, 5), partial.result().plan());
+
+        List<Source> enough = new ArrayList<>(stock);
+        enough.addAll(List.of(stock("minecraft:coal", 12), stock("minecraft:stick", 12), stock(obsidian, 64)));
+        Delivery complete = WholeOrderSolver.planForGathering(request(recipes, enough, goals, 5), true);
+        check(!complete.partial() && complete.units().size() == 13, "部分成品加足量原料可以直接证实整单可行");
+        replay(request(recipes, enough, goals, 5), complete.result().plan());
+
+        List<Source> finished = goals.stream().map(goal -> stock(goal.item(), goal.units())).toList();
+        Delivery direct = WholeOrderSolver.planForGathering(request(List.of(), finished, goals, 0), true);
+        check(!direct.partial() && direct.result().plan().actions().stream().allMatch(Take.class::isInstance),
+                "1152 件缓存成品无需任何配方或工作站");
+        Delivery empty = WholeOrderSolver.planForGathering(request(recipes, List.of(), goals, 5), true);
+        check(empty.result().status() == Status.NO_PLAN_IN_MODEL && empty.result().plan() == null && empty.units().isEmpty(),
+                "零库存无种子，明确交回剩余采集，不发取料或制作动作");
+    }
+
+    private void distributedWarehouse() {
+        List<Source> warehouse = new ArrayList<>();
+        for (int box = 0; box < 64; box++) {
+            warehouse.add(new Source("wood-" + box, BIRCH, 16, 2));
+            warehouse.add(new Source("rock-" + box, COBBLE, 16, 2));
+        }
+        List<Goal> work = List.of(goal(BIRCH, 512), goal(COBBLE, 512));
+        Request request = request(List.of(), warehouse, work, 0);
+        Delivery delivery = WholeOrderSolver.planForGathering(request, true);
+        check(delivery.result().plan().score().operations() == 128 && delivery.result().explored() < 1000,
+                "128 个等价分仓取 1024 件，访问成本下界可证明 64 次开箱最优");
+        replay(request, delivery.result().plan());
+    }
+
+    private void concreteWarehouse() {
+        List<Recipe> recipes = new ArrayList<>();
+        List<Goal> goals = new ArrayList<>();
+        List<Source> stock = new ArrayList<>();
+        for (String color : List.of("white", "orange", "magenta", "light_blue", "yellow", "lime",
+                "pink", "gray", "light_gray", "cyan", "purple", "blue")) {
+            String output = "minecraft:" + color + "_concrete_powder";
+            recipes.add(RecipeFixtures.read(output));
+            goals.add(goal(output, 96));
+            stock.add(stock(output, 8));
+            stock.add(stock("minecraft:" + color + "_dye", color.equals("cyan") ? 6 : 11));
+        }
+        stock.add(stock("minecraft:sand", 528));
+        stock.add(stock("minecraft:gravel", 528));
+        Request request = request(recipes, stock, goals, 5);
+        Delivery partial = WholeOrderSolver.planForGathering(request, true);
+        check(partial.partial() && partial.units().get("minecraft:cyan_concrete_powder") == 56
+                        && partial.units().values().stream().mapToLong(Long::longValue).sum() == 1112,
+                "12 色真实混凝土粉共需 1152 块，青色短五份染料，其余十一色可足额交付");
+        List<Goal> selected = partial.units().entrySet().stream().map(e -> goal(e.getKey(), Math.toIntExact(e.getValue()))).toList();
+        replay(request(recipes, stock, selected, 5), partial.result().plan());
+        check(partial.result().plan().shoppingList().get("minecraft:sand") == 508
+                        && partial.result().plan().shoppingList().get("minecraft:gravel") == 508,
+                "127 次制作共享砂与砂砾，各消耗 508 件");
+    }
+
+    private void partialOrdersShareStock() {
+        Request ready = request(List.of(RecipeFixtures.read(BIRCH)), List.of(stock(BIRCH, 4), stock("minecraft:birch_log", 1000)),
+                List.of(goal(BIRCH, 4), goal("unavailable", 1)), 3);
+        Delivery direct = WholeOrderSolver.planForGathering(ready, true);
+        Delivery conserve = WholeOrderSolver.planForGathering(ready, false);
+        check(direct.partial() && direct.result().plan().shoppingList().equals(Map.of(BIRCH, 4L))
+                        && conserve.result().plan().shoppingList().equals(Map.of("minecraft:birch_log", 1L)),
+                "可交付子单全有成品时仍尊重玩家的现货优先开关");
+        Recipe first = simple("one", "one", 1, List.of(new Slot(List.of("shared"))));
+        Recipe second = simple("two", "two", 1, List.of(new Slot(List.of("shared"))));
+        List<Goal> goals = List.of(goal("one", 4), goal("two", 4));
+        for (List<Goal> order : List.of(goals, goals.reversed())) {
+            Request request = new Request(new Catalog(List.of(first, second)), List.of(stock("shared", 7)), order,
+                    Map.of("shared", 2), Set.of(), Set.of(), 1, Policy.SAVE_STOCK, Mode.PREPARE);
+            Delivery delivery = WholeOrderSolver.planForGathering(request, true);
+            check(delivery.partial() && delivery.units().equals(Map.of(order.getFirst().item(), 4L, order.getLast().item(), 1L)),
+                    "共享原料冲突时为先处理的条目保留交付数量，再二分缩小另一项的数量");
+            check(delivery.result().plan().shoppingList().equals(Map.of("shared", 5L)), "部分交付同样保留两份硬下限");
+        }
+        Thread.currentThread().interrupt();
+        try {
+            Delivery cancelled = WholeOrderSolver.planForGathering(request(List.of(first, second),
+                    List.of(stock("shared", 3)), goals, 3), true);
+            check(cancelled.result().status() == Status.UNKNOWN_LIMIT && cancelled.result().plan() == null,
+                    "取消搜索不能误报缺料或交付部分动作");
+        } finally {
+            Thread.interrupted();
         }
     }
 

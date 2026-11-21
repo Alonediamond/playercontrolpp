@@ -3,6 +3,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialRequirements;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialTarget;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RemainderStock;
 import com.alonediamond.playercontrolpp.inventory.ContainerMenus;
 import com.alonediamond.playercontrolpp.util.ItemUtil;
 
@@ -44,6 +45,8 @@ public final class GatherContext {
 
     // 材料清单数据
     public final MaterialRequirements requirements = new MaterialRequirements();
+    /** 仅当前投影或手工批次使用。交接后即使下一项仍然缺货，也不重复启动同一个整单。 */
+    public RemainderStock remainderStock;
     private MaterialTarget target;
     private LooseAcquisition looseAcquisition;
 
@@ -233,6 +236,7 @@ public final class GatherContext {
         mixedBoxIdentity = ItemStack.EMPTY;
         storageAfterExtraction = false;
         requirements.clear();
+        remainderStock = null;
         target = null;
         clearLooseAcquisition();
 

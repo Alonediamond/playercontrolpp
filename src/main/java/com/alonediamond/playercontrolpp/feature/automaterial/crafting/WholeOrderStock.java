@@ -2,6 +2,7 @@ package com.alonediamond.playercontrolpp.feature.automaterial.crafting;
 
 import com.alonediamond.playercontrolpp.compat.RegistryCompat;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Balance;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.SupplyModel.Goal;
 import com.alonediamond.playercontrolpp.feature.automaterial.material.MaterialItemEntry;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
@@ -22,6 +23,19 @@ record WholeOrderStock(Balance balance, int missing) {
     static WholeOrderStock allocate(Balance held, int target, int hardReserve) {
         int reserve = Math.max(hardReserve, Math.min(target, held.owned()));
         return new WholeOrderStock(new Balance(held.owned(), held.plain(), reserve), Math.max(0, target - held.owned()));
+    }
+
+    static boolean finishedCover(List<Goal> gaps, Map<String, Long> stock, Map<String, Integer> floors) {
+        return gaps.stream().allMatch(goal -> goal.units() <= stock.getOrDefault(goal.item(), 0L) - floors.getOrDefault(goal.item(), 0));
+    }
+
+    static Map<Item, Integer> partialTargets(Map<String, Long> units, Map<String, Item> items, Map<Item, Balance> before) {
+        Map<Item, Integer> targets = new LinkedHashMap<>();
+        units.forEach((id, added) -> {
+            Item item = items.get(id);
+            targets.put(item, Math.toIntExact(before.get(item).owned() + added));
+        });
+        return targets;
     }
 
     /** 总下限包括已经为交付锁住的普通散装。期初不足下限时，保护现有库存，仍可用其他材料生产。 */

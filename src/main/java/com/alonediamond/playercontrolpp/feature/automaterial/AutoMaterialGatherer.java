@@ -14,6 +14,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.container.Container
 import com.alonediamond.playercontrolpp.feature.automaterial.container.ItemTransferExecutor;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.KnownMiningSurvey;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RawMaterialTask;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.RemainderStock;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialBatch;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualMaterialQueue;
 import com.alonediamond.playercontrolpp.feature.automaterial.manual.ManualPreparationMode;
@@ -269,6 +270,7 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
     /** 换到下一个缺失物品，或者结束。 */
     private void nextItem() {
+        if (ctx.remainderStock != null && ctx.transferCooldown > 0) return;
         transferExecutor.reset();
 
         // 开箱时可能顺带取齐其他条目，直接跳过它们，避免重复搜索。
@@ -299,19 +301,23 @@ public final class AutoMaterialGatherer implements ClientFeature {
 
         if (wantsWholeOrder()) {
             if (ctx.client.player.isCreative() || ctx.client.player.isSpectator() || !checkRawMaterialPrerequisites()) {
-                setState(State.STOPPED, "playercontrolpp.message.baritone.raw_material_solver_whole_unsupported");
+                try {
+                    continueWithRemainder(RemainderStock.withoutSnapshot(ctx), "unsupported");
+                } catch (IllegalArgumentException invalid) {
+                    setState(State.STOPPED, "playercontrolpp.message.baritone.raw_material_solver_whole_floors");
+                }
                 return;
             }
             rawMaterialTask.startWholeOrder(ctx, manualRun ? manualQueue.completedTargets() : Map.of());
             return;
         }
-        if (manualRun && manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT
+        if (ctx.remainderStock == null && manualRun && manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT
                 && !preparingRaw && tryStartRawMaterialTask()) return;
         setState(State.SEARCHING);
     }
 
     private boolean wantsWholeOrder() {
-        return Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()
+        return ctx.remainderStock == null && Configs.BaritoneSettings.USE_SUPPLY_SOLVER.getBooleanValue()
                 && Configs.BaritoneSettings.SOLVE_WHOLE_LIST.getBooleanValue()
                 && (manualRun ? manualPreparationMode == ManualPreparationMode.RAW_THEN_CRAFT
                 : Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue() != RawMaterialMode.DISABLED);
@@ -320,6 +326,13 @@ public final class AutoMaterialGatherer implements ClientFeature {
     public void onWholeOrderFinished() {
         currentItemIndex = 0;
         setState(State.NEXT_ITEM);
+    }
+
+    public void continueWithRemainder(RemainderStock protection, String reason) {
+        ctx.remainderStock = protection;
+        currentItemIndex = 0;
+        setState(State.NEXT_ITEM);
+        MessageUtil.sendActionBar(ctx.client, "playercontrolpp.message.baritone.raw_material_solver_whole_" + reason);
     }
 
     /** 只有整批满足才推进；失败批次保留原目标，供玩家补充缓存后恢复。 */
@@ -471,6 +484,11 @@ public final class AutoMaterialGatherer implements ClientFeature {
             if (active) {
                 setState(State.STOPPED);
             }
+            return;
+        }
+
+        if (ctx.remainderStock != null && !ctx.remainderStock.settingsCurrent()) {
+            setState(State.STOPPED, "playercontrolpp.message.baritone.raw_material_solver_whole_floor_changed");
             return;
         }
 
