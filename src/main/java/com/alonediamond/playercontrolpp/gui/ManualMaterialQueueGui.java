@@ -1,5 +1,7 @@
 package com.alonediamond.playercontrolpp.gui;
 
+import com.mojang.blaze3d.platform.InputConstants;
+
 //#if MC >= 12110
 import net.minecraft.client.input.MouseButtonEvent;
 //#endif
@@ -26,6 +28,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 import java.util.ArrayList;
@@ -78,7 +81,10 @@ public final class ManualMaterialQueueGui extends Screen {
         for (Item item : BuiltInRegistries.ITEM) {
             if (item == Items.AIR) continue;
             String id = BuiltInRegistries.ITEM.getKey(item).toString();
-            String name = item.getDefaultInstance().getHoverName().getString();
+            ItemStack stack = displayStack(item);
+            String name = stack.isEmpty()
+                    ? Component.translatable(item.getDescriptionId()).getString()
+                    : stack.getHoverName().getString();
             catalog.add(new Candidate(item, id, name));
         }
         catalog.sort(Comparator.comparing(Candidate::id));
@@ -396,7 +402,7 @@ public final class ManualMaterialQueueGui extends Screen {
             int y = LIST_TOP + (i - resultScroll) * ROW;
             Candidate candidate = results.get(i);
             if (candidate == selectedCandidate) ctx.fill(RIGHT, y, RIGHT + panelWidth, y + ROW - 1, 0x705588CC);
-            ctx.item(candidate.item().getDefaultInstance(), RIGHT + 2, y + 1);
+            ctx.item(displayStack(candidate.item()), RIGHT + 2, y + 1);
             String text = candidate.name() + "  " + candidate.id();
             ctx.text(font, Component.literal(font.plainSubstrByWidth(text, panelWidth - 26)),
                     RIGHT + 22, y + 4, 0xFFE5E5E5, false);
@@ -417,11 +423,19 @@ public final class ManualMaterialQueueGui extends Screen {
             try { item = RegistryCompat.item(Identifier.parse(entry.getKey())); }
             catch (RuntimeException e) { item = null; }
             if (item != null && BuiltInRegistries.ITEM.getKey(item).toString().equals(entry.getKey()))
-                ctx.item(item.getDefaultInstance(), RIGHT + 2, y + 1);
+                ctx.item(displayStack(item), RIGHT + 2, y + 1);
             String text = entry.getKey() + "  +" + entry.getValue();
             ctx.text(font, Component.literal(font.plainSubstrByWidth(text, panelWidth - 26)),
                     RIGHT + 22, y + 4, 0xFFAAFFAA, false);
         }
+    }
+
+    private static ItemStack displayStack(Item item) {
+        //#if MC >= 260300
+        //$$ // 主菜单中的物品可以按 ID 编辑，但要等世界组件绑定后才能构造图标。
+        //$$ if (!item.builtInRegistryHolder().areComponentsBound()) return ItemStack.EMPTY;
+        //#endif
+        return item.getDefaultInstance();
     }
 
     private static int clamp(int value, int max) { return Math.max(0, Math.min(value, max)); }
@@ -441,7 +455,9 @@ public final class ManualMaterialQueueGui extends Screen {
     //#endif
 
     private boolean handleClick(double x, double y, int button) {
-        if (button != 0 || y < LIST_TOP || y >= height - 55) return false;
+        if (button != InputConstants.MOUSE_BUTTON_LEFT || y < LIST_TOP || y >= height - 55) {
+            return false;
+        }
         int middle = panelMiddle();
         if (x >= LEFT && x < LEFT + LEFT_WIDTH) {
             int i = batchScroll + ((int) y - LIST_TOP) / ROW;

@@ -1,5 +1,9 @@
 package com.alonediamond.playercontrolpp.gui;
 
+//#if MC < 12110
+//$$ import com.mojang.blaze3d.platform.InputConstants;
+//#endif
+
 //#if MC >= 12110
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
@@ -561,9 +565,6 @@ public class RouteListGui extends Screen {
 
     // --- Keyboard ---
 
-    /** GLFW_KEY_ESCAPE */
-    private static final int KEY_ESCAPE = 256;
-
     /**
      * @return 当前获得焦点的输入框，检查顺序与早先那串逐字段 {@code isFocused()} 一致；
      *         没有焦点则 {@code null}。
@@ -591,7 +592,7 @@ public class RouteListGui extends Screen {
     @Override
     public boolean keyPressed(KeyEvent input) {
         EditBox focused = focusedField();
-        if (input.key() == KEY_ESCAPE && focused == null) {
+        if (input.isEscape() && focused == null) {
             onClose();
             return true;
         }
@@ -607,7 +608,7 @@ public class RouteListGui extends Screen {
     //$$ @Override
     //$$ public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
     //$$     EditBox focused = focusedField();
-    //$$     if (keyCode == KEY_ESCAPE && focused == null) {
+    //$$     if (keyCode == InputConstants.KEY_ESCAPE && focused == null) {
     //$$         onClose();
     //$$         return true;
     //$$     }
