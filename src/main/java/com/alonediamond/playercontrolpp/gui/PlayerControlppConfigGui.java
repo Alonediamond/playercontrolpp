@@ -173,6 +173,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                         Configs.BaritoneSettings.RAW_MATERIAL_CRAFT_MODE,
                         Configs.BaritoneSettings.USE_SUPPLY_SOLVER,
                         Configs.BaritoneSettings.SOLVE_WHOLE_LIST,
+                        Configs.BaritoneSettings.SOLVER_WHOLE_WAIT_SECONDS,
                         Configs.BaritoneSettings.SOLVER_PREFER_FINISHED,
                         Configs.BaritoneSettings.SOLVER_FEWEST_OPERATIONS,
                         Configs.BaritoneSettings.SOLVER_PREFER_KEEPING,

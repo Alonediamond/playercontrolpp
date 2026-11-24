@@ -14,7 +14,7 @@ public final class SupplyModel {
 
     public enum Policy { SAVE_STOCK, FEWEST_OPERATIONS }
     public enum Mode { PREPARE, RAW_ONLY }
-    public enum Status { BEST_IN_MODEL, FEASIBLE_LIMIT, NO_PLAN_IN_MODEL, UNKNOWN_LIMIT }
+    public enum Status { BEST_IN_MODEL, WITHIN_FIVE_PERCENT, FEASIBLE_LIMIT, NO_PLAN_IN_MODEL, UNKNOWN_LIMIT }
 
     /** 空列表表示空格，其他格位必须选择其中一种物品。 */
     public record Slot(List<String> choices) {

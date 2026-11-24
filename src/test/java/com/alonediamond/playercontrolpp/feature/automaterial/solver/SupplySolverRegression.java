@@ -29,6 +29,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class SupplySolverRegression {
     private static final long BUDGET = 200_000;
@@ -44,6 +46,10 @@ public final class SupplySolverRegression {
 
     public static void main(String[] args) {
         SupplySolverRegression suite = new SupplySolverRegression();
+        if (List.of(args).contains("--whole-wait")) {
+            suite.measureSurvivalOrder();
+            return;
+        }
         if (List.of(args).contains("--two-fences")) {
             suite.showPlans = true;
             suite.twoFences();
@@ -84,7 +90,124 @@ public final class SupplySolverRegression {
         concreteWarehouse();
         distributedWarehouse();
         partialOrdersShareStock();
+        timedSurvivalOrder();
+        certifiedAndTimedCosts();
         return checks;
+    }
+
+    /** 依截图保留全部 18 项及数量。仓库为测试假设：九种成品，另有石砖、木板等原料，缺比较器用的石英。 */
+    private Request survivalOrder() {
+        String[] ids = {"smooth_stone", "smooth_stone_slab", "stone_brick_wall", "glass", "stone_pressure_plate",
+                "white_bed", "oak_trapdoor", "water_bucket", "redstone", "stone_brick_stairs", "oak_fence_gate",
+                "oak_sign", "grass_block", "comparator", "pale_oak_sign", "hopper", "mangrove_trapdoor", "redstone_torch"};
+        int[] counts = {567, 196, 52, 32, 28, 24, 24, 21, 16, 14, 14, 10, 10, 8, 6, 5, 4, 4};
+        List<Goal> goals = new ArrayList<>();
+        for (int i = 0; i < ids.length; i++) goals.add(goal("minecraft:" + ids[i], counts[i]));
+        List<Source> warehouse = new ArrayList<>();
+        for (int i : List.of(0, 3, 5, 7, 8, 10, 12, 14, 16)) {
+            warehouse.add(new Source("finished", goals.get(i).item(), counts[i], 3));
+        }
+        warehouse.addAll(List.of(stock("minecraft:smooth_stone", 108), stock("minecraft:stone_bricks", 96),
+                stock("minecraft:stone", 64), stock(OAK, 128), stock("minecraft:stick", 64),
+                stock(DUST, 4), stock(IRON, 25), stock("minecraft:chest", 5)));
+        List<Recipe> recipes = new ArrayList<>();
+        for (int i : List.of(1, 2, 4, 6, 9, 11, 13, 15, 17)) recipes.add(RecipeFixtures.read(goals.get(i).item()));
+        recipes.add(RecipeFixtures.read("minecraft:stick"));
+        return request(recipes, warehouse, goals, 5);
+    }
+
+    private void timedSurvivalOrder() {
+        Request order = survivalOrder();
+        check(order.goals().size() == 18 && order.goals().stream().mapToInt(Goal::units).sum() == 1035, "截图清单共 18 种、1035 件");
+        AtomicBoolean expired = new AtomicBoolean();
+        Delivery first = WholeOrderSolver.planForGathering(order, true, expired::get, candidate -> expired.set(true));
+        check(first.partial() && first.units().size() == 9 && first.result().status() == Status.FEASIBLE_LIMIT,
+                "在首份现货候选后立即到期，只承诺可兑现的九种成品");
+        replayDelivery(order, first);
+        Delivery improved = WholeOrderSolver.planForGathering(order, true, () -> false, null);
+        check(improved.partial() && improved.units().size() == 17 && !improved.units().containsKey("minecraft:comparator")
+                        && improved.units().values().stream().mapToLong(Long::longValue).sum() == 1027,
+                "石英短缺，能够联合分配原料并完成其余 1027 件");
+        replayDelivery(order, improved);
+        Delivery empty = WholeOrderSolver.planForGathering(order, true, () -> true, null);
+        check(empty.result().status() == Status.UNKNOWN_LIMIT && empty.result().plan() == null && empty.units().isEmpty(),
+                "未建立候选就到期，交还逐项备货");
+    }
+
+    private void replayDelivery(Request order, Delivery delivery) {
+        List<Goal> selected = delivery.units().entrySet().stream()
+                .map(entry -> goal(entry.getKey(), Math.toIntExact(entry.getValue()))).toList();
+        replay(new Request(order.catalog(), order.stock(), selected, order.floors(), order.preferKeeping(),
+                order.stopAt(), order.depth(), order.policy(), order.mode()), delivery.result().plan());
+    }
+
+    private void certifiedAndTimedCosts() {
+        Recipe a = simple("first", "part", 1, List.of(new Slot(List.of("a"))));
+        Recipe b = simple("second", "part", 1, List.of(new Slot(List.of("b"))));
+        Request close = request(List.of(a, b), List.of(stock("a", 1000), stock("b", 1040)), List.of(goal("part", 100)), 1);
+        Delivery near = WholeOrderSolver.planForGathering(close, false, () -> false, null);
+        Result exact = WholeOrderSolver.solve(close);
+        check(near.result().status() == Status.WITHIN_FIVE_PERCENT && near.result().plan().score().pressure() == 100000
+                && exact.plan().score().pressure() == 96200, "有更省料的解时，误差证书仍能守住 5%，不限时可求出区别");
+        replayDelivery(close, near);
+
+        Request far = request(List.of(a, b), List.of(stock("a", 500), stock("b", 1000)), close.goals(), 1);
+        List<Delivery> updates = new ArrayList<>();
+        Delivery timed = WholeOrderSolver.planForGathering(far, false, () -> updates.size() >= 2, updates::add);
+        check(updates.size() == 2 && !timed.partial() && timed.result().status() == Status.FEASIBLE_LIMIT
+                && timed.equals(updates.getLast()) && timed.result().plan().score().pressure() < updates.getFirst().result().plan().score().pressure(),
+                "在改进候选后到期，保留最新完整方案且不冒认证优");
+        replayDelivery(far, timed);
+        AtomicBoolean stop = new AtomicBoolean();
+        try {
+            Delivery cancelled = WholeOrderSolver.planForGathering(far, false, stop::get, candidate -> {
+                stop.set(true);
+                Thread.currentThread().interrupt();
+            });
+            check(cancelled.result().plan() == null && cancelled.result().status() == Status.UNKNOWN_LIMIT,
+                    "主动停止优先于到期交付，已找到的方案也丢弃");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private void measureSurvivalOrder() {
+        Request order = survivalOrder();
+        measureWarehouse(order, "grouped stock");
+        List<Source> split = new ArrayList<>();
+        for (int i = 0; i < order.stock().size(); i++) {
+            Source row = order.stock().get(i);
+            int boxes = Math.min(24, row.count());
+            for (int j = 0; j < boxes; j++) {
+                int id = (i * 5 + j) % 47;
+                int count = row.count() / boxes + (j < row.count() % boxes ? 1 : 0);
+                split.add(new Source("box" + id, row.item(), count, 2 + id % 7));
+            }
+        }
+        measureWarehouse(request(order.catalog().recipes(), split, order.goals(), order.depth()), "split stock");
+        List<Source> alternatives = split.stream()
+                .map(row -> new Source(row.box(), row.item(), row.count() * 4, row.visitCost())).toList();
+        measureWarehouse(request(order.catalog().recipes(), alternatives, order.goals(), order.depth()), "overlapping surplus");
+        // 成品齐全也可能很难证优：每箱只有部分品类，玩家可在许多箱子组合之间选择。
+        List<Source> mixed = new ArrayList<>();
+        for (int box = 0; box < 90; box++) {
+            for (int slot = 0; slot < 6; slot++) {
+                Goal goal = order.goals().get((box + slot * 5) % order.goals().size());
+                mixed.add(new Source("mixed" + box, goal.item(), Math.ceilDiv(goal.units(), 10), 3 + box % 4));
+            }
+        }
+        measureWarehouse(request(List.of(), mixed, order.goals(), 0), "90 mixed finished-stock chests");
+    }
+
+    private void measureWarehouse(Request order, String layout) {
+        long started = System.nanoTime();
+        Delivery delivery = WholeOrderSolver.planForGathering(order, true,
+                () -> System.nanoTime() - started >= TimeUnit.SECONDS.toNanos(1), null);
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        replayDelivery(order, delivery);
+        System.out.printf("%s, 18 targets, 1035 units, 1s budget: %d ms, %s, %d units, %d nodes%n", layout, elapsedMillis,
+                delivery.result().status(), delivery.units().values().stream().mapToLong(Long::longValue).sum(),
+                delivery.result().explored());
     }
 
     private void pistons() {
@@ -578,6 +701,15 @@ public final class SupplySolverRegression {
                             check(solved.status() == Status.BEST_IN_MODEL && objective(solved.plan().score(), policy).equals(best),
                                     "正向全枚举对照整单的完整三项成本、硬保留及两箱共享访问");
                             replay(sample, solved.plan());
+                            Delivery timed = WholeOrderSolver.planForGathering(sample, false, () -> false, null);
+                            Score candidate = timed.result().plan().score();
+                            Score optimum = solved.plan().score();
+                            check(!timed.partial() && (timed.result().status() == Status.BEST_IN_MODEL
+                                    ? candidate.equals(optimum) : timed.result().status() == Status.WITHIN_FIVE_PERCENT
+                                    && candidate.protectedUnits() <= optimum.protectedUnits()
+                                    && candidate.pressure() * 100 <= optimum.pressure() * 105
+                                    && candidate.operations() * 100 <= optimum.operations() * 105),
+                                    "两种成本策略下的限时完成结果与独立最优解对照");
                         }
                     }
                 }

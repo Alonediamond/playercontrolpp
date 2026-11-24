@@ -48,7 +48,7 @@ final class CraftBatchActions {
 
     static Plan executable(Result result) {
         return switch (result.status()) {
-            case BEST_IN_MODEL, FEASIBLE_LIMIT -> result.plan();
+            case BEST_IN_MODEL, WITHIN_FIVE_PERCENT, FEASIBLE_LIMIT -> result.plan();
             case NO_PLAN_IN_MODEL, UNKNOWN_LIMIT -> null;
         };
     }

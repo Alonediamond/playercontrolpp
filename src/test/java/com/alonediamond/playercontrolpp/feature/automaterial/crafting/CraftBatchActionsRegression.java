@@ -110,10 +110,15 @@ public final class CraftBatchActionsRegression {
     }
 
     private void statusAndInvalidation() {
+        WholeOrderWait wait = new WholeOrderWait(700, 45);
+        check(!wait.expiredAt(45_000_000_699L) && wait.expiredAt(45_000_000_700L)
+                && !new WholeOrderWait(700, 0).expiredAt(Long.MAX_VALUE), "从首次快照起累计实时时间，0 秒始终等待证明");
         SupplyModel.Plan plan = new SupplyModel.Plan(List.of(), Map.of(), new SupplyModel.Score(0, 0, 0),
                 SupplyModel.Mode.PREPARE);
         check(CraftBatchActions.executable(new SupplyModel.Result(SupplyModel.Status.FEASIBLE_LIMIT,
                 plan, 1, List.of())) == plan, "超限时仍可执行完整候选");
+        check(CraftBatchActions.executable(new SupplyModel.Result(SupplyModel.Status.WITHIN_FIVE_PERCENT,
+                plan, 1, List.of())) == plan, "通过误差核验的方案走相同的执行前复核");
         check(CraftBatchActions.executable(new SupplyModel.Result(SupplyModel.Status.UNKNOWN_LIMIT,
                 null, 1, List.of())) == null, "超限无候选不发游戏动作");
         check(CraftBatchActions.executable(new SupplyModel.Result(SupplyModel.Status.NO_PLAN_IN_MODEL,

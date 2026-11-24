@@ -373,9 +373,11 @@ public class Configs implements IConfigHandler {
                 .apply(KEY_BARITONE);
 
         public static final ConfigBoolean SOLVE_WHOLE_LIST = new ConfigBoolean(
-                "solveWholeList", false, "Wait for a proven optimum for the whole current order.").apply(KEY_BARITONE);
+                "solveWholeList", false, "Plan the whole order before gathering.").apply(KEY_BARITONE);
         public static final ConfigBoolean SOLVER_PREFER_FINISHED = new ConfigBoolean(
                 "solverPreferFinished", true, "Use finished stock when it can cover the entire order without crafting.").apply(KEY_BARITONE);
+        public static final ConfigInteger SOLVER_WHOLE_WAIT_SECONDS = new ConfigInteger(
+                "solverWholeWaitSeconds", 45, 0, 60, "Whole-order planning time in seconds. Set to 0 to wait for proof.").apply(KEY_BARITONE);
         public static final ConfigBoolean SOLVER_FEWEST_OPERATIONS = new ConfigBoolean(
                 "solverFewestOperations", false, "Minimize box visit and crafting costs first.").apply(KEY_BARITONE);
         public static final ConfigStringList SOLVER_PREFER_KEEPING = new ConfigStringList(
@@ -402,7 +404,7 @@ public class Configs implements IConfigHandler {
                 GATHER_TARGET_HIGHLIGHT, GATHER_TARGET_COLOR, GATHER_TARGET_OPACITY,
                 MINING_SEARCH_RADIUS, MINING_ATTEMPT_TICKS, USE_SUPPLY_SOLVER, SOLVE_WHOLE_LIST,
                 SOLVER_FEWEST_OPERATIONS, SOLVER_PREFER_KEEPING, SOLVER_WINDOW_NODES, SOLVER_WINDOW_MILLIS, SOLVER_PLACEMENT_LIMIT,
-                SOLVER_STOCK_FLOORS, SOLVER_PREFER_FINISHED);
+                SOLVER_STOCK_FLOORS, SOLVER_PREFER_FINISHED, SOLVER_WHOLE_WAIT_SECONDS);
     }
 
     public static class CacheNearbySettings {

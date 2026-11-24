@@ -50,6 +50,7 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
@@ -88,6 +89,8 @@ final class OptimizedCraftBatch {
     private final String rootId;
     private final RawNode tree;
     private final boolean wholeOrder;
+    private final WholeOrderWait wait;
+    private final AtomicReference<SupplyModel.Delivery> candidate = new AtomicReference<>();
     private final boolean preferFinished;
     private boolean checkingFinished;
     private boolean partialDelivery;
@@ -116,17 +119,19 @@ final class OptimizedCraftBatch {
     private FutureTask<SupplyModel.Delivery> future;
     private int ticks;
     private boolean feasibleAtLimit;
+    private boolean withinFivePercent;
     private List<Step> steps = List.of();
     private SupplySchedule schedule;
     private WholeCapture wholeCapture;
     private Map<Item, Integer> targets;
 
     OptimizedCraftBatch(GatherContext ctx, Item root, RawNode tree, int target, Set<BlockPos> excluded) {
-        this(ctx, root, tree, target, excluded, null);
+        this(ctx, root, tree, target, excluded, null, null);
     }
 
     OptimizedCraftBatch(GatherContext ctx, Item root, RawNode tree, int target, Set<BlockPos> excluded,
-                        Map<Item, Integer> protectedStock) {
+                        Map<Item, Integer> protectedStock, WholeOrderWait wait) {
+        this.wait = wait;
         this.level = ctx.client.level;
         this.player = ctx.client.player;
         this.requirementsRevision = ctx.requirements.revision();
@@ -200,6 +205,7 @@ final class OptimizedCraftBatch {
 
     List<Step> steps() { return steps; }
     boolean feasibleAtLimit() { return feasibleAtLimit; }
+    boolean withinFivePercent() { return withinFivePercent; }
     boolean partialDelivery() { return partialDelivery; }
 
     boolean isComplete(GatherContext ctx) {
@@ -224,6 +230,7 @@ final class OptimizedCraftBatch {
     Progress advance(GatherContext ctx) {
         if (!isCurrent(ctx)) return Progress.STALE;
         if (future != null) return poll(ctx);
+        if (wholeOrder && wait.expired()) return Progress.LIMIT;
         if (!wholeOrder && ++ticks > CAPTURE_TICK_LIMIT) return Progress.LIMIT;
         if (recipes == null || traceStops == null || depth < 0 || depth == 0 && !wholeOrder) return Progress.UNAVAILABLE;
         if (!checkingFinished && !recipes.tick(ctx.client)) return Progress.PENDING;
@@ -454,27 +461,42 @@ final class OptimizedCraftBatch {
         int nodes = nodeLimit;
         long nanos = TimeUnit.MILLISECONDS.toNanos(timeMillis);
         boolean useFinished = preferFinished;
-        future = wholeOrder ? new FutureTask<>(() -> WholeOrderSolver.planForGathering(request, useFinished))
-                : new FutureTask<>(() -> new SupplyModel.Delivery(SupplySolver.solve(request, nodes, nanos), Map.of(), false));
+        if (wholeOrder && wait.seconds() > 0) {
+            WholeOrderWait deadline = wait;
+            AtomicReference<SupplyModel.Delivery> latest = candidate;
+            future = new FutureTask<>(() -> WholeOrderSolver.planForGathering(request, useFinished, deadline::expired, latest::set));
+        } else if (wholeOrder) {
+            future = new FutureTask<>(() -> WholeOrderSolver.planForGathering(request, useFinished));
+        } else {
+            future = new FutureTask<>(() -> new SupplyModel.Delivery(SupplySolver.solve(request, nodes, nanos), Map.of(), false));
+        }
         WORKER.execute(future);
         return Progress.PENDING;
     }
 
     private Progress poll(GatherContext ctx) {
-        if (!future.isDone()) return Progress.PENDING;
+        SupplyModel.Delivery delivery;
+        if (!future.isDone() && wholeOrder && wait.expired() && future.cancel(true)) {
+            // 工作线程可能还在排队或计算一个节点。只取该快照已发布的完整候选，无需阻塞客户端。
+            WORKER.remove(future);
+            delivery = candidate.get();
+            if (delivery == null) return Progress.LIMIT;
+        } else if (!future.isDone()) {
+            return Progress.PENDING;
+        } else if (future.state() == Future.State.FAILED) {
+            Playercontrolpp.LOGGER.warn("Raw material solver failed", future.exceptionNow());
+            return Progress.UNAVAILABLE;
+        } else if (future.state() == Future.State.SUCCESS) {
+            delivery = future.resultNow();
+        } else {
+            return Progress.STALE;
+        }
         if (!traceStopsCurrent()) return Progress.STALE;
         Function<Item, Balance> current = currentBalances(ctx);
         if (wholeOrder && (initialBalances.entrySet().stream().anyMatch(entry -> !entry.getValue().equals(current.apply(entry.getKey())))
                 || tableAvailable != stationAvailable(CraftStationManager.Kind.CRAFTING_TABLE)
                 || cutterAvailable != stationAvailable(CraftStationManager.Kind.STONECUTTER))) return Progress.STALE;
-        if (future.state() == Future.State.FAILED) {
-            Playercontrolpp.LOGGER.warn("Raw material solver failed", future.exceptionNow());
-            return Progress.UNAVAILABLE;
-        }
-        if (future.state() != Future.State.SUCCESS) return Progress.STALE;
-        SupplyModel.Delivery delivery = future.resultNow();
         SupplyModel.Result result = delivery.result();
-        if (wholeOrder && result.status() == SupplyModel.Status.FEASIBLE_LIMIT) return Progress.LIMIT;
         SupplyModel.Plan plan = CraftBatchActions.executable(result);
         if (plan == null) {
             return result.status() == SupplyModel.Status.UNKNOWN_LIMIT ? Progress.LIMIT : Progress.NO_PLAN;
@@ -493,6 +515,7 @@ final class OptimizedCraftBatch {
             steps = CraftBatchActions.group(translated, inventory);
         }
         feasibleAtLimit = result.status() == SupplyModel.Status.FEASIBLE_LIMIT;
+        withinFivePercent = result.status() == SupplyModel.Status.WITHIN_FIVE_PERCENT;
         return Progress.READY;
     }
 

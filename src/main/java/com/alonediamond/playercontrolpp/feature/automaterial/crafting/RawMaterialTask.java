@@ -104,6 +104,7 @@ public final class RawMaterialTask {
     private OptimizedCraftBatch optimized;
     /** 整单独占本次执行；失败后不能再让逐项追溯消耗同一份库存。 */
     private Map<Item, Integer> wholeOrderReserves;
+    private WholeOrderWait wholeOrderWait;
     private final Deque<Step> optimizedSteps = new ArrayDeque<>();
     private final Set<BlockPos> failedSources = new HashSet<>();
     private boolean optimizeBatches;
@@ -166,13 +167,14 @@ public final class RawMaterialTask {
     public void startWholeOrder(GatherContext ctx, Map<Item, Integer> completed) {
         reset();
         rootItem = ctx.targetItem();
+        wholeOrderWait = new WholeOrderWait(System.nanoTime(), Configs.BaritoneSettings.SOLVER_WHOLE_WAIT_SECONDS.getIntegerValue());
         wholeOrderReserves = Map.copyOf(completed);
         startWholeOrderCapture(ctx);
         MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + "whole_search");
     }
 
     private void startWholeOrderCapture(GatherContext ctx) {
-        optimized = new OptimizedCraftBatch(ctx, rootItem, null, ctx.targetFor(rootItem), failedSources, wholeOrderReserves);
+        optimized = new OptimizedCraftBatch(ctx, rootItem, null, ctx.targetFor(rootItem), failedSources, wholeOrderReserves, wholeOrderWait);
         stage = Stage.OPTIMIZE;
     }
 
@@ -504,8 +506,15 @@ public final class RawMaterialTask {
         switch (optimized.advance(ctx)) {
             case PENDING -> { }
             case READY -> {
-                if (optimized.partialDelivery()) MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + "partial_ready");
-                if (optimized.feasibleAtLimit() && !feasibleLimitShown) {
+                if (wholeOrderReserves != null && optimized.feasibleAtLimit()) {
+                    String key = optimized.partialDelivery() ? "whole_timed_partial" : "whole_timed_full";
+                    MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + key);
+                } else if (optimized.withinFivePercent()) {
+                    String key = optimized.partialDelivery() ? "whole_near_partial" : "whole_near_full";
+                    MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + key);
+                } else if (optimized.partialDelivery()) {
+                    MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + "partial_ready");
+                } else if (optimized.feasibleAtLimit() && !feasibleLimitShown) {
                     feasibleLimitShown = true;
                     MessageUtil.sendActionBar(ctx.client, SOLVER_MESSAGE + "feasible_limit", name(rootItem));
                 }
@@ -1040,6 +1049,7 @@ public final class RawMaterialTask {
     private void reset() {
         clearOptimized();
         wholeOrderReserves = null;
+        wholeOrderWait = null;
         failedSources.clear();
         optimizeBatches = false;
         replanUsed = false;

@@ -19,6 +19,7 @@ import com.alonediamond.playercontrolpp.feature.automaterial.crafting.solver.Sup
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -27,6 +28,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.LongConsumer;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * 对整单按允许的制作层数倒推。第 d 层的每种需求可由本层多个配方和上一层的现货共同满足。
@@ -35,11 +38,18 @@ import java.util.function.LongConsumer;
 public final class WholeOrderSolver {
     // 记忆表满时继续搜索；这个值只影响重复工作量，不影响可交付的计划或最优性。
     private static final int MEMO_ENTRIES = 32_768;
+    private static final int SHALLOW_PROBE_NODES = 2048;
     private record Stage(int level, Map<String, Long> due, Map<String, Long> earlier, int recipeIndex) {}
     private record History(List<? extends Action> actions, History later) {}
     private record Path(long crafts, History history) {}
     private record BoxBound(long largest, int cheapest, boolean exclusive) {}
     private final Request request;
+    private final BooleanSupplier expired;
+    private final Consumer<Delivery> publish;
+    private final Map<String, Long> wanted;
+    private Delivery incumbent;
+    private OrderCostBounds bounds;
+    private boolean nearOptimal;
     private final Map<String, List<Integer>> sources = new HashMap<>();
     private final Map<String, BoxBound> boxBounds = new HashMap<>();
     private final Map<String, List<BatchLayout>> recipes = new HashMap<>();
@@ -52,27 +62,72 @@ public final class WholeOrderSolver {
     private Plan best;
     private long explored;
 
-    private WholeOrderSolver(Request request) { this.request = request; }
+    private WholeOrderSolver(Request request, BooleanSupplier expired, Consumer<Delivery> publish) {
+        this.request = request;
+        this.expired = expired;
+        this.publish = publish;
+        this.wanted = goals();
+    }
 
     public static Result solve(Request request) {
         if (request.mode() != Mode.PREPARE) throw new IllegalArgumentException("整单精确求解需要成品目标");
-        WholeOrderSolver solver = new WholeOrderSolver(request);
-        if (solver.index()) solver.search(solver.goals(), request.depth(), false);
+        WholeOrderSolver solver = new WholeOrderSolver(request, null, null);
+        if (solver.index()) solver.search(solver.wanted, request.depth(), false);
+        if (solver.cancelled()) return new Result(Status.UNKNOWN_LIMIT, null, solver.explored, List.of());
         return solver.result();
     }
 
     /** 只在全单已证不可行后缩小交付量。每次可行性试算都重新联合分配所有已选目标，直到最后才选成本最低的方案。 */
     public static Delivery planForGathering(Request request, boolean preferFinished) {
+        return planForGathering(request, preferFinished, null, null);
+    }
+
+    /** 限时模式发布完整、不可变的候选，客户端到点可直接接手。取消整单时调用者丢弃整个任务。 */
+    public static Delivery planForGathering(Request request, boolean preferFinished, BooleanSupplier expired,
+                                           Consumer<Delivery> publish) {
         if (request.mode() != Mode.PREPARE) throw new IllegalArgumentException("整单精确求解需要成品目标");
-        WholeOrderSolver solver = new WholeOrderSolver(request);
-        Map<String, Long> wanted = solver.goals();
-        if (!solver.index()) return new Delivery(solver.result(), Map.of(), false);
-        if (solver.search(wanted, solver.deliveryDepth(wanted, preferFinished), false) || cancelled()) {
-            return new Delivery(solver.result(), wanted, false);
+        WholeOrderSolver solver = new WholeOrderSolver(request, expired, publish);
+        return solver.gather(preferFinished);
+    }
+
+    private Delivery gather(boolean preferFinished) {
+        Map<String, Long> selected = wanted;
+        if (index()) {
+            if (expired != null && !wanted.isEmpty()) seed(preferFinished);
+            if (!cancelled() && !search(wanted, deliveryDepth(wanted, preferFinished), false) && !cancelled()) {
+                selected = attainable(wanted, preferFinished);
+                if (!selected.isEmpty() && !cancelled()) search(selected, deliveryDepth(selected, preferFinished), false);
+            }
+        } else {
+            selected = Map.of();
         }
-        Map<String, Long> partial = solver.attainable(wanted);
-        if (!partial.isEmpty() && !cancelled()) solver.search(partial, solver.deliveryDepth(partial, preferFinished), false);
-        return new Delivery(solver.result(), partial, true);
+        if (cancelled()) {
+            if (!Thread.currentThread().isInterrupted() && incumbent != null) {
+                Result limited = new Result(Status.FEASIBLE_LIMIT, incumbent.result().plan(), explored, List.of());
+                return new Delivery(limited, incumbent.units(), incumbent.partial());
+            }
+            return new Delivery(new Result(Status.UNKNOWN_LIMIT, null, explored, List.of()), Map.of(), false);
+        }
+        return new Delivery(result(), selected, !selected.equals(wanted));
+    }
+
+    /** 先保留可直接提货的清单，再短试一、二层制作。试算预算只用于尽早取得候选，不参与证优剪枝。 */
+    private void seed(boolean preferFinished) {
+        for (int level = 0; level <= Math.min(request.depth(), 2) && !cancelled(); level++) {
+            Map<String, Long> subset = clipped(wanted, level);
+            if (subset.isEmpty() || incumbent != null && incumbent.units().equals(wanted)) continue;
+            if (preferFinished && level > 0 && covered(subset, 0)) continue;
+            search(subset, level, true, level == 0 ? Long.MAX_VALUE : SHALLOW_PROBE_NODES);
+        }
+    }
+
+    private Map<String, Long> clipped(Map<String, Long> goals, int level) {
+        Map<String, Long> clipped = new LinkedHashMap<>();
+        goals.forEach((item, units) -> {
+            long maximum = Math.min(units, capacities.get(level).getOrDefault(item, 0L));
+            if (maximum > 0) clipped.put(item, maximum);
+        });
+        return clipped;
     }
 
     private int deliveryDepth(Map<String, Long> goals, boolean preferFinished) {
@@ -90,12 +145,8 @@ public final class WholeOrderSolver {
         return goals;
     }
 
-    private Map<String, Long> attainable(Map<String, Long> wanted) {
-        Map<String, Long> clipped = new LinkedHashMap<>();
-        wanted.forEach((item, units) -> {
-            long maximum = Math.min(units, capacities.getLast().getOrDefault(item, 0L));
-            if (maximum > 0) clipped.put(item, maximum);
-        });
+    private Map<String, Long> attainable(Map<String, Long> wanted, boolean preferFinished) {
+        Map<String, Long> clipped = clipped(wanted, request.depth());
         if (clipped.isEmpty() || cancelled()) return Map.of();
         if (!clipped.equals(wanted) && (covered(clipped, 0) || search(clipped, request.depth(), true))) return clipped;
 
@@ -106,13 +157,13 @@ public final class WholeOrderSolver {
             String item = entry.getKey();
             long high = entry.getValue();
             kept.put(item, high);
-            if (search(kept, request.depth(), true)) continue;
+            if (search(kept, deliveryDepth(kept, preferFinished), true)) continue;
             long low = 0;
             high--;
             while (low < high && !cancelled()) {
                 long probe = low + (high - low + 1) / 2;
                 kept.put(item, probe);
-                if (search(kept, request.depth(), true)) low = probe;
+                if (search(kept, deliveryDepth(kept, preferFinished), true)) low = probe;
                 else high = probe - 1;
             }
             if (low == 0) kept.remove(item);
@@ -122,15 +173,29 @@ public final class WholeOrderSolver {
     }
 
     private boolean search(Map<String, Long> goals, int level, boolean firstFeasible) {
-        best = null;
+        return search(goals, level, firstFeasible, Long.MAX_VALUE);
+    }
+
+    private boolean search(Map<String, Long> goals, int level, boolean firstFeasible, long nodes) {
+        // 浅层试算另起搜索；最终优化才可继承其他层数对同一交付量给出的可行上界。
+        best = !firstFeasible && incumbent != null && incumbent.units().equals(goals) ? incumbent.result().plan() : null;
+        nearOptimal = false;
         pending.clear();
         cheapestPrefix.clear();
         delivery = new TreeMap<>(goals);
         // 一项连乐观上界都达不到就能判整单无解，避免先枚举清单前面的大标签配方。
         if (!covered(delivery, level)) return false;
+        Score goalBound = firstFeasible ? null : goalBound(level);
         Stage initial = new Stage(level, delivery, Map.of(), 0);
         pending.push(() -> expand(initial, new Path(0, null)));
-        while (!pending.isEmpty() && !cancelled() && !(firstFeasible && best != null)) {
+        while (!pending.isEmpty() && !cancelled() && nodes-- > 0) {
+            if (best != null) {
+                if (firstFeasible || best.score().equals(goalBound)) break;
+                if (expired != null && OrderCostBounds.withinFivePercent(best.score(), goalBound)) {
+                    nearOptimal = true;
+                    break;
+                }
+            }
             explored++;
             pending.pop().run();
         }
@@ -138,11 +203,21 @@ public final class WholeOrderSolver {
     }
 
     private Result result() {
-        if (cancelled()) return new Result(Status.UNKNOWN_LIMIT, null, explored, List.of());
-        return new Result(best == null ? Status.NO_PLAN_IN_MODEL : Status.BEST_IN_MODEL, best, explored, List.of());
+        Status status = best == null ? Status.NO_PLAN_IN_MODEL : Status.BEST_IN_MODEL;
+        return new Result(nearOptimal ? Status.WITHIN_FIVE_PERCENT : status, best, explored, List.of());
     }
 
-    private static boolean cancelled() { return Thread.currentThread().isInterrupted(); }
+    private boolean cancelled() { return Thread.currentThread().isInterrupted() || expired != null && expired.getAsBoolean(); }
+
+    private Score goalBound(int level) {
+        Score cost = bounds.estimate(level, delivery, Map.of(), 0);
+        Map<String, Long> mustFetch = new TreeMap<>();
+        delivery.forEach((item, count) -> {
+            if (level == 0 || !recipes.containsKey(item)) mustFetch.put(item, count);
+        });
+        return new Score(cost.protectedUnits(), cost.pressure(),
+                saturatedAdd(cost.operations(), minimumVisitCost(mustFetch, 0, Set.of())));
+    }
 
     private boolean index() {
         Map<String, Long> stock = new HashMap<>();
@@ -165,6 +240,8 @@ public final class WholeOrderSolver {
             if (previous != null && !previous.equals(row.item())) sharedBoxes.add(row.box());
         }
         for (Map.Entry<String, List<Integer>> source : sources.entrySet()) {
+            source.getValue().sort(Comparator.comparingInt((Integer row) -> request.stock().get(row).visitCost())
+                    .thenComparing(row -> request.stock().get(row).count(), Comparator.reverseOrder()));
             Map<String, Long> perBox = new HashMap<>();
             long later = 0;
             int cheapest = Integer.MAX_VALUE;
@@ -183,6 +260,7 @@ public final class WholeOrderSolver {
             boxBounds.put(source.getKey(), new BoxBound(largest, cheapest, exclusive));
         }
         capacities.add(stock);
+        bounds = new OrderCostBounds(stock, request.preferKeeping());
         Set<String> previousHeight = new HashSet<>();
         stock.forEach((item, count) -> { if (count > 0) previousHeight.add(item); });
         byHeight.add(Set.of());
@@ -213,6 +291,7 @@ public final class WholeOrderSolver {
             }
             capacities.add(next);
             byHeight.add(layouts);
+            bounds.addLayer(layouts);
             previousHeight.clear();
             previousHeight.addAll(thisHeight);
         }
@@ -242,7 +321,8 @@ public final class WholeOrderSolver {
     }
 
     private void expand(Stage stage, Path path) {
-        if (best != null && new Score(0, 0, path.crafts).compare(best.score(), request.policy()) >= 0) return;
+        if (best != null && bounds.estimate(stage.level, stage.due, stage.earlier, path.crafts)
+                .compare(best.score(), request.policy()) >= 0) return;
         if (stage.due.isEmpty()) {
             if (stage.earlier.isEmpty()) {
                 chooseSources(Map.of(), path);
@@ -357,6 +437,7 @@ public final class WholeOrderSolver {
             List<Action> actions = new ArrayList<>();
             for (History node = history; node != null; node = node.later) actions.addAll(node.actions);
             best = new Plan(actions, surplus(actions), score, request.mode());
+            if (expired != null) retainCandidate();
             return;
         }
         String item = needs.keySet().iterator().next();
@@ -383,6 +464,20 @@ public final class WholeOrderSolver {
         Score nextScore = cost;
         History taken = new History(List.of(new Take(sourceIndex, item, count)), history);
         pending.push(() -> withdraw(change(needs, item, -count), count == units ? 0 : index + 1, nextVisited, nextScore, taken));
+    }
+
+    /** 不同试算的 best 只在本次交付量内可比。跨试算先比清单优先级，再比同一交付量的成本。 */
+    private void retainCandidate() {
+        if (incumbent != null) {
+            int order = 0;
+            for (String item : wanted.keySet()) {
+                order = Long.compare(delivery.getOrDefault(item, 0L), incumbent.units().getOrDefault(item, 0L));
+                if (order != 0) break;
+            }
+            if (order < 0 || order == 0 && best.score().compare(incumbent.result().plan().score(), request.policy()) >= 0) return;
+        }
+        incumbent = new Delivery(new Result(Status.FEASIBLE_LIMIT, best, explored, List.of()), delivery, !delivery.equals(wanted));
+        if (publish != null) publish.accept(incumbent);
     }
 
     /** 每种材料先用满已访问箱和免费来源。余量至少需要若干个最大箱，按最低访问费计价只会低估。 */
