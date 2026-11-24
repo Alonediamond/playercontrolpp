@@ -1,10 +1,15 @@
 package com.alonediamond.playercontrolpp.inventory;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.Container;
+import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 /** 菜单状态与 Screen 分开判断：自动缓存会屏蔽 GUI，但菜单仍然正常同步。 */
 public final class ContainerMenus {
@@ -17,6 +22,13 @@ public final class ContainerMenus {
     /** 固定来源的取料只操作可按普通储物菜单核对的方块。 */
     public static boolean isPlainStorageBlock(Block block) {
         return block == Blocks.CHEST || block == Blocks.TRAPPED_CHEST || block == Blocks.BARREL;
+    }
+
+    /** 末影箱的库存随玩家保存，其他标记容器须提供世界内库存和菜单。 */
+    public static boolean isMarkedStorage(Level level, BlockPos pos) {
+        if (level.getBlockState(pos).is(Blocks.ENDER_CHEST)) return true;
+        BlockEntity entity = level.getBlockEntity(pos);
+        return entity instanceof Container && entity instanceof MenuProvider;
     }
 
     /** 只检查容器侧，玩家背包里的物品不能作为内容已出现的依据。 */

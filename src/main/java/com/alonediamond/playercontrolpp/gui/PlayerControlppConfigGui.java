@@ -9,14 +9,20 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 import com.alonediamond.playercontrolpp.compat.DrawCtx;
 import com.alonediamond.playercontrolpp.compat.ScreenCompat;
+import com.alonediamond.playercontrolpp.compat.WorldMarkScope;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.ScopedBlockMarks;
+import com.alonediamond.playercontrolpp.feature.automaterial.ScopedBlockMarks.Availability;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftStationManager.Kind;
+import com.alonediamond.playercontrolpp.feature.automaterial.restock.MarkedContainerManager;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.route.RouteManager;
 
 import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase.ConfigOptionWrapper;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
+import fi.dy.masa.malilib.gui.Message.MessageType;
 import fi.dy.masa.malilib.gui.button.ButtonBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
 import fi.dy.masa.malilib.gui.button.IButtonActionListener;
@@ -25,11 +31,13 @@ import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Predicate;
 
 public class PlayerControlppConfigGui extends GuiConfigsBase {
 
@@ -50,6 +58,10 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         }
         List<TabButton> tabs = layoutTabs();
         listTop = tabs.isEmpty() ? 52 : tabs.getLast().y() + 26;
+        Minecraft mc = Minecraft.getInstance();
+        WorldMarkScope scope = WorldMarkScope.current(mc);
+        boolean showMarks = scope != null && (selectedTab == ConfigGuiTab.CRAFTING || selectedTab == ConfigGuiTab.RESTOCK);
+        if (showMarks) listTop += 22;
         setListPosition(10, listTop);
         if (initialized) {
             saveCurrentList();
@@ -64,6 +76,56 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                     tab.tab().getDisplayName());
             addButton(button, new ButtonListener(tab.tab(), this));
         }
+        if (showMarks) addMarkButtons(mc, scope);
+    }
+
+    private void addMarkButtons(Minecraft mc, WorldMarkScope scope) {
+        int x = 10;
+        if (selectedTab == ConfigGuiTab.CRAFTING) {
+            x = addMarkButton(x, "crafting_tables", Kind.CRAFTING_TABLE.marks(), scope, false,
+                    pos -> Kind.CRAFTING_TABLE.availability(mc.level, pos) == Availability.VALID);
+            x = addMarkButton(x, "stonecutters", Kind.STONECUTTER.marks(), scope, false,
+                    pos -> Kind.STONECUTTER.availability(mc.level, pos) == Availability.VALID);
+        } else {
+            MarkedContainerManager containers = MarkedContainerManager.getInstance();
+            x = addMarkButton(x, "containers", containers.marks(), scope, true,
+                    pos -> containers.availability(mc.level, pos) == Availability.VALID);
+        }
+        ButtonGeneric importButton = markButton(x, "import_legacy");
+        addButton(importButton, (button, mouseButton) -> importLegacyMarks(mc, scope));
+    }
+
+    private int addMarkButton(int x, String label, ScopedBlockMarks marks, WorldMarkScope scope,
+                              boolean allowDisabled, Predicate<BlockPos> verified) {
+        ButtonGeneric button = markButton(x, label);
+        addButton(button, (clicked, mouseButton) -> {
+            Minecraft mc = Minecraft.getInstance();
+            if (!scope.equals(WorldMarkScope.current(mc))) return;
+            saveCurrentList();
+            ScreenCompat.setScreen(mc, new ScopedBlockMarkEditor(this, marks, scope, allowDisabled, verified));
+        });
+        return x + button.getWidth() + 2;
+    }
+
+    private ButtonGeneric markButton(int x, String key) {
+        String label = StringUtils.translate("playercontrolpp.gui.marks." + key);
+        return new ButtonGeneric(x, listTop - 24, getStringWidth(label) + 10, 20, label);
+    }
+
+    private void importLegacyMarks(Minecraft mc, WorldMarkScope scope) {
+        if (!scope.equals(WorldMarkScope.current(mc))) return;
+        int imported = 0;
+        if (selectedTab == ConfigGuiTab.CRAFTING) {
+            for (Kind kind : Kind.values()) {
+                imported += kind.marks().importLegacy(scope,
+                        pos -> kind.availability(mc.level, pos) == Availability.VALID);
+            }
+        } else {
+            MarkedContainerManager containers = MarkedContainerManager.getInstance();
+            imported = containers.marks().importLegacy(scope,
+                    pos -> containers.availability(mc.level, pos) == Availability.VALID);
+        }
+        addMessage(MessageType.INFO, "playercontrolpp.message.marks.imported", imported);
     }
 
     private List<TabButton> layoutTabs() {
@@ -96,11 +158,8 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
 
     private void switchTab(ConfigGuiTab tab) {
         if (selectedTab == tab) return;
-        saveCurrentList();
-        clearOptions();
         selectedTab = tab;
-        reCreateListWidget();
-        getListWidget().initGui();
+        initGui();
     }
 
     void restartSearch() {
@@ -187,14 +246,13 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                         Configs.BaritoneSettings.MINING_ATTEMPT_SECONDS,
                         Configs.BaritoneSettings.CRAFT_STATION_SOURCE,
                         Configs.Hotkeys.MARK_CRAFTING_TABLE,
-                        Configs.BaritoneSettings.CRAFTING_TABLE_POSITIONS,
-                        Configs.Hotkeys.MARK_STONECUTTER,
-                        Configs.BaritoneSettings.STONECUTTER_POSITIONS));
+                        Configs.Hotkeys.MARK_STONECUTTER));
             case RESTOCK:
                 List<IConfigBase> restockOptions = new ArrayList<>();
                 restockOptions.add(Configs.Hotkeys.ONE_CLICK_BUILD_RESTOCK);
                 restockOptions.add(Configs.Hotkeys.MARK_CONTAINER);
                 restockOptions.addAll(Configs.Restocks.OPTIONS);
+                restockOptions.remove(Configs.Restocks.MARKED_CONTAINERS);
                 replaceOption(restockOptions, Configs.Restocks.BUILD_LAYER_STABLE_TICKS,
                         Configs.Restocks.BUILD_LAYER_STABLE_SECONDS);
                 return ConfigOptionWrapper.createFor(restockOptions);

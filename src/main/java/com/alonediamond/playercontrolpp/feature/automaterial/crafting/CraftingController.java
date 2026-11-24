@@ -6,7 +6,9 @@ import com.alonediamond.playercontrolpp.compat.CraftingRecipes;
 import com.alonediamond.playercontrolpp.compat.SlotActionCompat;
 import com.alonediamond.playercontrolpp.config.Configs;
 import com.alonediamond.playercontrolpp.config.CraftStationSource;
+import com.alonediamond.playercontrolpp.feature.automaterial.ScopedBlockMarks.Availability;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Craft;
+import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftStationManager.Kind;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.WorkstationOrder.ExactPlacement;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.QuickShulkerIntegration;
@@ -24,8 +26,6 @@ import net.minecraft.world.inventory.StonecutterMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.LinkedHashMap;
@@ -258,7 +258,13 @@ final class CraftingController {
             fail(mc, "no world workstation position");
             return;
         }
-        if (canReachStation(mc)) {
+        Availability availability = stationAvailability(mc);
+        if (availability == Availability.INVALID) {
+            BaritoneIntegration.getInstance().cancelPathing();
+            fail(mc, "world workstation is gone or changed at " + this.stationPos.toShortString());
+            return;
+        }
+        if (availability == Availability.VALID && canReachStation(mc)) {
             BaritoneIntegration.getInstance().cancelPathing();
             this.stage = Stage.OPEN;
             this.cooldown = ACTION_COOLDOWN;
@@ -355,11 +361,8 @@ final class CraftingController {
         }
 
         // 方块可能已经被拆掉或被换成别的东西：开之前确认还是同一种工作站。
-        Block expectedBlock = this.station == Station.STONECUTTER
-                ? Blocks.STONECUTTER
-                : Blocks.CRAFTING_TABLE;
-        if (!mc.level.getBlockState(this.stationPos).is(expectedBlock)) {
-            fail(mc, "world workstation is gone or changed at " + this.stationPos.toShortString());
+        if (stationAvailability(mc) != Availability.VALID) {
+            fail(mc, "could not verify world workstation block at " + this.stationPos.toShortString());
             return;
         }
 
@@ -873,7 +876,7 @@ final class CraftingController {
         // 1) 背包里的工作站（需要 QuickShulker 才能就地打开）。
         if (this.mode != CraftStationSource.WORLD && tryInventoryStation(mc, stationItem, stonecutter)) return true;
         // 2) 世界坐标里记录的工作站（不装 QuickShulker 也能用）。
-        if (this.mode != CraftStationSource.INVENTORY && tryWorldStation(mc, stationItem, stonecutter)) return true;
+        if (this.mode != CraftStationSource.INVENTORY && tryWorldStation(mc, stonecutter)) return true;
         return false;
     }
 
@@ -909,12 +912,9 @@ final class CraftingController {
      *
      * <p>切石机同样要求背包里有输入材料——右键打开的只是工作站，原料还是要从身上摆过去。
      */
-    private boolean tryWorldStation(Minecraft mc, Item stationItem, boolean stonecutter) {
-        CraftStationManager.Kind kind = stonecutter
-                ? CraftStationManager.Kind.STONECUTTER
-                : CraftStationManager.Kind.CRAFTING_TABLE;
-        BlockPos pos = CraftStationManager.getInstance().nearest(
-                mc.level, mc.player.blockPosition(), kind);
+    private boolean tryWorldStation(Minecraft mc, boolean stonecutter) {
+        Kind kind = stonecutter ? Kind.STONECUTTER : Kind.CRAFTING_TABLE;
+        BlockPos pos = CraftStationManager.getInstance().nearest(mc, kind);
         if (pos == null) return false;
 
         if (stonecutter) {
@@ -931,6 +931,11 @@ final class CraftingController {
         this.stationPos = pos;
         this.source = StationSource.WORLD;
         return true;
+    }
+
+    private Availability stationAvailability(Minecraft mc) {
+        Kind kind = this.station == Station.STONECUTTER ? Kind.STONECUTTER : Kind.CRAFTING_TABLE;
+        return mc.level == null ? Availability.INVALID : kind.availability(mc.level, this.stationPos);
     }
 
     /** @return 玩家离工作站够不够近，可以直接右键。 */

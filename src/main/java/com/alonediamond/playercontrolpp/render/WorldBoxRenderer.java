@@ -53,9 +53,8 @@ import java.util.OptionalDouble;
  *   <li><b>1.21.1 – 26.1.2</b>：{@code MultiBufferSource.BufferSource} + {@code RenderType}。
  *       原版的 {@code debugQuads()} 正好就是我们要的管线
  *       （POSITION_COLOR + QUADS + 半透明混合 + 不写深度 + 不剔除）。</li>
- *   <li><b>26.2 起</b>：{@code MultiBufferSource} 被移除，改用它内部的
- *       {@code StagedVertexBuffer} + {@code PreparedRenderType}；26.3 再把
- *       {@code drawFromBuffer} 拆成需要显式 {@code RenderPass} 的重载。</li>
+ *   <li><b>26.2 起</b>：高亮用独立的 {@code StagedVertexBuffer} 和 {@code PreparedRenderType}；
+ *       26.3 的 {@code drawFromBuffer} 还需要调用方提供 {@code RenderPass}。</li>
  * </ul>
  *
  * <p>管线创建与降级由 {@link HighlightPipelines} 负责，本类只处理几何、矩阵和提交。
@@ -67,7 +66,11 @@ public final class WorldBoxRenderer {
     private static final float HALO_INFLATE = 0.020F;
     private static final float HALO_ALPHA_SCALE = 0.35F;
 
-    private WorldBoxRenderer() {}
+    //#if MC >= 260200
+    private static final int INITIAL_STAGING_CAPACITY_BYTES = 4096;
+
+    private StagedVertexBuffer stagedBuffer;
+    //#endif
 
     /**
      * 画一组方块。
@@ -75,7 +78,7 @@ public final class WorldBoxRenderer {
      * @param boxes   方块坐标
      * @param style   颜色与实体框透明度；光晕层按 {@link #HALO_ALPHA_SCALE} 变淡
      */
-    public static void renderBoxes(Collection<BlockPos> boxes, BoxStyle style) {
+    public void renderBoxes(Collection<BlockPos> boxes, BoxStyle style) {
         if (boxes.isEmpty()) return;
 
         Minecraft mc = Minecraft.getInstance();
@@ -167,33 +170,53 @@ public final class WorldBoxRenderer {
     // ---- 提交：26.2+ ----
 
     //#if MC >= 260200
-    private static void submitStaged(Minecraft mc, Collection<BlockPos> boxes, Vec3 cam,
-                                     float red, float green, float blue, float alpha) {
+    private void submitStaged(Minecraft mc, Collection<BlockPos> boxes, Vec3 cam,
+                              float red, float green, float blue, float alpha) {
         RenderType type = worldType();
         // prepare() 会把此刻的模型视图矩阵写进 DynamicTransforms，所以必须在设置矩阵之后调用。
         PreparedRenderType prepared = type.prepare();
-        StagedVertexBuffer buffer = mc.gameRenderer.renderBuffers().stagedVertexBuffer();
-        StagedVertexBuffer.Draw draw = buffer.appendDraw(type.format(), type.primitiveTopology());
-        VertexConsumer vc = buffer.getVertexBuilder(draw);
-        for (BlockPos pos : boxes) {
-            emitBox(vc, pos, cam, red, green, blue, alpha);
+        // 世界渲染结束后，手持物品还要向原版共享缓冲区追加顶点。高亮单独上传。
+        if (stagedBuffer == null) {
+            stagedBuffer = new StagedVertexBuffer(() -> "PlayerControl++ world highlights", INITIAL_STAGING_CAPACITY_BYTES);
         }
-        buffer.upload();
-        StagedVertexBuffer.ExecuteInfo info = buffer.getExecuteInfo(draw);
-        if (info == null) return;
+        try {
+            StagedVertexBuffer.Draw draw = stagedBuffer.appendDraw(type.format(), type.primitiveTopology());
+            VertexConsumer vc = stagedBuffer.getVertexBuilder(draw);
+            for (BlockPos pos : boxes) {
+                emitBox(vc, pos, cam, red, green, blue, alpha);
+            }
+            stagedBuffer.upload();
+            StagedVertexBuffer.ExecuteInfo info = stagedBuffer.getExecuteInfo(draw);
+            if (info == null) return;
 
-        //#if MC >= 260300
-        //$$ // 26.3 把 RenderPass 的责任交给了调用方：自己开一个画到主渲染目标的 pass。
-        //$$ RenderTarget target = mc.gameRenderer.mainRenderTarget();
-        //$$ try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
-        //$$         () -> "playercontrolpp:container_highlight",
-        //$$         target.getColorTextureView(), Optional.empty(),
-        //$$         target.getDepthTextureView(), OptionalDouble.empty())) {
-        //$$     prepared.drawFromBuffer(info, pass);
-        //$$ }
-        //#else
-        prepared.drawFromBuffer(info);
-        //#endif
+            //#if MC >= 260300
+            //$$ RenderTarget target = mc.gameRenderer.mainRenderTarget();
+            //$$ try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
+            //$$         () -> "playercontrolpp:container_highlight",
+            //$$         target.getColorTextureView(), Optional.empty(),
+            //$$         target.getDepthTextureView(), OptionalDouble.empty())) {
+            //$$     prepared.drawFromBuffer(info, pass);
+            //$$ }
+            //#else
+            prepared.drawFromBuffer(info);
+            //#endif
+        } finally {
+            // 同一帧还可能提交另一种高亮。这里只结束本批，GPU 缓冲区在帧末交给栅栏回收。
+            stagedBuffer.endDraw();
+        }
+    }
+
+    public void endFrame() {
+        if (stagedBuffer != null) {
+            stagedBuffer.endFrame();
+        }
+    }
+
+    public void close() {
+        if (stagedBuffer != null) {
+            stagedBuffer.close();
+            stagedBuffer = null;
+        }
     }
     //#endif
 

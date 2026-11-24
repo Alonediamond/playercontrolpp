@@ -1,8 +1,10 @@
 package com.alonediamond.playercontrolpp.mixin.client;
 
 import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
+import com.alonediamond.playercontrolpp.render.WorldBoxRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -21,14 +23,28 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(LevelRenderer.class)
 public class MixinLevelRenderer {
+    @Unique
+    private final WorldBoxRenderer playercontrolpp$boxRenderer = new WorldBoxRenderer();
 
-    // 26.2 起这个入口从 renderLevel 改名成 render，方法体没变。
+    // 26.2 起世界渲染入口改名为 render。
     //#if MC >= 260200
     @Inject(method = "render", at = @At("TAIL"), require = 0)
     //#else
     //$$ @Inject(method = "renderLevel", at = @At("TAIL"), require = 0)
     //#endif
     private void playercontrolpp$renderContainerHighlights(CallbackInfo ci) {
-        ContainerHighlightFeature.getInstance().renderWorld();
+        ContainerHighlightFeature.getInstance().renderWorld(playercontrolpp$boxRenderer);
     }
+
+    //#if MC >= 260200
+    @Inject(method = "endFrame", at = @At("TAIL"))
+    private void playercontrolpp$endHighlightFrame(CallbackInfo ci) {
+        playercontrolpp$boxRenderer.endFrame();
+    }
+
+    @Inject(method = "close", at = @At("HEAD"))
+    private void playercontrolpp$closeHighlightRenderer(CallbackInfo ci) {
+        playercontrolpp$boxRenderer.close();
+    }
+    //#endif
 }

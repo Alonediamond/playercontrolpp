@@ -5,10 +5,12 @@ import com.alonediamond.playercontrolpp.compat.CraftingRecipes;
 import com.alonediamond.playercontrolpp.compat.CraftingRecipes.SolverRecipe;
 import com.alonediamond.playercontrolpp.compat.CraftingRecipes.SolverSnapshot;
 import com.alonediamond.playercontrolpp.compat.RegistryCompat;
+import com.alonediamond.playercontrolpp.compat.WorldMarkScope;
 import com.alonediamond.playercontrolpp.config.Configs.BaritoneSettings;
 import com.alonediamond.playercontrolpp.config.CraftStationSource;
 import com.alonediamond.playercontrolpp.config.RawMaterialMode;
 import com.alonediamond.playercontrolpp.feature.automaterial.GatherContext;
+import com.alonediamond.playercontrolpp.feature.automaterial.ScopedBlockMarks.Mark;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Balance;
 import com.alonediamond.playercontrolpp.feature.automaterial.crafting.CraftBatchActions.Step;
@@ -82,8 +84,9 @@ final class OptimizedCraftBatch {
     private final int depth;
     private final RawMaterialMode traceMode;
     private final CraftStationSource stationMode;
-    private final List<String> craftingTables;
-    private final List<String> stonecutters;
+    private final WorldMarkScope markScope;
+    private final List<Mark> craftingTables;
+    private final List<Mark> stonecutters;
     private final Set<Item> traceStops;
     private final Item root;
     private final String rootId;
@@ -148,10 +151,11 @@ final class OptimizedCraftBatch {
         this.floorSettings = List.copyOf(BaritoneSettings.SOLVER_STOCK_FLOORS.getStrings());
         this.nodeLimit = BaritoneSettings.SOLVER_WINDOW_NODES.getIntegerValue();
         this.timeMillis = BaritoneSettings.SOLVER_WINDOW_MILLIS.getIntegerValue();
+        this.markScope = WorldMarkScope.current(ctx.client);
         this.tableAvailable = stationAvailable(CraftStationManager.Kind.CRAFTING_TABLE);
         this.cutterAvailable = stationAvailable(CraftStationManager.Kind.STONECUTTER);
-        this.craftingTables = List.copyOf(BaritoneSettings.CRAFTING_TABLE_POSITIONS.getStrings());
-        this.stonecutters = List.copyOf(BaritoneSettings.STONECUTTER_POSITIONS.getStrings());
+        this.craftingTables = CraftStationManager.Kind.CRAFTING_TABLE.marks().entries(markScope);
+        this.stonecutters = CraftStationManager.Kind.STONECUTTER.marks().entries(markScope);
         this.traceStops = LitematListIntegration.getInstance().rawTraceStops();
         this.root = root;
         this.rootId = id(root);
@@ -170,7 +174,7 @@ final class OptimizedCraftBatch {
     }
 
     private boolean stationAvailable(CraftStationManager.Kind kind) {
-        return stationMode != CraftStationSource.INVENTORY && CraftStationManager.getInstance().anyInDimension(level, kind)
+        return stationMode != CraftStationSource.INVENTORY && CraftStationManager.getInstance().hasAvailable(level, markScope, kind)
                 || stationMode != CraftStationSource.WORLD && QuickShulkerIntegration.getInstance().isLoaded()
                 && ItemUtil.countLoose(player, kind.item) > 0;
     }
@@ -197,8 +201,8 @@ final class OptimizedCraftBatch {
                 && timeMillis == BaritoneSettings.SOLVER_WINDOW_MILLIS.getIntegerValue())
                 && BaritoneSettings.RAW_MATERIAL_CRAFT_MODE.getOptionListValue() == traceMode
                 && BaritoneSettings.CRAFT_STATION_SOURCE.getOptionListValue() == stationMode
-                && BaritoneSettings.CRAFTING_TABLE_POSITIONS.getStrings().equals(craftingTables)
-                && BaritoneSettings.STONECUTTER_POSITIONS.getStrings().equals(stonecutters)
+                && CraftStationManager.Kind.CRAFTING_TABLE.marks().entries(markScope).equals(craftingTables)
+                && CraftStationManager.Kind.STONECUTTER.marks().entries(markScope).equals(stonecutters)
                 && configuredDepth() == depth && (recipes == null || recipes.isCurrent(ctx.client))
                 && (!wholeOrder || traceStops == null || traceStopsCurrent());
     }
@@ -391,7 +395,8 @@ final class OptimizedCraftBatch {
             for (CraftStationManager.Kind kind : CraftStationManager.Kind.values()) {
                 Balance balance = inventory.apply(kind.item);
                 boolean portableOnly = stationMode != CraftStationSource.WORLD && QuickShulkerIntegration.getInstance().isLoaded()
-                        && (stationMode == CraftStationSource.INVENTORY || !CraftStationManager.getInstance().anyInDimension(level, kind));
+                        && (stationMode == CraftStationSource.INVENTORY
+                        || !CraftStationManager.getInstance().hasAvailable(level, markScope, kind));
                 if (portableOnly && balance.plain() > 0 && ItemUtil.countLoose(player, kind.item) == balance.plain()) {
                     protectedStock.merge(kind.item, balance.owned() - balance.plain() + 1, Math::max);
                 }

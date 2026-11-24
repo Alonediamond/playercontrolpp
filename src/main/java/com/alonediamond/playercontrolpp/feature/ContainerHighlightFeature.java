@@ -90,10 +90,10 @@ public final class ContainerHighlightFeature implements ClientFeature {
     }
 
     /** 由 {@code MixinLevelRenderer} 在渲染入口末尾调用。 */
-    public void renderWorld() {
+    public void renderWorld(WorldBoxRenderer renderer) {
         if (!positions.isEmpty() && remainingTicks > 0) {
             // 拷一份再遍历：渲染期间高亮列表可能被 tick 清空（换维度、超时）。
-            WorldBoxRenderer.renderBoxes(new ArrayList<>(positions), STYLE);
+            renderer.renderBoxes(new ArrayList<>(positions), STYLE);
         }
         if (gatherTarget != null && gatherTargetTicks > 0
                 && Configs.BaritoneSettings.GATHER_TARGET_HIGHLIGHT.getBooleanValue()) {
@@ -102,7 +102,7 @@ public final class ContainerHighlightFeature implements ClientFeature {
             if (opacity <= 0.0F) return;
             BoxStyle style = new BoxStyle(((color >> 16) & 0xFF) / 255.0F,
                     ((color >> 8) & 0xFF) / 255.0F, (color & 0xFF) / 255.0F, opacity);
-            WorldBoxRenderer.renderBoxes(List.of(gatherTarget), style);
+            renderer.renderBoxes(List.of(gatherTarget), style);
         }
     }
 

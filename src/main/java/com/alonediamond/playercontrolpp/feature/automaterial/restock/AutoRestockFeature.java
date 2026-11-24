@@ -11,6 +11,7 @@ import com.alonediamond.playercontrolpp.feature.ClientFeature;
 import com.alonediamond.playercontrolpp.feature.ContainerHighlightFeature;
 import com.alonediamond.playercontrolpp.feature.SchematicSelectionContainerCacheFeature;
 import com.alonediamond.playercontrolpp.feature.automaterial.AutoMaterialGatherer;
+import com.alonediamond.playercontrolpp.feature.automaterial.ScopedBlockMarks.Availability;
 import com.alonediamond.playercontrolpp.feature.automaterial.container.CachedContainerSource;
 import com.alonediamond.playercontrolpp.integration.BaritoneIntegration;
 import com.alonediamond.playercontrolpp.integration.ChestTrackerIntegration;
@@ -31,7 +32,6 @@ import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -81,36 +81,7 @@ public class AutoRestockFeature implements ClientFeature {
      * 比删掉再重新标记省事。
      */
     public static void onMarkContainer() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null) return;
-        if (!(mc.hitResult instanceof BlockHitResult hit) || hit.getType() != BlockHitResult.Type.BLOCK) {
-            return;
-        }
-
-        BlockPos pos = hit.getBlockPos();
-        MarkedContainerManager mgr = MarkedContainerManager.getInstance();
-
-        if (mc.player.isShiftKeyDown()) {
-            Boolean enabled = mgr.toggleEnabled(pos, mc.level);
-            if (enabled != null) {
-                MessageUtil.sendActionBar(mc, enabled
-                                ? "playercontrolpp.message.restock.container_enabled"
-                                : "playercontrolpp.message.restock.container_disabled",
-                        pos.getX(), pos.getY(), pos.getZ());
-                return;
-            }
-            // 还没标记过，就按普通标记处理，省得玩家再按一次。
-        }
-
-        if (mgr.contains(pos, mc.level)) {
-            mgr.remove(pos, mc.level);
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.container_unmarked",
-                    pos.getX(), pos.getY(), pos.getZ());
-        } else {
-            mgr.add(pos, mc.level);
-            MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.container_marked",
-                    pos.getX(), pos.getY(), pos.getZ());
-        }
+        MarkedContainerManager.getInstance().mark(Minecraft.getInstance());
     }
 
     public static void onOneClickBuild() {
@@ -148,6 +119,7 @@ public class AutoRestockFeature implements ClientFeature {
      * 没有这个标志的话两个阶段会永远互相甩。
      */
     private boolean containerTripDone;
+    private boolean markedContainerTrip;
 
     /** 本轮续料期间真正进到物品栏里的物品数。 */
     private int cycleGained;
@@ -481,7 +453,8 @@ public class AutoRestockFeature implements ClientFeature {
 
     private void startContainerTrip(Minecraft mc) {
         containerQueue.clear();
-        if (usesCache()) {
+        markedContainerTrip = !usesCache();
+        if (!markedContainerTrip) {
             CachedContainerSource source = new CachedContainerSource();
             CachedContainerSource.Scope scope = source.scope(Configs.Restocks.RESTOCK_CONTAINER_MAX_DISTANCE.getIntegerValue());
             if (scope.error() != null) {
@@ -501,7 +474,7 @@ public class AutoRestockFeature implements ClientFeature {
                 return;
             }
         } else {
-            MarkedContainerManager.Targets targets = containerManager.pickTargets(mc.level, mc.player.blockPosition());
+            MarkedContainerManager.Targets targets = containerManager.pickTargets(mc);
             if (targets.isEmpty()) {
                 stop(targets.filtered() > 0 ? "playercontrolpp.message.restock.all_containers_filtered"
                         : "playercontrolpp.message.restock.no_containers");
@@ -509,7 +482,7 @@ public class AutoRestockFeature implements ClientFeature {
             }
             if (targets.filtered() > 0) {
                 MessageUtil.sendActionBar(mc, "playercontrolpp.message.restock.containers_filtered",
-                        targets.disabled(), targets.tooFar());
+                        targets.disabled(), targets.tooFar(), targets.invalid());
             }
             containerQueue.addAll(targets.positions());
         }
@@ -529,6 +502,10 @@ public class AutoRestockFeature implements ClientFeature {
     }
 
     private void navigateToCurrentContainer(Minecraft mc) {
+        while (markedContainerTrip && containerIndex < containerQueue.size()
+                && containerManager.availability(mc.level, containerQueue.get(containerIndex)) == Availability.INVALID) {
+            containerIndex++;
+        }
         if (containerIndex >= containerQueue.size()) {
             afterContainers(mc);
             return;
@@ -572,7 +549,16 @@ public class AutoRestockFeature implements ClientFeature {
     private void tickPathing(Minecraft mc) {
         pathingTicks++;
 
+        Availability availability = markedContainerTrip
+                ? containerManager.availability(mc.level, currentContainerTarget)
+                : Availability.VALID;
+        if (availability == Availability.INVALID) {
+            baritone.cancelPathing();
+            nextContainer(mc);
+            return;
+        }
         if (currentContainerTarget != null
+                && availability == Availability.VALID
                 && mc.player.blockPosition().distSqr(currentContainerTarget) <= PlayerUtil.blockReachSq(mc.player)) {
             baritone.cancelPathing();
             openContainer(mc);
@@ -615,6 +601,10 @@ public class AutoRestockFeature implements ClientFeature {
 
     /** 只发 useItemOn 包，不动重试计数。 */
     private void tryOpenContainerClick(Minecraft mc) {
+        if (markedContainerTrip && containerManager.availability(mc.level, currentContainerTarget) != Availability.VALID) {
+            nextContainer(mc);
+            return;
+        }
         try {
             BlockInteraction.lookAt(mc.player, currentContainerTarget);
             BlockInteraction.useNearestFace(mc, currentContainerTarget);

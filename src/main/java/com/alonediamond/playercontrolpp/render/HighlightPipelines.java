@@ -36,9 +36,11 @@ import net.minecraft.client.renderer.BindGroupLayouts;
 //#endif
 
 //#if MC >= 12111
+import com.alonediamond.playercontrolpp.Playercontrolpp;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.resources.Identifier;
 //#else
 //$$ import net.minecraft.client.renderer.RenderType;
 //#endif
@@ -120,9 +122,11 @@ public final class HighlightPipelines {
     //#if MC >= 12111
     /** 四个版本区间各写一份，参数完全一致。 */
     private static RenderPipeline buildPipeline() {
+        // 字符串重载只接受原版命名空间下的路径。
+        Identifier location = Playercontrolpp.id("highlight_box");
         //#if MC >= 260300
         //$$ return RenderPipeline.builder()
-        //$$         .withLocation("playercontrolpp:highlight_box")
+        //$$         .withLocation(location)
         //$$         .withBindGroupLayout(BindGroupLayouts.GLOBALS)
         //$$         .withBindGroupLayout(BindGroupLayouts.PROJECTION)
         //$$         .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
@@ -137,7 +141,7 @@ public final class HighlightPipelines {
         //#elseif MC >= 260200
         // 26.2 起改用 bind group + 顶点绑定描述管线，深度比较也换成了反向深度。
         return RenderPipeline.builder()
-                .withLocation("playercontrolpp:highlight_box")
+                .withLocation(location)
                 .withBindGroupLayout(BindGroupLayouts.GLOBALS)
                 .withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
                 .withVertexShader("core/position_color")
@@ -150,7 +154,7 @@ public final class HighlightPipelines {
                 .build();
         //#elseif MC >= 260000
         //$$ return RenderPipeline.builder()
-        //$$         .withLocation("playercontrolpp:highlight_box")
+        //$$         .withLocation(location)
         //$$         .withVertexShader("core/position_color")
         //$$         .withFragmentShader("core/position_color")
         //$$         .withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)
@@ -162,7 +166,7 @@ public final class HighlightPipelines {
         //$$         .build();
         //#else
         //$$ return RenderPipeline.builder()
-        //$$         .withLocation("playercontrolpp:highlight_box")
+        //$$         .withLocation(location)
         //$$         .withVertexShader("core/position_color")
         //$$         .withFragmentShader("core/position_color")
         //$$         .withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)

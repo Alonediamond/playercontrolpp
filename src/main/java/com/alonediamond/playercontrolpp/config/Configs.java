@@ -334,16 +334,15 @@ public class Configs implements IConfigHandler {
                 "Where the auto-crafter gets its crafting table / stonecutter.\nAuto: from the inventory via QuickShulker first, then the marked world position.\nInventory Only: QuickShulker only.\nWorld Position Only: walk to the position marked with the hotkeys.")
                 .apply(KEY_BARITONE);
 
-        /** 记录的工作台坐标，格式同标记容器：dimension x y z。 */
+        /** 保留旧磁盘键。新行由工作站标记功能写入世界归属。 */
         public static final ConfigStringList CRAFTING_TABLE_POSITIONS = new ConfigStringList(
                 "craftingTablePositions", ImmutableList.of(),
-                "Marked crafting table positions for auto-crafting. Each entry: dimension x y z. Use the Mark Crafting Table hotkey to record one.")
+                "Marked crafting table positions scoped to a world and dimension.")
                 .apply(KEY_BARITONE);
 
-        /** 记录的切石机坐标，格式同上。 */
         public static final ConfigStringList STONECUTTER_POSITIONS = new ConfigStringList(
                 "stonecutterPositions", ImmutableList.of(),
-                "Marked stonecutter positions for auto-crafting. Each entry: dimension x y z. Use the Mark Stonecutter hotkey to record one.")
+                "Marked stonecutter positions scoped to a world and dimension.")
                 .apply(KEY_BARITONE);
 
 
@@ -453,7 +452,7 @@ public class Configs implements IConfigHandler {
 
         public static final ConfigStringList MARKED_CONTAINERS = new ConfigStringList(
                 "markedContainers", ImmutableList.of(),
-                "Marked container positions for auto-restock. Each entry: dimension x y z [off] (e.g. minecraft:overworld 10 64 -20). A trailing 'off' disables that container without deleting it. Use the Mark Container hotkey to add/remove, sneak + the hotkey to enable/disable, or edit this list directly.")
+                "Marked restock containers scoped to a world and dimension.")
                 .apply(KEY_BARITONE);
 
         /** 分层推进的方向；关闭时保持现有整张投影建造行为。 */

@@ -80,6 +80,7 @@ public final class MaterialCollectorRegression {
         checkBoundLooseSelection(stone, loose, fullSlot, dirtBox);
         checks += TransferSessionRegression.run();
         checks += SharedAutomationRegression.run();
+        checks += ScopedBlockMarksRegression.run();
         checks += RawMaterialPlanRegression.run();
         checks += CraftBatchActionsRegression.run();
         checks += CachedLooseStockRegression.run();
