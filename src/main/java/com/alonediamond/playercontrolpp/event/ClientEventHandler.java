@@ -80,8 +80,12 @@ public class ClientEventHandler {
                 SimulatedInput.set(mc.options.keyJump, MOVEMENT_OWNER, playback.getJump());
                 SimulatedInput.set(mc.options.keyShift, MOVEMENT_OWNER, playback.getSneak());
                 SimulatedInput.set(mc.options.keySprint, MOVEMENT_OWNER, playback.getSprint());
-                SimulatedInput.set(mc.options.keyAttack, MOVEMENT_OWNER, playback.getLeftClick());
-                SimulatedInput.set(mc.options.keyUse, MOVEMENT_OWNER, playback.getRightClick());
+                if (playback.getLeftClick()) {
+                    SimulatedInput.holdWithClick(mc.options.keyAttack, MOVEMENT_OWNER);
+                }
+                if (playback.getRightClick()) {
+                    SimulatedInput.holdWithClick(mc.options.keyUse, MOVEMENT_OWNER);
+                }
                 return;
             }
 

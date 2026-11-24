@@ -145,6 +145,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                         new ArrayList<>(RouteManager.getInstance().getRouteHotkeyList()));
             case SETTINGS:
                 List<IConfigBase> settings = new ArrayList<>(Configs.Settings.OPTIONS);
+                settings.removeAll(Configs.Settings.RECORDING_OPTIONS);
                 settings.addAll(Configs.CacheNearbySettings.OPTIONS);
                 replaceOption(settings, Configs.CacheNearbySettings.UNCACHED_HIGHLIGHT_TICKS,
                         Configs.CacheNearbySettings.UNCACHED_HIGHLIGHT_SECONDS);
@@ -200,6 +201,8 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
                 return Collections.emptyList();
             case ROUTES:
                 return Collections.emptyList();
+            case RECORDING_FEATURES:
+                return ConfigOptionWrapper.createFor(Configs.Settings.RECORDING_OPTIONS);
         }
         return Collections.emptyList();
     }
@@ -248,6 +251,7 @@ public class PlayerControlppConfigGui extends GuiConfigsBase {
         SETTINGS("playercontrolpp.gui.tab.settings"),
         ROUTES("playercontrolpp.gui.tab.routes"),
         RECORDING("playercontrolpp.gui.tab.recording"),
+        RECORDING_FEATURES("playercontrolpp.gui.tab.recording_features"),
         GATHER("playercontrolpp.gui.tab.gather"),
         CRAFTING("playercontrolpp.gui.tab.crafting"),
         RESTOCK("playercontrolpp.gui.tab.restock"),

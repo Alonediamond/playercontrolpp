@@ -1,5 +1,7 @@
 package com.alonediamond.playercontrolpp.input;
 
+import com.alonediamond.playercontrolpp.mixin.client.KeyMappingAccessor;
+
 import net.minecraft.client.KeyMapping;
 
 import java.util.ArrayList;
@@ -29,6 +31,9 @@ public final class SimulatedInput {
     /** 本类按下且还没松开的键——只有 {@link #apply()} 能清。 */
     private static final Set<KeyMapping> PRESSED = newIdentitySet();
 
+    /** 本 tick 请求攻击或使用的按下沿。其他功能的持续按键不附带点击。 */
+    private static final Set<KeyMapping> CLICK_ON_PRESS = newIdentitySet();
+
     private SimulatedInput() {}
 
     private static <T> Set<T> newIdentitySet() {
@@ -38,6 +43,11 @@ public final class SimulatedInput {
     /** 声明 {@code owner} 需要按住 {@code key}。可重复调用。 */
     public static void hold(KeyMapping key, Object owner) {
         HOLDERS.computeIfAbsent(key, k -> newIdentitySet()).add(owner);
+    }
+
+    public static void holdWithClick(KeyMapping key, Object owner) {
+        hold(key, owner);
+        CLICK_ON_PRESS.add(key);
     }
 
     /** 撤销 {@code owner} 对 {@code key} 的要求；其他 owner 仍可让它保持按下。 */
@@ -75,6 +85,7 @@ public final class SimulatedInput {
     /** 丢弃所有 owner 的所有要求。玩家离开世界时用。 */
     public static void clear() {
         HOLDERS.clear();
+        CLICK_ON_PRESS.clear();
     }
 
     /** @return 当前是否有 owner 要求按住 {@code key}。 */
@@ -85,6 +96,11 @@ public final class SimulatedInput {
     /** 把声明状态落到真正的 {@link KeyMapping} 上。每 tick 一次，在所有功能 tick 完之后。 */
     public static void apply() {
         for (KeyMapping key : HOLDERS.keySet()) {
+            // 攻击起手依赖点击计数，持续按下只会处理挖掘延续。
+            if (CLICK_ON_PRESS.contains(key) && !PRESSED.contains(key) && !key.isDown()) {
+                KeyMappingAccessor accessor = (KeyMappingAccessor) key;
+                accessor.playercontrolpp$setClickCount(accessor.playercontrolpp$getClickCount() + 1);
+            }
             key.setDown(true);
             PRESSED.add(key);
         }
@@ -93,5 +109,6 @@ public final class SimulatedInput {
             key.setDown(false);
             return true;
         });
+        CLICK_ON_PRESS.clear();
     }
 }
